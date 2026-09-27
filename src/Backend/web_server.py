@@ -98,7 +98,6 @@ class WebServerManager:
                             log_level="info",
                             log_config=None,  # Use existing Python logging configuration
                             timeout_keep_alive=300,
-                            install_signal_handlers=False,
                         )
                         self._server = uvicorn.Server(config)
                         await self._server.serve()
