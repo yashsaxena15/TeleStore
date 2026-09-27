@@ -84,22 +84,36 @@ class WebServerManager:
 
             # Initialize FastAPI app
             self._web_app = await _web_server(self._bot_manager)
+            self._stopping = False
 
-            # Configure Uvicorn server with custom logging (programmatic launch)
-            config = uvicorn.Config(
-                self._web_app,
-                host=os.getenv("HOST", "0.0.0.0"),
-                port=self._web_port,
-                log_level="info",
-                log_config=None,  # This tells Uvicorn to use the existing Python logging configuration
-                timeout_keep_alive=300,
-            )
-            self._server = uvicorn.Server(config)
+            # Run in background with resilient watchdog / auto-restart
+            async def _server_watchdog():
+                while not self._stopping:
+                    try:
+                        logger.info(f"Starting Uvicorn server on port {self._web_port}...")
+                        config = uvicorn.Config(
+                            self._web_app,
+                            host=os.getenv("HOST", "0.0.0.0"),
+                            port=self._web_port,
+                            log_level="info",
+                            log_config=None,  # Use existing Python logging configuration
+                            timeout_keep_alive=300,
+                            install_signal_handlers=False,
+                        )
+                        self._server = uvicorn.Server(config)
+                        await self._server.serve()
+                    except asyncio.CancelledError:
+                        break
+                    except Exception as e:
+                        logger.critical(f"FastAPI server crashed unexpectedly: {e}", exc_info=True)
 
-            # Run in background
-            import asyncio
+                    if self._stopping:
+                        break
+                    logger.warning("FastAPI uvicorn server stopped unexpectedly. Auto-restarting in 2 seconds...")
+                    await asyncio.sleep(2)
+
             loop = asyncio.get_event_loop()
-            loop.create_task(self._server.serve())
+            self._watchdog_task = loop.create_task(_server_watchdog())
 
             # Info output
             if WEB_APP:
@@ -122,6 +136,9 @@ class WebServerManager:
 
     async def cleanup(self) -> None:
         try:
+            self._stopping = True
+            if hasattr(self, '_watchdog_task') and self._watchdog_task:
+                self._watchdog_task.cancel()
             if self._server and self._server.should_exit is False:
                 self._server.should_exit = True
                 logger.info("FastAPI web server stopped")
