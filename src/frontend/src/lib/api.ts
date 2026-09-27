@@ -1591,6 +1591,57 @@ export const api = {
         return response.json();
     },
 
+    async transferTelegramToCloud(
+        accountId: string,
+        sourceFileIds: string[],
+        sourceFolderPaths: string[],
+        targetFolderId: string = 'root',
+        operation: 'copy' | 'cut' = 'copy'
+    ): Promise<any> {
+        const baseUrl = getApiBaseUrl();
+        const apiUrl = baseUrl ? `${baseUrl}` : '';
+        const response = await fetchWithTimeout(`${apiUrl}/cloud/${accountId}/transfer-from-telegram`, {
+            method: 'POST',
+            headers: {
+                ...authService.getAuthHeaders(),
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                source_file_ids: sourceFileIds,
+                source_folder_paths: sourceFolderPaths,
+                target_folder_id: targetFolderId,
+                operation
+            }),
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || 'Failed to start transfer to Google Drive');
+        }
+        return response.json();
+    },
+
+    async uploadToCloud(
+        accountId: string,
+        file: File,
+        folderId: string = 'root'
+    ): Promise<any> {
+        const baseUrl = getApiBaseUrl();
+        const apiUrl = baseUrl ? `${baseUrl}` : '';
+        const formData = new FormData();
+        formData.append('file', file);
+        const targetFid = encodeURIComponent(folderId || 'root');
+        const response = await fetchWithTimeout(`${apiUrl}/cloud/${accountId}/upload?folder_id=${targetFid}`, {
+            method: 'POST',
+            headers: authService.getAuthHeaders(),
+            body: formData,
+        }, 300000);
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || 'Failed to upload file to Google Drive');
+        }
+        return response.json();
+    },
+
     async fetchCloudStorageQuota(accountId: string): Promise<CloudStorageQuotaResponse> {
         const baseUrl = getApiBaseUrl();
         const apiUrl = baseUrl ? `${baseUrl}` : '';

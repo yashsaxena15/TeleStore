@@ -3,6 +3,7 @@
 import time
 import logging
 import urllib.parse
+import mimetypes
 from typing import Dict, Any, Optional, List, Tuple
 import aiohttp
 from datetime import datetime, timezone
@@ -436,3 +437,229 @@ class GoogleDriveManager:
         async with aiohttp.ClientSession() as session:
             async with session.delete(url, headers=headers, timeout=30) as resp:
                 return resp.status in (200, 204)
+
+    @staticmethod
+    async def initiate_resumable_upload(
+        access_token: str,
+        file_name: str,
+        file_size: Optional[int] = None,
+        mime_type: Optional[str] = None,
+        parent_id: Optional[str] = None
+    ) -> str:
+        """
+        Initiate a resumable upload session with Google Drive.
+        Returns the upload session URL to stream chunked PUT requests to.
+        """
+        url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true"
+        effective_mime = mime_type or mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json; charset=UTF-8",
+            "X-Upload-Content-Type": effective_mime
+        }
+        if file_size is not None and file_size >= 0:
+            headers["X-Upload-Content-Length"] = str(file_size)
+
+        payload: Dict[str, Any] = {"name": file_name}
+        if parent_id and parent_id not in ("root", "my_drive", "google_drive"):
+            payload["parents"] = [parent_id]
+        elif parent_id == "my_drive" or not parent_id:
+            payload["parents"] = ["root"]
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload, timeout=30) as resp:
+                if resp.status not in (200, 201):
+                    err_text = await resp.text()
+                    raise ValueError(f"Failed to initiate Google Drive upload: {resp.status} - {err_text}")
+                upload_url = resp.headers.get("Location")
+                if not upload_url:
+                    raise ValueError("Google Drive did not return an upload session URL in Location header")
+                return upload_url
+
+    @staticmethod
+    async def upload_resumable_stream(
+        upload_session_url: str,
+        async_stream_gen: Any,
+        total_size: Optional[int] = None,
+        progress_callback: Optional[Any] = None,
+        cancel_event: Optional[Any] = None,
+        chunk_size: int = 4 * 1024 * 1024  # 4 MB chunk buffer (multiple of 256 KB)
+    ) -> Dict[str, Any]:
+        """
+        Streams data from an async byte generator to a Google Drive resumable upload session.
+        Uses 0 VM disk buffer: chunks are kept only in RAM and uploaded sequentially.
+        """
+        buffer = bytearray()
+        offset = 0
+        total_str = str(total_size) if total_size is not None and total_size > 0 else "*"
+
+        async with aiohttp.ClientSession() as session:
+            async for data in async_stream_gen:
+                if cancel_event and cancel_event.is_set():
+                    raise asyncio.CancelledError("Upload cancelled by user")
+
+                buffer.extend(data)
+                while len(buffer) >= chunk_size:
+                    chunk = bytes(buffer[:chunk_size])
+                    buffer = buffer[chunk_size:]
+                    chunk_len = len(chunk)
+                    end_byte = offset + chunk_len - 1
+
+                    headers = {
+                        "Content-Length": str(chunk_len),
+                        "Content-Range": f"bytes {offset}-{end_byte}/{total_str}"
+                    }
+
+                    # Retry loop for chunk upload
+                    retry = 0
+                    while retry < 3:
+                        if cancel_event and cancel_event.is_set():
+                            raise asyncio.CancelledError("Upload cancelled by user")
+                        try:
+                            async with session.put(upload_session_url, headers=headers, data=chunk, timeout=60) as resp:
+                                if resp.status in (200, 201):
+                                    # Finished early or exact size
+                                    offset += chunk_len
+                                    if progress_callback:
+                                        await progress_callback(offset, total_size)
+                                    return await resp.json()
+                                elif resp.status == 308:
+                                    # 308 Resume Incomplete is expected for partial chunks
+                                    offset += chunk_len
+                                    if progress_callback:
+                                        await progress_callback(offset, total_size)
+                                    break
+                                else:
+                                    err_t = await resp.text()
+                                    logger.warning(f"[GDRIVE_UPLOAD] Chunk status {resp.status}: {err_t}. Retrying ({retry+1}/3)...")
+                                    retry += 1
+                                    await asyncio.sleep(2)
+                        except Exception as conn_err:
+                            logger.warning(f"[GDRIVE_UPLOAD] Chunk conn error: {conn_err}. Retrying ({retry+1}/3)...")
+                            retry += 1
+                            await asyncio.sleep(2)
+
+                    if retry >= 3:
+                        raise ConnectionError(f"Failed to upload chunk at offset {offset} after 3 retries")
+
+            # Upload any remaining final chunk
+            if len(buffer) > 0 or offset == 0:
+                final_chunk = bytes(buffer)
+                final_len = len(final_chunk)
+                final_end = offset + final_len - 1 if final_len > 0 else 0
+                final_total = str(offset + final_len) if total_size is None or total_size <= 0 else str(total_size)
+
+                headers = {
+                    "Content-Length": str(final_len),
+                    "Content-Range": f"bytes {offset}-{final_end}/{final_total}"
+                }
+
+                retry = 0
+                while retry < 3:
+                    if cancel_event and cancel_event.is_set():
+                        raise asyncio.CancelledError("Upload cancelled by user")
+                    try:
+                        async with session.put(upload_session_url, headers=headers, data=final_chunk, timeout=120) as resp:
+                            if resp.status in (200, 201):
+                                offset += final_len
+                                if progress_callback:
+                                    await progress_callback(offset, total_size)
+                                return await resp.json()
+                            elif resp.status == 308:
+                                # Incomplete: query status
+                                offset += final_len
+                                break
+                            else:
+                                err_t = await resp.text()
+                                logger.warning(f"[GDRIVE_UPLOAD] Final chunk error {resp.status}: {err_t}")
+                                retry += 1
+                                await asyncio.sleep(2)
+                    except Exception as conn_err:
+                        logger.warning(f"[GDRIVE_UPLOAD] Final chunk conn error: {conn_err}")
+                        retry += 1
+                        await asyncio.sleep(2)
+
+                if retry >= 3:
+                    raise ConnectionError(f"Failed to upload final chunk at offset {offset}")
+
+            # If ended on exact chunk boundary, query the session to verify completion
+            async with session.put(upload_session_url, headers={"Content-Length": "0", "Content-Range": f"bytes */{offset}"}, timeout=30) as resp:
+                if resp.status in (200, 201):
+                    return await resp.json()
+                elif resp.status == 308:
+                    raise ValueError(f"Google Drive upload incomplete: received status 308 with Range: {resp.headers.get('Range')}")
+                else:
+                    err_t = await resp.text()
+                    raise ValueError(f"Failed to finalize upload: {resp.status} - {err_t}")
+
+    @staticmethod
+    async def crawl_folder_recursive(
+        access_token: str,
+        root_folder_id: str,
+        root_folder_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Recursively scans a Google Drive folder and returns all files and subdirectories
+        with their relative paths from root_folder_name.
+        """
+        headers = {"Authorization": f"Bearer {access_token}"}
+        all_files: List[Dict[str, Any]] = []
+        all_folders: List[Dict[str, Any]] = []
+
+        # Queue of tuples: (folder_id, relative_path_prefix)
+        queue = [(root_folder_id, root_folder_name or "")]
+
+        async with aiohttp.ClientSession() as session:
+            while queue:
+                current_fid, current_prefix = queue.pop(0)
+                page_token = None
+
+                while True:
+                    q = f"'{current_fid}' in parents and trashed = false"
+                    url = f"{DRIVE_API_BASE}/files?q={urllib.parse.quote(q)}&fields=nextPageToken,files(id,name,size,mimeType)&pageSize=1000&supportsAllDrives=true"
+                    if page_token:
+                        url += f"&pageToken={page_token}"
+
+                    async with session.get(url, headers=headers, timeout=30) as resp:
+                        if resp.status != 200:
+                            err_text = await resp.text()
+                            logger.error(f"[GDRIVE_CRAWL] Error reading folder {current_fid}: {err_text}")
+                            break
+                        data = await resp.json()
+
+                    for item in data.get("files", []):
+                        item_id = item["id"]
+                        item_name = item["name"]
+                        item_mime = item.get("mimeType", "")
+                        item_size = int(item.get("size", 0))
+
+                        rel_path = f"{current_prefix}/{item_name}".strip("/")
+
+                        if item_mime == "application/vnd.google-apps.folder":
+                            all_folders.append({
+                                "id": item_id,
+                                "name": item_name,
+                                "rel_path": rel_path
+                            })
+                            queue.append((item_id, rel_path))
+                        else:
+                            all_files.append({
+                                "id": item_id,
+                                "name": item_name,
+                                "size": item_size,
+                                "mimeType": item_mime,
+                                "rel_path": rel_path
+                            })
+
+                    page_token = data.get("nextPageToken")
+                    if not page_token:
+                        break
+
+        return {
+            "root_folder_id": root_folder_id,
+            "root_folder_name": root_folder_name,
+            "files": all_files,
+            "folders": all_folders,
+            "total_files": len(all_files),
+            "total_bytes": sum(f["size"] for f in all_files)
+        }

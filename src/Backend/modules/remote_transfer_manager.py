@@ -270,7 +270,10 @@ class RemoteTransferManager:
         custom_filesize: Optional[int] = None,
         post_action_delete: bool = False,
         cloud_account_id: Optional[str] = None,
-        cloud_file_id: Optional[str] = None
+        cloud_file_id: Optional[str] = None,
+        group_id: Optional[str] = None,
+        group_name: Optional[str] = None,
+        group_total_items: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
         Parses the URL (GDrive file, GDrive folder, direct URL) and creates
@@ -449,6 +452,10 @@ class RemoteTransferManager:
             doc["cloud_account_id"] = cloud_account_id
         if cloud_file_id:
             doc["cloud_file_id"] = cloud_file_id
+        if group_id:
+            doc["group_id"] = group_id
+            doc["group_name"] = group_name
+            doc["group_total_items"] = group_total_items
 
         coll.insert_one(doc)
         doc["_id"] = str(doc["_id"])
@@ -511,6 +518,221 @@ class RemoteTransferManager:
         doc["_id"] = str(doc["_id"])
         return doc
 
+    async def enqueue_telegram_to_gdrive(
+        self,
+        user_id: str,
+        telegram_file_id: str,
+        cloud_account_id: str,
+        target_gdrive_folder_id: str,
+        filename: str,
+        filesize: int,
+        post_action_delete: bool = False,
+        group_id: Optional[str] = None,
+        group_name: Optional[str] = None,
+        group_total_items: Optional[int] = None,
+        target_rel_subpath: Optional[str] = None
+    ) -> Dict[str, Any]:
+        coll = get_remote_db()["RemoteTransfers"]
+        now = datetime.now(timezone.utc)
+        task_id = f"rt_{secrets.token_hex(6)}"
+
+        doc = {
+            "task_id": task_id,
+            "user_id": str(user_id),
+            "chat_id": 0,
+            "source_url": f"telegram://{telegram_file_id}",
+            "source_type": "telegram_to_gdrive",
+            "telegram_file_id": telegram_file_id,
+            "cloud_account_id": cloud_account_id,
+            "target_gdrive_folder_id": target_gdrive_folder_id,
+            "target_rel_subpath": target_rel_subpath,
+            "destination_path": f"Google Drive / {target_gdrive_folder_id}",
+            "filename": filename,
+            "filesize": filesize or 0,
+            "transferred_bytes": 0,
+            "speed_bps": 0,
+            "progress": 0,
+            "eta_seconds": 0,
+            "status": "queued",
+            "phase": "Queued for Google Drive Upload",
+            "error_message": None,
+            "post_action_delete": post_action_delete,
+            "created_at": now,
+            "updated_at": now
+        }
+        if group_id:
+            doc["group_id"] = group_id
+            doc["group_name"] = group_name
+            doc["group_total_items"] = group_total_items
+
+        coll.insert_one(doc)
+        doc["_id"] = str(doc["_id"])
+        return doc
+
+    async def _ensure_gdrive_subfolders(self, access_token: str, base_folder_id: str, rel_path: str) -> str:
+        from .google_drive_manager import GoogleDriveManager
+        segments = [s.strip() for s in rel_path.replace("\\", "/").split("/") if s.strip()]
+        current_parent = "root" if base_folder_id in ("root", "my_drive", "google_drive", None) else base_folder_id
+
+        for seg in segments:
+            items = await GoogleDriveManager.list_folder(access_token, folder_id=current_parent, query=seg)
+            existing = None
+            for item in items.get("files", []):
+                if item.get("name") == seg and item.get("is_folder"):
+                    existing = item["id"]
+                    break
+            if existing:
+                current_parent = existing
+            else:
+                created = await GoogleDriveManager.create_folder(access_token, parent_id=current_parent, folder_name=seg)
+                current_parent = created["id"]
+        return current_parent
+
+    async def _execute_telegram_to_gdrive(self, task_doc: dict, cancel_event: threading.Event):
+        task_id = task_doc["task_id"]
+        user_id = task_doc["user_id"]
+        telegram_file_id = task_doc.get("telegram_file_id")
+        cloud_account_id = task_doc.get("cloud_account_id")
+        target_fid = task_doc.get("target_gdrive_folder_id") or "root"
+        filename = task_doc.get("filename", "file.bin")
+
+        self._update_task(task_id, {
+            "status": "uploading_tg",
+            "phase": "Connecting to Telegram & Google Drive...",
+            "speed_bps": 0
+        })
+
+        from bson import ObjectId
+        from .google_drive_manager import GoogleDriveManager
+        from .byte_streamer import ByteStreamer
+
+        # 1. Fetch file record from database.Files
+        file_doc = None
+        if telegram_file_id:
+            if ObjectId.is_valid(telegram_file_id):
+                file_doc = database.Files.find_one({"_id": ObjectId(telegram_file_id)})
+            if not file_doc:
+                file_doc = database.Files.find_one({"file_unique_id": telegram_file_id})
+        if not file_doc:
+            raise ValueError(f"Telegram file not found for ID: {telegram_file_id}")
+
+        file_name = file_doc.get("file_name", filename)
+        file_size = int(file_doc.get("file_size", 0))
+
+        # 2. Get Google Drive account and access token
+        account = database.CloudAccounts.get_account_raw(account_id=cloud_account_id, user_id=user_id)
+        if not account:
+            raise ValueError(f"Google Drive account '{cloud_account_id}' not found.")
+        access_token = await GoogleDriveManager.get_valid_access_token(account)
+
+        # 3. If relative subfolders need to be created in Google Drive
+        rel_subpath = task_doc.get("target_rel_subpath")
+        effective_parent = target_fid
+        if rel_subpath:
+            effective_parent = await self._ensure_gdrive_subfolders(access_token, target_fid, rel_subpath)
+
+        # 4. Initiate Resumable Upload on Google Drive
+        self._update_task(task_id, {
+            "filesize": file_size,
+            "phase": "Initiating Google Drive upload session..."
+        })
+        upload_session_url = await GoogleDriveManager.initiate_resumable_upload(
+            access_token=access_token,
+            file_name=file_name,
+            file_size=file_size,
+            parent_id=effective_parent
+        )
+
+        # 5. Acquire bot client and prepare parts
+        bot_manager = self._bot_manager
+        client = None
+        for _ in range(30):
+            if cancel_event.is_set():
+                raise InterruptedError("Cancelled by user")
+            client = bot_manager.get_least_busy_client() if bot_manager else None
+            if client:
+                break
+            await asyncio.sleep(1)
+
+        if not client:
+            raise RuntimeError("No Telegram bot client available for streaming.")
+
+        parts_to_stream = []
+        if file_doc.get("parts") and len(file_doc["parts"]) > 0:
+            for p in file_doc["parts"]:
+                parts_to_stream.append({
+                    "chat_id": p["chat_id"],
+                    "message_id": p["message_id"],
+                    "part_from_byte": 0,
+                    "part_until_byte": p["part_size"] - 1,
+                    "part_index": p["part_index"]
+                })
+        else:
+            parts_to_stream.append({
+                "chat_id": file_doc["chat_id"],
+                "message_id": file_doc["message_id"],
+                "part_from_byte": 0,
+                "part_until_byte": file_size - 1 if file_size > 0 else 0,
+                "part_index": 1
+            })
+
+        tg_streamer = ByteStreamer(client)
+        clients_pool = bot_manager.clients if bot_manager else [client]
+        async_stream_gen = tg_streamer.yield_parts(
+            parts_to_stream=parts_to_stream,
+            chunk_size=1024 * 1024,
+            client_list=clients_pool
+        )
+
+        # 6. Stream directly from Telegram into Google Drive Resumable Upload
+        last_progress_time = [time.time()]
+        last_bytes = [0]
+
+        async def progress_cb(cur_transferred: int, total_sz: Optional[int]):
+            if cancel_event.is_set():
+                raise InterruptedError("Cancelled by user")
+            now_t = time.time()
+            dt = now_t - last_progress_time[0]
+            if dt >= 0.8 or (total_sz and cur_transferred >= total_sz):
+                speed = int((cur_transferred - last_bytes[0]) / max(0.1, dt))
+                last_progress_time[0] = now_t
+                last_bytes[0] = cur_transferred
+                pct = round((cur_transferred / total_sz) * 100, 1) if total_sz and total_sz > 0 else 0
+                rem_bytes = max(0, total_sz - cur_transferred) if total_sz else 0
+                eta = int(rem_bytes / max(1, speed)) if speed > 0 and total_sz else 0
+                self._update_task(task_id, {
+                    "transferred_bytes": cur_transferred,
+                    "speed_bps": speed,
+                    "progress": pct,
+                    "eta_seconds": eta,
+                    "phase": f"Streaming to Google Drive ({pct}%)"
+                })
+
+        upload_result = await GoogleDriveManager.upload_resumable_stream(
+            upload_session_url=upload_session_url,
+            async_stream_gen=async_stream_gen,
+            total_size=file_size,
+            progress_callback=progress_cb,
+            cancel_event=cancel_event
+        )
+
+        self._update_task(task_id, {
+            "status": "completed",
+            "speed_bps": 0,
+            "eta_seconds": 0,
+            "filesize": file_size,
+            "transferred_bytes": file_size,
+            "phase": "Completed & Saved to Google Drive ☁️"
+        })
+        logger.info(f"[TELEGRAM_TO_GDRIVE] File '{file_name}' ({file_size} bytes) successfully uploaded to Google Drive ID: {upload_result.get('id')}")
+
+        if task_doc.get("post_action_delete"):
+            try:
+                database.Files.delete_file(str(file_doc["_id"]), owner_id=str(user_id))
+                logger.info(f"[TELEGRAM_TO_GDRIVE] Purged source Telegram file {file_doc['_id']} after cut.")
+            except Exception as del_err:
+                logger.warning(f"[TELEGRAM_TO_GDRIVE] Failed to delete source Telegram file: {del_err}")
+
     async def _execute_task_wrapper(self, task_doc: dict):
         task_id = task_doc["task_id"]
         cancel_event = threading.Event()
@@ -534,6 +756,10 @@ class RemoteTransferManager:
                 self.cancel_events.pop(task_id, None)
 
     async def _run_download_and_upload(self, task_doc: dict, cancel_event: threading.Event):
+        if task_doc.get("source_type") == "telegram_to_gdrive":
+            await self._execute_telegram_to_gdrive(task_doc, cancel_event)
+            return
+
         task_id = task_doc["task_id"]
         source_url = task_doc["source_url"]
         gdrive_id = task_doc.get("gdrive_id")

@@ -777,7 +777,42 @@ export const FileExplorer = () => {
   const handlePaste = async () => {
     try {
       if (isCloudMode) {
-        toast.info("To transfer items into Telegram, navigate to any folder under Home and click Paste.");
+        if (!cloudAccountId) {
+          toast.error("No cloud account selected.");
+          return;
+        }
+
+        if (clipboard?.items && clipboard.items.length > 0) {
+          // Check if items are from Telegram (not is_cloud)
+          const tgItems = clipboard.items.filter((it: any) => !it.is_cloud);
+          if (tgItems.length > 0) {
+            const targetFolderId = cloudFolderId || "root";
+            const fileIds = tgItems
+              .filter((it: any) => it.type !== "folder" && !it.is_folder)
+              .map((it: any) => it.id || it.file_unique_id)
+              .filter(Boolean);
+            const folderPaths = tgItems
+              .filter((it: any) => it.type === "folder" || it.is_folder)
+              .map((it: any) => it.path || it.file_path || it.name)
+              .filter(Boolean);
+
+            const res = await api.transferTelegramToCloud(
+              cloudAccountId,
+              fileIds,
+              folderPaths,
+              targetFolderId,
+              clipboard.operation === "cut" ? "cut" : "copy"
+            );
+            toast.success(res.message || `Queued ${tgItems.length} item(s) for transfer to Google Drive ☁️. Track in Transfers.`);
+            clearClipboard();
+            refetch();
+            return;
+          } else {
+            toast.info("Google Drive-to-Google Drive internal copy is not supported yet.");
+            return;
+          }
+        }
+        toast.info("Clipboard is empty.");
         return;
       }
 
@@ -785,7 +820,7 @@ export const FileExplorer = () => {
         const targetPath = currentApiPath || (currentPath.length > 1 ? `/${currentPath.join('/')}` : "/Home");
         const cloudItemsToTransfer = clipboard.items.filter((it: any) => it.is_cloud);
         for (const item of cloudItemsToTransfer) {
-          const cloudAccId = (item as any).cloud_account_id;
+          const cloudAccId = (item as any).cloud_account_id || cloudAccountId;
           const cloudFileId = (item as any).cloud_file_id || item.id;
           if (cloudAccId && cloudFileId) {
             await api.transferCloudToTelegram(
@@ -796,7 +831,7 @@ export const FileExplorer = () => {
             );
           }
         }
-        toast.success(`Queued ${cloudItemsToTransfer.length} cloud transfer(s) to ${targetPath}. Track progress in Transfers.`);
+        toast.success(`Queued ${cloudItemsToTransfer.length} cloud item(s) to ${targetPath}. Track progress in Transfers.`);
         clearClipboard();
         refetch();
         return;

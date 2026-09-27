@@ -996,6 +996,28 @@ export const FileGrid = ({
       
       // Import the API client
       const { api } = await import('@/lib/api');
+
+      // Direct upload to Google Drive if in Cloud Mode
+      if (isCloudMode && cloudAccountId) {
+        let uploadedCount = 0;
+        toast.info(`Uploading ${filesToUpload.length} file(s) to Google Drive ☁️...`);
+        for (const file of filesToUpload) {
+          try {
+            await api.uploadToCloud(cloudAccountId, file, cloudFolderId || "root");
+            uploadedCount++;
+          } catch (uploadErr: any) {
+            toast.error(`Failed to upload "${file.name}": ${uploadErr.message}`);
+          }
+        }
+        if (uploadedCount > 0) {
+          toast.success(`Successfully uploaded ${uploadedCount} file(s) to Google Drive ☁️`);
+          if (onRefresh) onRefresh();
+          if (onFileUploaded) onFileUploaded();
+        }
+        setUploadingFiles(null);
+        setUploadProgressMap({});
+        return;
+      }
       
       // Collect all unique top-level folder names that need to be created
       const topLevelFoldersToCreate = new Set<string>();

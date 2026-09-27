@@ -1,14 +1,16 @@
 # src/Backend/routes/cloud_routes.py
 
 import os
+import re
 import json
 import base64
+import secrets
 import logging
 import urllib.parse
 import aiohttp
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
-from fastapi import APIRouter, Request, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Request, Depends, HTTPException, Query, status, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -49,6 +51,12 @@ class RestoreFileRequest(BaseModel):
 class TransferToTelegramRequest(BaseModel):
     source_file_id: str
     destination_path: Optional[str] = "/Home"
+    operation: Optional[str] = "copy"  # "copy" or "cut"
+
+class TransferFromTelegramRequest(BaseModel):
+    source_file_ids: List[str] = []
+    source_folder_paths: List[str] = []
+    target_folder_id: Optional[str] = "root"
     operation: Optional[str] = "copy"  # "copy" or "cut"
 
 def _get_base_redirect_uri(request: Request, provided_uri: Optional[str] = None) -> str:
@@ -583,7 +591,7 @@ async def transfer_to_telegram(
     user: User = Depends(require_auth)
 ):
     """
-    Stream and copy/cut a file directly from Google Drive into Telegram storage.
+    Stream and copy/cut a file or full recursive folder directly from Google Drive into Telegram storage.
     Enqueues the transfer into RemoteTransferManager with Zero-Disk footprint.
     """
     if not user.telegram_user_id:
@@ -607,34 +615,241 @@ async def transfer_to_telegram(
         access_token = await GoogleDriveManager.get_valid_access_token(account)
         file_info = await GoogleDriveManager.get_file_info(access_token, body.source_file_id)
         
-        file_name = file_info.get("name", "Google_Drive_File")
-        file_size = int(file_info.get("size", 0))
-
-        # Build direct streaming REST download URL
-        media_url = GoogleDriveManager.get_download_url(body.source_file_id)
+        file_name = file_info.get("name", "Google_Drive_Item")
+        is_folder = file_info.get("mimeType") == "application/vnd.google-apps.folder"
+        clean_dest = (body.destination_path or "/Home").rstrip("/")
 
         # Make sure background worker is alive
         remote_transfer_manager.start_worker(request.app)
 
-        # Enqueue task
-        tasks = await remote_transfer_manager.enqueue_transfer(
+        if is_folder:
+            crawl_data = await GoogleDriveManager.crawl_folder_recursive(access_token, body.source_file_id, root_folder_name=file_name)
+            files = crawl_data.get("files", [])
+            
+            if not files:
+                database.Files.create_folder_path(f"{clean_dest}/{file_name}", owner_id=user_id)
+                if body.operation == "cut":
+                    await GoogleDriveManager.delete_file(access_token, body.source_file_id)
+                return {
+                    "success": True,
+                    "message": f"Created empty folder '{file_name}' in Telegram.",
+                    "tasks": []
+                }
+
+            group_id = f"grp_{secrets.token_hex(6)}"
+            all_tasks = []
+            for f in files:
+                rel_dir = os.path.dirname(f["rel_path"]).replace("\\", "/").strip("/")
+                item_dest = f"{clean_dest}/{rel_dir}" if rel_dir else f"{clean_dest}/{file_name}"
+                media_url = GoogleDriveManager.get_download_url(f["id"])
+
+                queued = await remote_transfer_manager.enqueue_transfer(
+                    user_id=user_id,
+                    url=media_url,
+                    destination_path=item_dest,
+                    chat_id=chat_id,
+                    custom_headers={"Authorization": f"Bearer {access_token}"},
+                    custom_filename=f["name"],
+                    custom_filesize=f["size"],
+                    post_action_delete=(body.operation == "cut"),
+                    cloud_account_id=account_id,
+                    cloud_file_id=f["id"],
+                    group_id=group_id,
+                    group_name=file_name,
+                    group_total_items=len(files)
+                )
+                all_tasks.extend(queued)
+
+            return {
+                "success": True,
+                "message": f"Queued {len(files)} file(s) from folder '{file_name}' to {clean_dest}.",
+                "tasks": all_tasks,
+                "group_id": group_id
+            }
+        else:
+            file_size = int(file_info.get("size", 0))
+            media_url = GoogleDriveManager.get_download_url(body.source_file_id)
+
+            tasks = await remote_transfer_manager.enqueue_transfer(
+                user_id=user_id,
+                url=media_url,
+                destination_path=clean_dest,
+                chat_id=chat_id,
+                custom_headers={"Authorization": f"Bearer {access_token}"},
+                custom_filename=file_name,
+                custom_filesize=file_size,
+                post_action_delete=(body.operation == "cut"),
+                cloud_account_id=account_id,
+                cloud_file_id=body.source_file_id
+            )
+
+            return {
+                "success": True,
+                "message": f"Transfer queued for '{file_name}' to {clean_dest}.",
+                "tasks": tasks
+            }
+    except Exception as e:
+        logger.error(f"[GDRIVE_TRANSFER] Error enqueueing transfer: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{account_id}/transfer-from-telegram")
+async def transfer_from_telegram(
+    account_id: str,
+    body: TransferFromTelegramRequest,
+    request: Request,
+    user: User = Depends(require_auth)
+):
+    """
+    Stream and copy/cut Telegram files/folders directly into Google Drive.
+    Uses Zero VM Disk Footprint: Streams bytes from Telegram MTProto to GDrive Resumable Upload.
+    """
+    user_identifiers = _get_user_identifiers(user)
+    user_id = str(user.telegram_user_id) if user.telegram_user_id else user.username
+
+    account = database.CloudAccounts.get_account_raw(account_id=account_id, user_id=user_identifiers)
+    if not account:
+        raise HTTPException(status_code=404, detail="Cloud account not found.")
+
+    target_fid = body.target_folder_id or "root"
+    if target_fid in ("root", "my_drive", "google_drive"):
+        target_fid = "root"
+
+    # Make sure background worker is alive
+    remote_transfer_manager.start_worker(request.app)
+
+    from bson import ObjectId
+    files_to_transfer: List[Dict[str, Any]] = []
+
+    # 1. Resolve source file IDs
+    if body.source_file_ids:
+        for fid in body.source_file_ids:
+            query = {}
+            if ObjectId.is_valid(fid):
+                query = {"_id": ObjectId(fid), "owner_id": {"$in": user_identifiers}}
+            else:
+                query = {"file_unique_id": fid, "owner_id": {"$in": user_identifiers}}
+            doc = database.Files.find_one(query)
+            if doc:
+                files_to_transfer.append({"doc": doc, "rel_subpath": ""})
+
+    # 2. Resolve source folder paths
+    if body.source_folder_paths:
+        for fpath in body.source_folder_paths:
+            clean_fpath = fpath.strip().rstrip("/")
+            folder_base_name = clean_fpath.split("/")[-1]
+            nested_files = list(database.Files.find({
+                "file_path": {"$regex": f"^{re.escape(clean_fpath)}"},
+                "owner_id": {"$in": user_identifiers},
+                "file_type": {"$ne": "folder"}
+            }))
+            for nfile in nested_files:
+                sub = nfile.get("file_path", "")[len(clean_fpath):].strip("/")
+                rel_dir = f"{folder_base_name}/{sub}".strip("/") if sub else folder_base_name
+                files_to_transfer.append({"doc": nfile, "rel_subpath": rel_dir})
+
+    if not files_to_transfer:
+        raise HTTPException(status_code=400, detail="No valid Telegram files found to transfer.")
+
+    # Deduplicate files by _id
+    seen_ids = set()
+    unique_files = []
+    for item in files_to_transfer:
+        oid = str(item["doc"]["_id"])
+        if oid not in seen_ids:
+            seen_ids.add(oid)
+            unique_files.append(item)
+
+    group_id = f"grp_{secrets.token_hex(6)}" if len(unique_files) > 1 else None
+    group_name = (
+        body.source_folder_paths[0].split("/")[-1]
+        if body.source_folder_paths
+        else f"{len(unique_files)} items to Google Drive"
+    ) if group_id else None
+
+    queued_tasks = []
+    for item in unique_files:
+        fdoc = item["doc"]
+        rel_sub = item["rel_subpath"]
+        t_id = str(fdoc["_id"])
+        fname = fdoc.get("file_name", "Telegram_File")
+        fsize = int(fdoc.get("file_size", 0))
+
+        q_task = await remote_transfer_manager.enqueue_telegram_to_gdrive(
             user_id=user_id,
-            url=media_url,
-            destination_path=body.destination_path or "/Home",
-            chat_id=chat_id,
-            custom_headers={"Authorization": f"Bearer {access_token}"},
-            custom_filename=file_name,
-            custom_filesize=file_size,
-            post_action_delete=(body.operation == "cut"),
+            telegram_file_id=t_id,
             cloud_account_id=account_id,
-            cloud_file_id=body.source_file_id
+            target_gdrive_folder_id=target_fid,
+            filename=fname,
+            filesize=fsize,
+            post_action_delete=(body.operation == "cut"),
+            group_id=group_id,
+            group_name=group_name,
+            group_total_items=len(unique_files) if group_id else None,
+            target_rel_subpath=rel_sub
+        )
+        queued_tasks.append(q_task)
+
+    return {
+        "success": True,
+        "message": f"Queued {len(queued_tasks)} file(s) for transfer to Google Drive.",
+        "tasks": queued_tasks,
+        "group_id": group_id
+    }
+
+@router.post("/{account_id}/upload")
+async def upload_to_google_drive(
+    account_id: str,
+    file: UploadFile = File(...),
+    folder_id: Optional[str] = Query("root"),
+    user: User = Depends(require_auth)
+):
+    """
+    Directly upload a file from the user's browser into Google Drive.
+    Pipes the upload directly into Google Drive's resumable upload session with zero disk usage.
+    """
+    user_identifiers = _get_user_identifiers(user)
+    account = database.CloudAccounts.get_account_raw(account_id=account_id, user_id=user_identifiers)
+    if not account:
+        raise HTTPException(status_code=404, detail="Cloud account not found.")
+
+    target_fid = folder_id or "root"
+    if target_fid in ("root", "my_drive", "google_drive"):
+        target_fid = "root"
+
+    try:
+        access_token = await GoogleDriveManager.get_valid_access_token(account)
+        file_name = file.filename or "upload.bin"
+        file_size = file.size
+        mime_type = file.content_type or "application/octet-stream"
+
+        # 1. Initiate Resumable Upload
+        upload_session_url = await GoogleDriveManager.initiate_resumable_upload(
+            access_token=access_token,
+            file_name=file_name,
+            file_size=file_size,
+            mime_type=mime_type,
+            parent_id=target_fid
+        )
+
+        # 2. Async stream chunks from file
+        async def file_stream_gen():
+            while True:
+                chunk = await file.read(512 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+
+        upload_result = await GoogleDriveManager.upload_resumable_stream(
+            upload_session_url=upload_session_url,
+            async_stream_gen=file_stream_gen(),
+            total_size=file_size
         )
 
         return {
             "success": True,
-            "message": f"Transfer queued for '{file_name}' to {body.destination_path}.",
-            "tasks": tasks
+            "message": f"File '{file_name}' uploaded successfully to Google Drive.",
+            "file": upload_result
         }
     except Exception as e:
-        logger.error(f"[GDRIVE_TRANSFER] Error enqueueing transfer: {e}", exc_info=True)
+        logger.error(f"[GDRIVE_UPLOAD] Error uploading file to Google Drive: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

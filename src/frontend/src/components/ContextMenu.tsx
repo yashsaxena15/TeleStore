@@ -260,6 +260,16 @@ export const ContextMenu = ({
               label: "New Folder",
               action: "new_folder",
             },
+            ...(onUploadFiles ? [{
+              icon: Upload,
+              label: "Upload Files",
+              action: "upload_files",
+            }] : []),
+            ...(onUploadFolder ? [{
+              icon: Upload,
+              label: "Upload Folder",
+              action: "upload_folder",
+            }] : []),
             { divider: true, label: "", action: "" },
             {
               icon: Clipboard,
