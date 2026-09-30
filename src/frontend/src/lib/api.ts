@@ -1620,6 +1620,33 @@ export const api = {
         return response.json();
     },
 
+    async transferCloudInternal(
+        accountId: string,
+        fileIds: string[],
+        targetFolderId: string = 'root',
+        operation: 'copy' | 'cut' = 'copy'
+    ): Promise<any> {
+        const baseUrl = getApiBaseUrl();
+        const apiUrl = baseUrl ? `${baseUrl}` : '';
+        const response = await fetchWithTimeout(`${apiUrl}/cloud/${accountId}/files/transfer-internal`, {
+            method: 'POST',
+            headers: {
+                ...authService.getAuthHeaders(),
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                file_ids: fileIds,
+                target_folder_id: targetFolderId,
+                operation
+            }),
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || `Failed to ${operation} items in Google Drive`);
+        }
+        return response.json();
+    },
+
     async uploadToCloud(
         accountId: string,
         file: File,

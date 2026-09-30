@@ -59,6 +59,11 @@ class TransferFromTelegramRequest(BaseModel):
     target_folder_id: Optional[str] = "root"
     operation: Optional[str] = "copy"  # "copy" or "cut"
 
+class CloudInternalTransferRequest(BaseModel):
+    file_ids: List[str]
+    target_folder_id: Optional[str] = "root"
+    operation: Optional[str] = "copy"  # "copy" or "cut"
+
 def _get_base_redirect_uri(request: Request, provided_uri: Optional[str] = None) -> str:
     if provided_uri and provided_uri.strip():
         return provided_uri.strip()
@@ -356,6 +361,92 @@ async def create_cloud_folder(
     except Exception as e:
         logger.error(f"[GDRIVE_MKDIR] Error creating folder: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{account_id}/files/transfer-internal")
+async def transfer_cloud_internal(
+    account_id: str,
+    body: CloudInternalTransferRequest,
+    user: User = Depends(require_auth)
+):
+    """
+    Copy or cut/move files and folders directly within Google Drive using Google Drive API v3.
+    Zero VM disk usage and instantaneous cloud execution.
+    """
+    user_identifiers = _get_user_identifiers(user)
+    account = database.CloudAccounts.get_account_raw(account_id=account_id, user_id=user_identifiers)
+    if not account:
+        raise HTTPException(status_code=404, detail="Cloud account not found.")
+
+    target_fid = body.target_folder_id or "root"
+    if target_fid in ("root", "my_drive", "google_drive"):
+        target_fid = "root"
+
+    if target_fid in ("trash", "starred", "shared_with_me"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot copy or move items into virtual folders (Trash, Starred, Shared with me). Please select a valid folder in My Drive."
+        )
+
+    if not body.file_ids:
+        raise HTTPException(status_code=400, detail="No file IDs provided to transfer.")
+
+    operation = "cut" if body.operation == "cut" else "copy"
+
+    try:
+        access_token = await GoogleDriveManager.get_valid_access_token(account)
+        results = []
+        errors = []
+
+        for fid in body.file_ids:
+            if not fid:
+                continue
+            if fid == target_fid:
+                errors.append(f"Cannot move/copy folder '{fid}' into itself.")
+                continue
+
+            try:
+                # Check item info
+                info = await GoogleDriveManager.get_file_info(access_token, fid)
+                is_folder = info.get("mimeType") == "application/vnd.google-apps.folder"
+                item_name = info.get("name", fid)
+
+                if operation == "cut":
+                    # Move item by updating parents
+                    await GoogleDriveManager.move_file(access_token, fid, target_fid)
+                    results.append({"id": fid, "name": item_name, "status": "moved"})
+                else:
+                    # Copy item
+                    if is_folder:
+                        res = await GoogleDriveManager.copy_folder_recursive(access_token, fid, target_fid)
+                        results.append({"id": fid, "name": item_name, "status": "copied_folder", "new_id": res.get("id")})
+                    else:
+                        res = await GoogleDriveManager.copy_file(access_token, fid, target_fid)
+                        results.append({"id": fid, "name": item_name, "status": "copied_file", "new_id": res.get("id")})
+            except Exception as item_err:
+                logger.error(f"[GDRIVE_INTERNAL] Error transferring {fid}: {item_err}")
+                errors.append(f"Failed to {operation} '{fid}': {str(item_err)}")
+
+        if not results and errors:
+            raise HTTPException(status_code=500, detail="; ".join(errors))
+
+        msg = f"Successfully {('moved' if operation == 'cut' else 'copied')} {len(results)} item(s) in Google Drive."
+        if errors:
+            msg += f" ({len(errors)} failed)"
+
+        return {
+            "success": True,
+            "message": msg,
+            "transferred_count": len(results),
+            "results": results,
+            "errors": errors if errors else None
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[GDRIVE_INTERNAL] Unexpected error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/{account_id}/storage")
 async def get_cloud_storage(

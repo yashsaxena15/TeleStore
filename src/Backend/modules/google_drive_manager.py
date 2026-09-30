@@ -372,6 +372,125 @@ class GoogleDriveManager:
                 return await resp.json()
 
     @staticmethod
+    async def copy_file(
+        access_token: str,
+        file_id: str,
+        target_parent_id: str = "root",
+        new_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Copy a file within Google Drive using Google Drive API v3."""
+        clean_target = target_parent_id.strip() if target_parent_id else "root"
+        if clean_target in ("root", "my_drive", "google_drive"):
+            clean_target = "root"
+
+        url = f"{DRIVE_API_BASE}/files/{file_id}/copy?supportsAllDrives=true"
+        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+        payload: Dict[str, Any] = {"parents": [clean_target]}
+        if new_name:
+            payload["name"] = new_name
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload, timeout=20) as resp:
+                if resp.status not in (200, 201):
+                    err_txt = await resp.text()
+                    raise RuntimeError(f"Google Drive copy_file failed: {err_txt}")
+                return await resp.json()
+
+    @staticmethod
+    async def move_file(
+        access_token: str,
+        file_id: str,
+        target_parent_id: str = "root"
+    ) -> Dict[str, Any]:
+        """Move a file or folder within Google Drive by updating its parents."""
+        clean_target = target_parent_id.strip() if target_parent_id else "root"
+        if clean_target in ("root", "my_drive", "google_drive"):
+            clean_target = "root"
+
+        # 1. Fetch current parents
+        file_info = await GoogleDriveManager.get_file_info(access_token, file_id)
+        current_parents = file_info.get("parents", [])
+
+        if clean_target in current_parents:
+            # Already in target folder
+            return file_info
+
+        remove_parents = ",".join(current_parents)
+        url = f"{DRIVE_API_BASE}/files/{file_id}"
+        params = {
+            "addParents": clean_target,
+            "supportsAllDrives": "true"
+        }
+        if remove_parents:
+            params["removeParents"] = remove_parents
+
+        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+        async with aiohttp.ClientSession() as session:
+            async with session.patch(url, headers=headers, params=params, json={}, timeout=20) as resp:
+                if resp.status not in (200, 204):
+                    err_txt = await resp.text()
+                    raise RuntimeError(f"Google Drive move_file failed: {err_txt}")
+                return await resp.json()
+
+    @staticmethod
+    async def copy_folder_recursive(
+        access_token: str,
+        folder_id: str,
+        target_parent_id: str = "root"
+    ) -> Dict[str, Any]:
+        """Recursively copy a folder and all its contents inside Google Drive."""
+        clean_target = target_parent_id.strip() if target_parent_id else "root"
+        if clean_target in ("root", "my_drive", "google_drive"):
+            clean_target = "root"
+
+        # 1. Get info on source folder
+        source_info = await GoogleDriveManager.get_file_info(access_token, folder_id)
+        folder_name = source_info.get("name", "Copied Folder")
+
+        # If copying inside the same parent, prepend "Copy of "
+        if clean_target in source_info.get("parents", []):
+            folder_name = f"Copy of {folder_name}"
+
+        # 2. Create the destination folder
+        new_folder = await GoogleDriveManager.create_folder(access_token, clean_target, folder_name)
+        new_folder_id = new_folder["id"]
+
+        # 3. List all immediate children of source folder
+        headers = {"Authorization": f"Bearer {access_token}"}
+        page_token = None
+        while True:
+            params = {
+                "q": f"'{folder_id}' in parents and trashed = false",
+                "fields": "nextPageToken, files(id, name, mimeType)",
+                "pageSize": 100,
+                "supportsAllDrives": "true",
+                "includeItemsFromAllDrives": "true"
+            }
+            if page_token:
+                params["pageToken"] = page_token
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{DRIVE_API_BASE}/files", headers=headers, params=params, timeout=20) as resp:
+                    if resp.status != 200:
+                        err = await resp.text()
+                        raise RuntimeError(f"Failed listing folder items to copy: {err}")
+                    data = await resp.json()
+
+            for child in data.get("files", []):
+                cid = child["id"]
+                cmime = child.get("mimeType", "")
+                if cmime == "application/vnd.google-apps.folder":
+                    await GoogleDriveManager.copy_folder_recursive(access_token, cid, new_folder_id)
+                else:
+                    await GoogleDriveManager.copy_file(access_token, cid, new_folder_id, child.get("name"))
+
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+
+        return new_folder
+
+    @staticmethod
     def get_download_url(file_id: str) -> str:
         """Return the REST download URL for streaming."""
         return f"{DRIVE_API_BASE}/files/{file_id}?alt=media&supportsAllDrives=true"

@@ -808,7 +808,36 @@ export const FileExplorer = () => {
             refetch();
             return;
           } else {
-            toast.info("Google Drive-to-Google Drive internal copy is not supported yet.");
+            // Internal Google Drive Copy / Cut (Move)
+            const targetFolderId = cloudFolderId || "root";
+            if (["trash", "starred", "shared_with_me"].includes(targetFolderId)) {
+              toast.error("Cannot paste items into Starred, Trash, or Shared with me. Please open a folder in My Drive.");
+              return;
+            }
+
+            const cloudFileIds = clipboard.items.map((it: any) => (it as any).cloud_file_id || it.id).filter(Boolean);
+            if (cloudFileIds.length === 0) {
+              toast.error("No valid cloud items found in clipboard.");
+              return;
+            }
+
+            const op = clipboard.operation === "cut" ? "cut" : "copy";
+            const toastId = toast.loading(`${op === "cut" ? "Moving" : "Copying"} ${cloudFileIds.length} item(s) in Google Drive...`);
+            try {
+              const res = await api.transferCloudInternal(
+                cloudAccountId,
+                cloudFileIds,
+                targetFolderId,
+                op
+              );
+              toast.dismiss(toastId);
+              toast.success(res.message || `Successfully ${op === "cut" ? "moved" : "copied"} ${cloudFileIds.length} item(s) in Google Drive! ☁️`);
+              clearClipboard();
+              refetch();
+            } catch (err: any) {
+              toast.dismiss(toastId);
+              toast.error(err.message || `Failed to ${op} items in Google Drive`);
+            }
             return;
           }
         }
@@ -1090,6 +1119,35 @@ export const FileExplorer = () => {
 
   const handleMove = async (item: FileItem, targetFolder: FileItem) => {
     try {
+      if (isCloudMode && cloudAccountId) {
+        if (targetFolder.is_virtual || ["trash", "starred", "shared_with_me"].includes(targetFolder.id)) {
+          toast.error("Cannot move items into virtual folders.");
+          return;
+        }
+        const fileId = (item as any).cloud_file_id || item.id;
+        const targetId = (targetFolder as any).cloud_file_id || targetFolder.id;
+        if (!fileId || !targetId) {
+          toast.error("Invalid cloud items for move operation.");
+          return;
+        }
+        const toastId = toast.loading(`Moving "${item.name}" into "${targetFolder.name}"...`);
+        try {
+          await api.transferCloudInternal(
+            cloudAccountId,
+            [fileId],
+            targetId,
+            "cut"
+          );
+          toast.dismiss(toastId);
+          toast.success(`Moved "${item.name}" to "${targetFolder.name}" ☁️`);
+          refetch();
+        } catch (err: any) {
+          toast.dismiss(toastId);
+          toast.error(err.message || "Failed to move item in Google Drive");
+        }
+        return;
+      }
+
       // Determine source path from item or current path
       let sourcePath = item.file_path || (currentPath.length > 1 ? `/${currentPath.join('/')}` : "/Home");
       
