@@ -542,13 +542,44 @@ export const FileGrid = ({
         const itemFPath = item.file_path ? `&path=${encodeURIComponent(item.file_path)}` : '';
         mediaUrl = `${baseUrl ? baseUrl : ''}/dl/${encodeURIComponent(item.name)}${tokenParam}${sep}inline=1${itemFId}${itemFPath}`;
       }
+
+      // If audio, construct a full playlist of all audio items in current folder/view
+      let folderAudioPlaylist: any[] | undefined;
+      if (isAudio) {
+        const audioExtensions = new Set(["mp3", "m4a", "wav", "flac", "ogg", "opus", "aac", "wma"]);
+        folderAudioPlaylist = items
+          .filter((it) => {
+            const itExt = (it.extension || it.name.split('.').pop() || '').toLowerCase();
+            return it.type === "audio" || (it as any).fileType === "audio" || audioExtensions.has(itExt);
+          })
+          .map((it) => {
+            let trackUrl: string;
+            if (it.is_cloud) {
+              trackUrl = api.getCloudStreamUrl(
+                cloudAccountId || (it as any).cloud_account_id,
+                (it as any).cloud_file_id || it.id
+              );
+            } else {
+              const itFId = it.id ? `&file_id=${encodeURIComponent(it.id)}` : '';
+              const itFPath = it.file_path ? `&path=${encodeURIComponent(it.file_path)}` : '';
+              trackUrl = `${baseUrl ? baseUrl : ''}/dl/${encodeURIComponent(it.name)}${tokenParam}${sep}inline=1${itFId}${itFPath}`;
+            }
+            return {
+              id: it.id || it.name,
+              name: it.name,
+              url: trackUrl,
+              size: it.size,
+              fileItem: it,
+            };
+          });
+      }
       
       playMedia({ 
         url: mediaUrl, 
         fileName: item.name, 
         fileType: isVideo ? "video" : (item.fileType as "audio" | "voice" || "audio"),
         fileItem: item,
-      });
+      }, folderAudioPlaylist);
     } else if (isDoc) {
       let docUrl: string;
       if (item.is_cloud) {
