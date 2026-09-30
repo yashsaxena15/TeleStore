@@ -225,7 +225,7 @@ async def gdrive_oauth_callback(
         <body>
           <div class="card">
             <h2>Connected Successfully!</h2>
-            <p><strong>{email}</strong> has been linked to your Telegram Drive.</p>
+            <p><strong>{email}</strong> has been linked to your TeleStore.</p>
             <p>This window will close automatically...</p>
           </div>
           <script>

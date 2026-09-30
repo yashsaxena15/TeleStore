@@ -1,8 +1,8 @@
-# Telegram File Server Frontend
+# TeleStore Frontend
 
 ## Project Overview
 
-This is the frontend component of the Telegram File Server application, built with modern web technologies to provide a seamless file management experience integrated with Telegram.
+This is the frontend component of the TeleStore application, built with modern web technologies to provide a seamless cloud file management and streaming experience.
 
 ## Technologies Used
 

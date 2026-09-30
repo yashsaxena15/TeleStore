@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from pyrogram.types import ChatPrivileges
 load_dotenv()
 
-APP_NAME = os.getenv("APP_NAME", "MyApp")
+APP_NAME = os.getenv("APP_NAME", "TeleStore")
 TIME_ZONE = os.getenv("TIME_ZONE", "+5:30")
 WEB_APP = os.getenv("WEB_APP", None)
 API_ID = int(os.getenv("API_ID", "0")) if os.getenv("API_ID") else None

@@ -262,13 +262,13 @@ export const PersistentAudioPlayer: React.FC<PersistentAudioPlayerProps> = ({
       try {
         navigator.mediaSession.metadata = new MediaMetadata({
           title: cleanTrackTitle,
-          artist: "Telegram Drive Audio",
+          artist: "TeleStore Audio",
           album: activeTrack.fileItem?.file_path?.replace(/^\//, "") || "Music Playlist",
           artwork: [
             {
-              src: "/icon-192.png",
+              src: "/logo.jpg",
               sizes: "192x192",
-              type: "image/png",
+              type: "image/jpeg",
             },
           ],
         });

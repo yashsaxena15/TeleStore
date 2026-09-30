@@ -6,7 +6,7 @@ import logger from '@/lib/logger'
 import authService from '@/lib/authService'
 
 // Initialize logger
-logger.info('Starting Telegram File Server frontend application')
+logger.info('Starting TeleStore frontend application')
 
 // Check if we're running in Tauri
 const isTauri = authService.isTauri()

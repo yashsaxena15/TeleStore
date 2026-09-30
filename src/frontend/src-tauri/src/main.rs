@@ -324,7 +324,7 @@ fn main() {
     ])
     .setup(|_app| {
       // Log startup messages after logger is initialized
-      log::info!("Starting Telegram File Server application");
+      log::info!("Starting TeleStore application");
       log::info!("Current working directory: {:?}", std::env::current_dir());
       
       // Log environment variables that might be relevant

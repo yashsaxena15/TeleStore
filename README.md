@@ -1,6 +1,24 @@
-# Telegram File Server 🚀
+<p align="center">
+  <img src="assets/photo_2026-09-30_23-09-08.jpg" alt="TeleStore Logo" width="160" style="border-radius: 24px; box-shadow: 0 8px 24px rgba(0,0,0,0.2);" />
+</p>
 
-A modern, high-performance, self-hosted Cloud Storage and Media Streaming Server powered by **FastAPI**, **React (TypeScript & Vite)**, **MongoDB**, **Pyrogram**, and **FFmpeg**. It transforms your private Telegram channels and groups into an unlimited personal cloud drive with Google Drive-like streaming, folder downloads, file management, real-time channel inbox syncing, and comprehensive storage analytics.
+<h1 align="center">TeleStore 🚀</h1>
+
+<p align="center">
+  <b>Modern, High-Performance Cloud Storage and Media Streaming Server powered by Telegram & Google Drive</b>
+</p>
+
+<p align="center">
+  <a href="#-key-features">Key Features</a> •
+  <a href="#️-architecture">Architecture</a> •
+  <a href="#-quick-start-docker-recommended">Quick Start</a> •
+  <a href="#-desktop--mobile-webdav-mount-raidrive--mixplorer--finder">WebDAV</a> •
+  <a href="#-api-overview">API</a>
+</p>
+
+---
+
+**TeleStore** is a modern, high-performance, self-hosted Cloud Storage and Media Streaming Server powered by **FastAPI**, **React (TypeScript & Vite)**, **MongoDB**, **Pyrogram**, and **FFmpeg**. It transforms your private Telegram channels and groups into an unlimited personal cloud drive with Google Drive-like streaming, folder downloads, file management, real-time channel inbox syncing, and comprehensive storage analytics.
 
 ---
 
@@ -323,4 +341,4 @@ Interactive OpenAPI documentation is available at **`/docs`** when the server is
 This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
 
 - **Original Author**: Copyright (c) 2025 P A M O D ([FileServerApp](https://github.com/pamod-madubashana/FileServerApp))
-- **Extended & Maintained**: Copyright (c) 2026 TelegramFileServer Contributors
+- **Extended & Maintained**: Copyright (c) 2026 TeleStore Contributors

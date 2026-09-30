@@ -97,7 +97,7 @@ def authenticate_webdav(request: Request) -> Tuple[Dict[str, Any], str, Optional
         raise HTTPException(
             status_code=401,
             detail="Unauthorized",
-            headers={"WWW-Authenticate": 'Basic realm="TelegramFileServer WebDAV"'}
+            headers={"WWW-Authenticate": 'Basic realm="TeleStore WebDAV"'}
         )
 
     # Resolve user metadata

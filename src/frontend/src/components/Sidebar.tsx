@@ -269,13 +269,13 @@ export const Sidebar = ({
         onClick={() => handleCategoryClick("all")}
       >
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="rounded-xl bg-primary/10 p-2 text-primary shrink-0">
-            <FolderOpen className="w-5 h-5" />
+          <div className="rounded-xl overflow-hidden shadow-sm shrink-0 border border-primary/20 bg-muted">
+            <img src="/logo.jpg" alt="TeleStore" className="w-8 h-8 object-cover" />
           </div>
           {!collapsed && (
             <div className="min-w-0 flex-1">
               <h1 className="font-bold text-sidebar-foreground text-base tracking-tight leading-none truncate">
-                Telegram Drive
+                TeleStore
               </h1>
               <p className="text-[11px] text-muted-foreground mt-1 leading-none">
                 Cloud File Server

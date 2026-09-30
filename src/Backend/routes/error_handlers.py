@@ -9,7 +9,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 async def unauthorized_handler(request: Request, exc):
     headers = dict(getattr(exc, "headers", None) or {})
     if request.url.path.startswith("/webdav"):
-        headers.setdefault("WWW-Authenticate", 'Basic realm="TelegramFileServer WebDAV"')
+        headers.setdefault("WWW-Authenticate", 'Basic realm="TeleStore WebDAV"')
     return JSONResponse(
         status_code=401,
         content={"detail": getattr(exc, "detail", "Authentication required")},

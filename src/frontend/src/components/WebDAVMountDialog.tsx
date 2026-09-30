@@ -63,7 +63,7 @@ export const WebDAVMountDialog: React.FC<WebDAVMountDialogProps> = ({
                 </Badge>
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground mt-0.5">
-                Mount your Telegram Drive directly into Windows Explorer, macOS Finder, or Android MiXplorer.
+                Mount your TeleStore cloud drive directly into Windows Explorer, macOS Finder, or Android MiXplorer.
               </DialogDescription>
             </div>
           </div>
@@ -230,7 +230,7 @@ export const WebDAVMountDialog: React.FC<WebDAVMountDialogProps> = ({
                     Account: Enter your Username (<strong className="text-foreground">{username}</strong>) and your web login Password.
                   </li>
                   <li>
-                    Click <strong className="text-foreground">Connect</strong>. Your Telegram Drive will mount as a drive letter (e.g. <strong className="text-foreground font-mono">Z:</strong>)!
+                    Click <strong className="text-foreground">Connect</strong>. Your TeleStore drive will mount as a drive letter (e.g. <strong className="text-foreground font-mono">Z:</strong>)!
                   </li>
                 </ol>
 
@@ -266,7 +266,7 @@ export const WebDAVMountDialog: React.FC<WebDAVMountDialogProps> = ({
                     Select <strong className="text-foreground">WebDAV</strong> from the cloud storage list.
                   </li>
                   <li>
-                    Display Name: <strong className="text-foreground font-mono">Telegram Drive</strong>
+                    Display Name: <strong className="text-foreground font-mono">TeleStore</strong>
                   </li>
                   <li>
                     Host / Server: <strong className="text-foreground font-mono">{hostname}</strong>

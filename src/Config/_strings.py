@@ -3,12 +3,12 @@
 START_MSG = """
 <b>Hello {user_mention} !!!</b>
 
-🎬 <b>Welcome to Telegram File Server!</b>
-Your personal movie vault, right here on Telegram.
+🎬 <b>Welcome to TeleStore!</b>
+Your personal cloud storage and media vault, right here on Telegram.
 
-🍿 Browse. Search. Streamline.
-📽️ From classics to the latest drops, everything is just a tap away.
-✨ Fast, clean, and built for real movie lovers.
+🍿 Browse. Search. Stream.
+📁 From movies and music to documents, everything is just a tap away.
+✨ Fast, clean, and unlimited personal cloud storage.
 """
 
 WELCOME_MSG = """

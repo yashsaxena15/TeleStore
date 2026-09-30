@@ -57,7 +57,7 @@ create_service() {
     # Create service file
     sudo tee "$SERVICE_FILE" > /dev/null <<EOF
 [Unit]
-Description=Telegram File Server
+Description=TeleStore Cloud Server
 After=network.target
 Wants=network-online.target
 
@@ -117,7 +117,7 @@ install_tgserver_command() {
     sudo tee "/usr/local/bin/tgserver" > /dev/null <<'EOF'
 #!/usr/bin/env python3
 """
-tgserver - Easy command line interface for Telegram File Server
+tgserver - Easy command line interface for TeleStore
 """
 
 import sys
@@ -165,7 +165,7 @@ def send_sigint_to_service():
 
 def show_help():
     """Display help information"""
-    help_text = """tgserver - Telegram File Server Manager
+    help_text = """tgserver - TeleStore Service Manager
 
 Usage: tgserver [command]
 
