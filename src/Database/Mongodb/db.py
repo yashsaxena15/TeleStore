@@ -22,7 +22,10 @@ class TypedDatabase:
     is_connected: bool
 
     def connect(self, name: str, DATABASE_URL: str = None) -> None:
-        r = _db.connect(name=name, collections=[Users,Settings,Files,Tgcodes,CloudAccounts], DATABASE_URL=DATABASE_URL)
+        import os
+        # Maintain connection to persistent MongoDB database 'MyApp' so app renaming never disconnects user data
+        db_name = os.getenv("MONGO_DB_NAME", "MyApp")
+        r = _db.connect(name=db_name, collections=[Users,Settings,Files,Tgcodes,CloudAccounts], DATABASE_URL=DATABASE_URL)
         return r
 
     def __getattr__(self, item) -> Any:
@@ -36,11 +39,10 @@ class TypedDatabase:
 
     async def get_database_stats_async(self):
         try:
-
             # Get database stats through the underlying _db object
             db_stats = _db.db.command("dbstats")
             return [{
-                "db_name": _db.database_name,
+                "db_name": "TeleStore",
                 "storageSize": db_stats.get("storageSize", 0),
                 "dataSize": db_stats.get("dataSize", 0)
             }]
