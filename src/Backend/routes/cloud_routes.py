@@ -350,14 +350,24 @@ async def create_cloud_folder(
     if not account:
         raise HTTPException(status_code=404, detail="Cloud account not found.")
 
+    parent_fid = body.parent_id or "root"
+    if parent_fid in ("root", "google_drive", "starred", "trash", "shared_with_me"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot create folders at the root level or in virtual sections (Starred, Trash, Shared with me). Please navigate inside My Drive first."
+        )
+    effective_parent = "root" if parent_fid == "my_drive" else parent_fid
+
     try:
         access_token = await GoogleDriveManager.get_valid_access_token(account)
         created = await GoogleDriveManager.create_folder(
             access_token=access_token,
-            parent_id=body.parent_id or "root",
+            parent_id=effective_parent,
             folder_name=body.folder_name
         )
         return {"success": True, "folder": created}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"[GDRIVE_MKDIR] Error creating folder: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -378,14 +388,12 @@ async def transfer_cloud_internal(
         raise HTTPException(status_code=404, detail="Cloud account not found.")
 
     target_fid = body.target_folder_id or "root"
-    if target_fid in ("root", "my_drive", "google_drive"):
-        target_fid = "root"
-
-    if target_fid in ("trash", "starred", "shared_with_me"):
+    if target_fid in ("root", "google_drive", "trash", "starred", "shared_with_me"):
         raise HTTPException(
             status_code=400,
-            detail="Cannot copy or move items into virtual folders (Trash, Starred, Shared with me). Please select a valid folder in My Drive."
+            detail="Cannot copy or move items into root or virtual folders (Trash, Starred, Shared with me). Please select a valid folder in My Drive."
         )
+    effective_target = "root" if target_fid == "my_drive" else target_fid
 
     if not body.file_ids:
         raise HTTPException(status_code=400, detail="No file IDs provided to transfer.")
@@ -400,7 +408,7 @@ async def transfer_cloud_internal(
         for fid in body.file_ids:
             if not fid:
                 continue
-            if fid == target_fid:
+            if fid == effective_target or fid == target_fid:
                 errors.append(f"Cannot move/copy folder '{fid}' into itself.")
                 continue
 
@@ -412,15 +420,15 @@ async def transfer_cloud_internal(
 
                 if operation == "cut":
                     # Move item by updating parents
-                    await GoogleDriveManager.move_file(access_token, fid, target_fid)
+                    await GoogleDriveManager.move_file(access_token, fid, effective_target)
                     results.append({"id": fid, "name": item_name, "status": "moved"})
                 else:
                     # Copy item
                     if is_folder:
-                        res = await GoogleDriveManager.copy_folder_recursive(access_token, fid, target_fid)
+                        res = await GoogleDriveManager.copy_folder_recursive(access_token, fid, effective_target)
                         results.append({"id": fid, "name": item_name, "status": "copied_folder", "new_id": res.get("id")})
                     else:
-                        res = await GoogleDriveManager.copy_file(access_token, fid, target_fid)
+                        res = await GoogleDriveManager.copy_file(access_token, fid, effective_target)
                         results.append({"id": fid, "name": item_name, "status": "copied_file", "new_id": res.get("id")})
             except Exception as item_err:
                 logger.error(f"[GDRIVE_INTERNAL] Error transferring {fid}: {item_err}")
@@ -802,8 +810,12 @@ async def transfer_from_telegram(
         raise HTTPException(status_code=404, detail="Cloud account not found.")
 
     target_fid = body.target_folder_id or "root"
-    if target_fid in ("root", "my_drive", "google_drive"):
-        target_fid = "root"
+    if target_fid in ("root", "google_drive", "trash", "starred", "shared_with_me"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot transfer items into root or virtual folders (Trash, Starred, Shared with me). Please select a valid folder in My Drive."
+        )
+    effective_target = "root" if target_fid == "my_drive" else target_fid
 
     # Make sure background worker is alive
     remote_transfer_manager.start_worker(request.app)
@@ -869,7 +881,7 @@ async def transfer_from_telegram(
             user_id=user_id,
             telegram_file_id=t_id,
             cloud_account_id=account_id,
-            target_gdrive_folder_id=target_fid,
+            target_gdrive_folder_id=effective_target,
             filename=fname,
             filesize=fsize,
             post_action_delete=(body.operation == "cut"),
@@ -904,8 +916,12 @@ async def upload_to_google_drive(
         raise HTTPException(status_code=404, detail="Cloud account not found.")
 
     target_fid = folder_id or "root"
-    if target_fid in ("root", "my_drive", "google_drive"):
-        target_fid = "root"
+    if target_fid in ("root", "google_drive", "starred", "trash", "shared_with_me"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot upload files at the root level or in virtual sections (Starred, Trash, Shared with me). Please navigate inside My Drive first."
+        )
+    effective_target = "root" if target_fid == "my_drive" else target_fid
 
     try:
         access_token = await GoogleDriveManager.get_valid_access_token(account)
@@ -919,7 +935,7 @@ async def upload_to_google_drive(
             file_name=file_name,
             file_size=file_size,
             mime_type=mime_type,
-            parent_id=target_fid
+            parent_id=effective_target
         )
 
         # 2. Async stream chunks from file

@@ -125,6 +125,13 @@ def validate_folder_name(name: str) -> str:
 
 def validate_folder_creation(folder_name: str, current_path: str) -> str:
     """Validates folder name, subfolder depth limit, and total path length."""
+    clean_curr = current_path.strip().lower()
+    if clean_curr in ("/telegram inbox", "telegram inbox", "/inbox", "inbox", "/trash", "trash", "/starred", "starred") or clean_curr.startswith("/telegram inbox/") or clean_curr.startswith("telegram inbox/"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot create folders inside Telegram Inbox, Trash, or Starred sections."
+        )
+
     valid_name = validate_folder_name(folder_name)
     if valid_name.lower() in ["home", "trash", "starred", "telegram inbox", "inbox", "vault"] and current_path in ["/", "/Home", "Home", ""]:
         raise HTTPException(

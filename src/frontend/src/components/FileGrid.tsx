@@ -12,7 +12,6 @@ import { DocumentReaderModal } from "./DocumentReaderModal";
 import { ArchiveInspectDialog } from "./ArchiveInspectDialog";
 import { CompressDialog } from "./CompressDialog";
 import { UploadProgressWidget, FileUploadStatus } from "./UploadProgressWidget";
-import { FloatingUploadButton } from "./FloatingUploadButton"; // Add this import
 import { uploadManager } from "@/lib/uploadManager";
 import { TelegramVerificationDialog } from "./TelegramVerificationDialog";
 import { IndexChatDialog } from "./IndexChatDialog"; // Add this import
@@ -73,6 +72,7 @@ interface FileGridProps {
   isCloudMode?: boolean;
   cloudAccountId?: string;
   cloudFolderId?: string;
+  isInboxMode?: boolean;
 }
 
 interface ContextMenuState {
@@ -124,7 +124,27 @@ export const FileGrid = ({
   isCloudMode = false,
   cloudAccountId,
   cloudFolderId,
+  isInboxMode = false,
 }: FileGridProps) => {
+  const isEffectiveInboxMode = Boolean(
+    isInboxMode ||
+    currentFolder === "Telegram Inbox" ||
+    currentApiPath === "/inbox" ||
+    (currentPath && currentPath.length === 1 && currentPath[0] === "Telegram Inbox")
+  );
+
+  const isCloudVirtualSection = Boolean(
+    isCloudMode && (!cloudFolderId || ["root", "starred", "trash", "shared_with_me"].includes(cloudFolderId))
+  );
+
+  const isRestrictedEmptyArea = Boolean(
+    isEffectiveInboxMode ||
+    isTrashMode ||
+    cloudFolderId === "trash" ||
+    currentFolder === "Starred" ||
+    currentApiPath === "/starred" ||
+    isCloudVirtualSection
+  );
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [draggedItem, setDraggedItem] = useState<FileItem | null>(null);
   const [imageViewer, setImageViewer] = useState<{
@@ -811,6 +831,23 @@ export const FileGrid = ({
   // Add file upload handler that accepts both FileList and TraversedFile[]
   const handleFileUpload = async (files: FileList | TraversedFile[]) => {
     try {
+      if (isEffectiveInboxMode) {
+        toast.error("Uploading files to Telegram Inbox is restricted. Inbox is only for incoming Telegram messages.");
+        return;
+      }
+      if (isCloudMode && isCloudVirtualSection) {
+        toast.error("Cannot upload files at root level or in virtual sections. Please open My Drive first.");
+        return;
+      }
+      if (isTrashMode || cloudFolderId === "trash") {
+        toast.error("Cannot upload files to Trash.");
+        return;
+      }
+      if (currentFolder === "Starred" || currentApiPath === "/starred") {
+        toast.error("Cannot upload files to Starred.");
+        return;
+      }
+
       // Use the API path if available, otherwise construct it
       // Ensure root path is always "/Home" instead of "/"
       let currentPathStr = currentApiPath || `/${currentFolder}`;
@@ -1030,6 +1067,11 @@ export const FileGrid = ({
 
       // Direct upload to Google Drive if in Cloud Mode
       if (isCloudMode && cloudAccountId) {
+        if (isCloudVirtualSection) {
+          toast.error("Cannot upload files at root level or in virtual sections. Please open My Drive first.");
+          setUploadingFiles(null);
+          return;
+        }
         let uploadedCount = 0;
         toast.info(`Uploading ${filesToUpload.length} file(s) to Google Drive ☁️...`);
         for (const file of filesToUpload) {
@@ -1209,6 +1251,9 @@ export const FileGrid = ({
     // Only set drag active for actual file drags (not internal moves)
     const hasFiles = e.dataTransfer.types.includes('Files');
     if (hasFiles) {
+      if (isRestrictedEmptyArea) {
+        return;
+      }
       setIsDragActive(true);
     }
   };
@@ -1243,6 +1288,10 @@ export const FileGrid = ({
     // Only set drop effect for actual file drags (not internal moves)
     const hasFiles = e.dataTransfer.types.includes('Files');
     if (hasFiles) {
+      if (isRestrictedEmptyArea) {
+        e.dataTransfer.dropEffect = 'none';
+        return;
+      }
       e.dataTransfer.dropEffect = 'copy';
     }
   };
@@ -1664,6 +1713,9 @@ export const FileGrid = ({
           e.stopPropagation();
           // Additional prevention of default context menu
           e.nativeEvent.preventDefault();
+          if (isEffectiveInboxMode) {
+            return;
+          }
           // Show context menu for empty area
           setContextMenu({
             x: e.clientX,
@@ -2316,18 +2368,10 @@ export const FileGrid = ({
             onRestore={() => contextMenu.item && onRestoreItem?.(contextMenu.item)}
             isCloudMode={isCloudMode}
             isVirtualFolder={Boolean((contextMenu.item as any)?.is_virtual)}
+            isRestrictedEmptyArea={isRestrictedEmptyArea}
           />
         );
       })()}
-
-      {/* Floating Upload Button */}
-      {!isTrashMode && (
-        <FloatingUploadButton
-          onUploadFiles={onUploadFiles}
-          onUploadFolder={onUploadFolder}
-          onCreateFolder={onNewFolder}
-        />
-      )}
 
       {/* Image Viewer */}
       {imageViewer && (

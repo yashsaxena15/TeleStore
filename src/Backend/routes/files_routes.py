@@ -535,6 +535,10 @@ async def upload_file(
         print(f"File name: {file.filename}, File size: {file.size}, Content type: {file.content_type}")
         print(f"User: {user}")
 
+        clean_p = path.strip().lower()
+        if clean_p in ("/telegram inbox", "telegram inbox", "/inbox", "inbox", "/trash", "trash", "/starred", "starred") or clean_p.startswith("/telegram inbox/") or clean_p.startswith("telegram inbox/"):
+            raise HTTPException(status_code=400, detail="Cannot upload files directly to Telegram Inbox, Trash, or Starred.")
+
         # Check if user has verified their Telegram account upfront before writing to disk
         if not user.telegram_user_id:
             raise HTTPException(status_code=400, detail="TELEGRAM_NOT_VERIFIED: Please verify your Telegram account before uploading files")
@@ -830,6 +834,10 @@ async def init_chunked_upload(
                     t.cancel()
             if "dir" in s and os.path.exists(s["dir"]):
                 shutil.rmtree(s["dir"], ignore_errors=True)
+
+    clean_p = (req.path or "/Home").strip().lower()
+    if clean_p in ("/telegram inbox", "telegram inbox", "/inbox", "inbox", "/trash", "trash", "/starred", "starred") or clean_p.startswith("/telegram inbox/") or clean_p.startswith("telegram inbox/"):
+        raise HTTPException(status_code=400, detail="Cannot upload files directly to Telegram Inbox, Trash, or Starred.")
 
     upload_id = secrets.token_hex(12)
     priority_manager.notify_user_upload_started(upload_id)

@@ -57,6 +57,7 @@ interface ContextMenuProps {
   onMoveToHome?: () => void;
   isCloudMode?: boolean;
   isVirtualFolder?: boolean;
+  isRestrictedEmptyArea?: boolean;
 }
 
 interface MenuItem {
@@ -105,6 +106,7 @@ export const ContextMenu = ({
   onMoveToHome,
   isCloudMode = false,
   isVirtualFolder = false,
+  isRestrictedEmptyArea = false,
 }: ContextMenuProps) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
@@ -253,39 +255,49 @@ export const ContextMenu = ({
             },
           ])
     : (itemType === "empty"
-        ? [
-            // Empty area context menu
-            {
-              icon: FolderOpen,
-              label: "New Folder",
-              action: "new_folder",
-            },
-            ...(onUploadFiles ? [{
-              icon: Upload,
-              label: "Upload Files",
-              action: "upload_files",
-            }] : []),
-            ...(onUploadFolder ? [{
-              icon: Upload,
-              label: "Upload Folder",
-              action: "upload_folder",
-            }] : []),
-            { divider: true, label: "", action: "" },
-            {
-              icon: Clipboard,
-              label: "Paste",
-              action: "paste",
-              shortcut: "Ctrl+V",
-            },
-            { divider: true, label: "", action: "" },
-            {
-              icon: RefreshCw,
-              label: "Refresh",
-              action: "refresh",
-              shortcut: "F5",
-              disabled: true,
-            },
-          ]
+        ? (isRestrictedEmptyArea
+            ? [
+                {
+                  icon: RefreshCw,
+                  label: "Refresh",
+                  action: "refresh",
+                  shortcut: "F5",
+                  disabled: true,
+                },
+              ]
+            : [
+                // Empty area context menu
+                {
+                  icon: FolderOpen,
+                  label: "New Folder",
+                  action: "new_folder",
+                },
+                ...(onUploadFiles ? [{
+                  icon: Upload,
+                  label: "Upload Files",
+                  action: "upload_files",
+                }] : []),
+                ...(onUploadFolder ? [{
+                  icon: Upload,
+                  label: "Upload Folder",
+                  action: "upload_folder",
+                }] : []),
+                { divider: true, label: "", action: "" },
+                {
+                  icon: Clipboard,
+                  label: "Paste",
+                  action: "paste",
+                  shortcut: "Ctrl+V",
+                },
+                { divider: true, label: "", action: "" },
+                {
+                  icon: RefreshCw,
+                  label: "Refresh",
+                  action: "refresh",
+                  shortcut: "F5",
+                  disabled: true,
+                },
+              ])
         : isVirtualFolder
         ? [
             {

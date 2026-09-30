@@ -776,6 +776,19 @@ export const FileExplorer = () => {
 
   const handlePaste = async () => {
     try {
+      if (isInboxMode || currentFolder === "Telegram Inbox" || currentApiPath === "/inbox") {
+        toast.error("Cannot paste items into Telegram Inbox. Inbox is reserved for incoming messages.");
+        return;
+      }
+      if (currentFolder === "Starred" || currentApiPath === "/starred") {
+        toast.error("Cannot paste items into Starred.");
+        return;
+      }
+      if (isEffectiveTrashMode || currentFolder === "Trash" || currentApiPath === "/trash") {
+        toast.error("Cannot paste items into Trash.");
+        return;
+      }
+
       if (isCloudMode) {
         if (!cloudAccountId) {
           toast.error("No cloud account selected.");
@@ -786,7 +799,11 @@ export const FileExplorer = () => {
           // Check if items are from Telegram (not is_cloud)
           const tgItems = clipboard.items.filter((it: any) => !it.is_cloud);
           if (tgItems.length > 0) {
-            const targetFolderId = cloudFolderId || "root";
+            if (!cloudFolderId || ["root", "google_drive", "trash", "starred", "shared_with_me"].includes(cloudFolderId)) {
+              toast.error("Cannot transfer files to root level or virtual sections. Please navigate inside My Drive first.");
+              return;
+            }
+            const targetFolderId = cloudFolderId;
             const fileIds = tgItems
               .filter((it: any) => it.type !== "folder" && !it.is_folder)
               .map((it: any) => it.id || it.file_unique_id)
@@ -810,8 +827,8 @@ export const FileExplorer = () => {
           } else {
             // Internal Google Drive Copy / Cut (Move)
             const targetFolderId = cloudFolderId || "root";
-            if (["trash", "starred", "shared_with_me"].includes(targetFolderId)) {
-              toast.error("Cannot paste items into Starred, Trash, or Shared with me. Please open a folder in My Drive.");
+            if (!cloudFolderId || ["root", "google_drive", "trash", "starred", "shared_with_me"].includes(targetFolderId)) {
+              toast.error("Cannot paste items into Google Drive root, Starred, Trash, or Shared with me. Please open a folder in My Drive.");
               return;
             }
 
@@ -1062,12 +1079,25 @@ export const FileExplorer = () => {
 
   const handleNewFolder = async (folderName: string) => {
     try {
+      if (isInboxMode || currentFolder === "Telegram Inbox" || currentApiPath === "/inbox") {
+        toast.error("Cannot create folders in Telegram Inbox. Inbox is reserved for incoming messages.");
+        return;
+      }
+      if (currentFolder === "Starred" || currentApiPath === "/starred") {
+        toast.error("Cannot create folders in Starred.");
+        return;
+      }
+      if (isEffectiveTrashMode || currentFolder === "Trash" || currentApiPath === "/trash") {
+        toast.error("Cannot create folders in Trash.");
+        return;
+      }
+
       if (isCloudMode) {
-        if (["trash", "starred", "shared_with_me"].includes(cloudFolderId)) {
-          toast.error("Cannot create folders here. Please navigate inside My Drive.");
+        if (!cloudFolderId || ["root", "google_drive", "trash", "starred", "shared_with_me"].includes(cloudFolderId)) {
+          toast.error("Cannot create folders at root level or in virtual sections. Please navigate inside My Drive first.");
           return;
         }
-        const effectiveParent = (cloudFolderId === "root" || cloudFolderId === "my_drive") ? "root" : cloudFolderId;
+        const effectiveParent = cloudFolderId === "my_drive" ? "root" : cloudFolderId;
         await api.createCloudFolder(cloudAccountId, folderName, effectiveParent);
         toast.success(`Folder "${folderName}" created in Google Drive`);
         setNewFolderDialogOpen(false);
@@ -1724,15 +1754,6 @@ export const FileExplorer = () => {
                     &bull; Copy/cut files here &amp; paste into Home to transfer to Telegram (0 disk usage)
                   </span>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setNewFolderDialogOpen(true)}
-                  className="h-7 text-xs font-medium px-3 gap-1.5 shrink-0 border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 text-sky-700 dark:text-sky-300"
-                >
-                  <FolderPlus className="w-3.5 h-3.5" />
-                  New Folder
-                </Button>
               </div>
             )}
 
@@ -1770,6 +1791,7 @@ export const FileExplorer = () => {
               isCloudMode={isCloudMode}
               cloudAccountId={cloudAccountId}
               cloudFolderId={cloudFolderId}
+              isInboxMode={isInboxMode}
             />
 
             {/* Pagination Controls */}
