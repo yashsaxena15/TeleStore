@@ -1418,7 +1418,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
         }}/>
       
       {/* Hidden directory input for directory uploads */}
-      <input type="file" ref={directoryInputRef} className="hidden" multiple {...{ webkitdirectory: "true" }} // TypeScript workaround - must be string for React
+      <input type="file" ref={directoryInputRef} className="hidden" multiple {...{ webkitdirectory: "true" }}
      onChange={(e) => {
             if (e.target.files && e.target.files.length > 0) {
                 setIsDirectoryUpload(true);

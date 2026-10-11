@@ -18,7 +18,7 @@
 
 ---
 
-**TeleStore** is a modern, high-performance, self-hosted Cloud Storage and Media Streaming Server powered by **FastAPI**, **React (TypeScript & Vite)**, **MongoDB**, **Pyrogram**, and **FFmpeg**. It transforms your private Telegram channels and groups into an unlimited personal cloud drive with Google Drive-like streaming, folder downloads, file management, real-time channel inbox syncing, and comprehensive storage analytics.
+**TeleStore** is a modern, high-performance, self-hosted Cloud Storage and Media Streaming Server powered by **FastAPI**, **React (JavaScript & Vite)**, **MongoDB**, **Pyrogram**, and **FFmpeg**. It transforms your private Telegram channels and groups into an unlimited personal cloud drive with Google Drive-like streaming, folder downloads, file management, real-time channel inbox syncing, and comprehensive storage analytics.
 
 ---
 

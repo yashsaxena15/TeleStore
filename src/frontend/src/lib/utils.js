@@ -27,7 +27,7 @@ const isTauriEnv = () => {
     }
     return false;
 };
-console.log('[utils.ts] Tauri detection at module load:', {
+console.log('[utils.js] Tauri detection at module load:', {
     isTauri: isTauriEnv(),
     authServiceResult: typeof window !== 'undefined' ? authService.isTauri() : undefined,
     hasWindowTAURI: typeof window !== 'undefined' && window.__TAURI__ !== undefined,

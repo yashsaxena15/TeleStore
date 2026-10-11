@@ -1,4 +1,4 @@
-// src/lib/logger.ts
+// src/lib/logger.js
 import { invoke } from '@tauri-apps/api/core';
 let log = null;
 let isTauriEnv = false;

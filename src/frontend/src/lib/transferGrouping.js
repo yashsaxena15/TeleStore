@@ -1,4 +1,4 @@
-// src/frontend/src/lib/transferGrouping.ts
+// src/frontend/src/lib/transferGrouping.js
 export function groupRemoteTransfers(remoteTransfers) {
     const groupMap = new Map();
     const singleRemoteItems = [];
