@@ -39,6 +39,7 @@ export const TransfersWidget = () => {
     cancelDownload,
     cancelRemoteTransfer,
     cancelRemoteGroup,
+    resumeRemoteGroup,
     pauseAll,
     resumeAll
   } = useTransferManager();
@@ -70,7 +71,7 @@ export const TransfersWidget = () => {
 
   // Show only if there are active items, or if recently expanded
   const recentItems = allItems
-    .filter(i => i.status === "uploading" || i.status === "downloading" || i.status === "uploading_tg" || i.status === "paused" || i.status === "queued")
+    .filter(i => i.status === "uploading" || i.status === "downloading" || i.status === "uploading_tg" || i.status === "paused" || i.status === "queued" || i.status === "paused_quota" || i.status === "discovering")
     .slice(0, 6);
 
   if (recentItems.length === 0 && !isExpanded) {
@@ -173,6 +174,8 @@ export const TransfersWidget = () => {
               const isUpload = item.type === "upload";
               const isTransferring = item.status === "uploading" || item.status === "downloading" || item.status === "uploading_tg";
               const isPaused = item.status === "paused";
+              const isPausedQuota = item.status === "paused_quota" || Boolean((item as any).isPausedQuota);
+              const isDiscovering = item.status === "discovering" || Boolean((item as any).isDiscovering);
               const transferred = item.bytesUploaded || (item.downloaded || 0);
               const total = item.filesize || (item.size || 0);
 
@@ -184,7 +187,11 @@ export const TransfersWidget = () => {
                   <div className="flex items-center justify-between gap-2 mb-1.5">
                     <div className="flex items-center gap-1.5 min-w-0 flex-1">
                       <span className={`p-1 rounded shrink-0 ${
-                        isRemote
+                        isPausedQuota
+                          ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                          : isDiscovering
+                          ? "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 animate-pulse"
+                          : isRemote
                           ? "bg-purple-500/15 text-purple-600 dark:text-purple-400"
                           : isUpload
                           ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
@@ -214,9 +221,15 @@ export const TransfersWidget = () => {
                           )}
                           {isRemote && !isGroup && (
                             <span className={`text-[9px] px-1 py-0.2 rounded font-normal ${
+                              isPausedQuota ? "bg-amber-500/20 text-amber-500 font-semibold" :
+                              isDiscovering ? "bg-indigo-500/20 text-indigo-400 font-semibold" :
                               isPaused ? "bg-amber-500/20 text-amber-500" : "bg-purple-500/20 text-purple-400"
                             }`}>
-                              {isPaused
+                              {isPausedQuota
+                                ? "Quota 24h"
+                                : isDiscovering
+                                ? "Discovering"
+                                : isPaused
                                 ? "Paused"
                                 : (item as any).source_type === "magnet"
                                 ? "Magnet"
@@ -232,7 +245,12 @@ export const TransfersWidget = () => {
                           )}
                         </div>
                         {isRemote && (item as any).phase && (
-                          <div className={`text-[10px] truncate ${isPaused ? "text-amber-500 font-medium" : "text-muted-foreground"}`}>
+                          <div className={`text-[10px] truncate ${
+                            isPausedQuota ? "text-amber-500 font-medium" :
+                            isDiscovering ? "text-indigo-400 font-medium" :
+                            isPaused ? "text-amber-500 font-medium" :
+                            "text-muted-foreground"
+                          }`}>
                             {(item as any).phase}
                           </div>
                         )}
@@ -240,6 +258,21 @@ export const TransfersWidget = () => {
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
+                      {isPausedQuota && (
+                        <button
+                          className="p-1 text-amber-500 hover:text-amber-600 rounded"
+                          onClick={() => {
+                            if (isGroup) {
+                              resumeRemoteGroup((item as any).group_id);
+                            } else {
+                              resumeRemoteGroup(item.id);
+                            }
+                          }}
+                          title="Resume Now"
+                        >
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                        </button>
+                      )}
                       {!isRemote && isTransferring && (
                         <button
                           className="p-1 text-muted-foreground hover:text-foreground rounded"
@@ -281,7 +314,7 @@ export const TransfersWidget = () => {
                   {/* Progress Bar */}
                   <Progress
                     value={item.progress}
-                    className={`h-1 w-full ${isPaused ? "[&>div]:bg-amber-500" : isRemote ? "[&>div]:bg-purple-500" : ""}`}
+                    className={`h-1 w-full ${isPausedQuota || isPaused ? "[&>div]:bg-amber-500" : isDiscovering ? "[&>div]:bg-indigo-500" : isRemote ? "[&>div]:bg-purple-500" : ""}`}
                   />
 
                   {/* Stats */}
@@ -291,6 +324,10 @@ export const TransfersWidget = () => {
                     </span>
                     {isTransferring && item.speed ? (
                       <span>{formatSpeed(item.speed)}</span>
+                    ) : isPausedQuota ? (
+                      <span className="text-amber-500 font-medium">Quota Hit (24h)</span>
+                    ) : isDiscovering ? (
+                      <span className="text-indigo-400 font-medium">Scanning...</span>
                     ) : (
                       <span className="capitalize">{item.status}</span>
                     )}

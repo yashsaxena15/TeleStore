@@ -46,6 +46,7 @@ export const Transfers = () => {
     retryDownload,
     cancelRemoteTransfer,
     cancelRemoteGroup,
+    resumeRemoteGroup,
     pauseAll,
     resumeAll,
     cancelAll,
@@ -99,8 +100,8 @@ export const Transfers = () => {
 
   // Sort: active/paused items first, then completed/failed by start time
   transferItems.sort((a, b) => {
-    const aActive = a.status === "uploading" || a.status === "downloading" || a.status === "uploading_tg" || a.status === "queued" || a.status === "paused";
-    const bActive = b.status === "uploading" || b.status === "downloading" || b.status === "uploading_tg" || b.status === "queued" || b.status === "paused";
+    const aActive = a.status === "uploading" || a.status === "downloading" || a.status === "uploading_tg" || a.status === "queued" || a.status === "paused" || a.status === "paused_quota" || a.status === "discovering";
+    const bActive = b.status === "uploading" || b.status === "downloading" || b.status === "uploading_tg" || b.status === "queued" || b.status === "paused" || b.status === "paused_quota" || b.status === "discovering";
     if (aActive && !bActive) return -1;
     if (!aActive && bActive) return 1;
     const aTime = (a as any).startTime ? new Date((a as any).startTime).getTime() : 0;
@@ -276,6 +277,8 @@ export const Transfers = () => {
                 const isUpload = item.type === "upload";
                 const isTransferring = item.status === "uploading" || item.status === "downloading" || item.status === "uploading_tg";
                 const isPaused = item.status === "paused";
+                const isPausedQuota = item.status === "paused_quota" || Boolean((item as any).isPausedQuota);
+                const isDiscovering = item.status === "discovering" || Boolean((item as any).isDiscovering);
                 const isCompleted = item.status === "completed";
                 const isFailed = item.status === "failed";
                 const isQueued = item.status === "queued";
@@ -295,9 +298,11 @@ export const Transfers = () => {
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0 flex-1">
                           <div className={`p-2 rounded-lg shrink-0 ${
-                            isRemote ? "bg-purple-100 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400"
-                                     : isUpload ? "bg-blue-100 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400"
-                                     : "bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400"
+                            isPausedQuota ? "bg-amber-100 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400"
+                              : isDiscovering ? "bg-indigo-100 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 animate-pulse"
+                              : isRemote ? "bg-purple-100 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400"
+                              : isUpload ? "bg-blue-100 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400"
+                              : "bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400"
                           }`}>
                             {isGroup ? (
                               <FolderArchive className="w-5 h-5" />
@@ -324,7 +329,11 @@ export const Transfers = () => {
                                          : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
                               }`}>
                                 {isGroup
-                                  ? (item as any).group_type === "torrent" ? "Torrent Leech" : "Folder Leech"
+                                  ? (item as any).group_type === "torrent"
+                                    ? "Torrent Leech"
+                                    : (item as any).group_type === "file"
+                                    ? "Multi-Node Leech ⚡"
+                                    : "Folder Leech"
                                   : isRemote
                                   ? (item as any).source_type === "magnet"
                                     ? "Magnet Leech"
@@ -333,10 +342,10 @@ export const Transfers = () => {
                                     : "Cloud Leech"
                                   : isUpload ? "Upload" : "Download"}
                               </span>
-                              {/* Group file counter badge */}
+                              {/* Group file/part counter badge */}
                               {isGroup && (
                                 <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300 border border-indigo-500/20">
-                                  {(item as any).completedCount}/{(item as any).totalCount} files
+                                  {(item as any).completedCount}/{(item as any).totalCount} {(item as any).group_type === "file" ? "parts" : "files"}
                                 </span>
                               )}
                               {/* Peer Count Badge */}
@@ -348,19 +357,26 @@ export const Transfers = () => {
                               {/* Status Badge */}
                               <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
                                 isCompleted ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" :
+                                isPausedQuota ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-500/30 animate-pulse font-semibold" :
+                                isDiscovering ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-500/30 animate-pulse font-semibold" :
                                 isPaused ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" :
                                 isFailed ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" :
                                 isQueued ? "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" :
                                 "bg-primary/10 text-primary"
                               }`}>
-                                {item.status.toUpperCase()}
+                                {isPausedQuota ? "QUOTA LIMIT (24H)" : isDiscovering ? "DISCOVERING FILES..." : item.status.toUpperCase()}
                               </span>
                             </div>
 
                             {/* Phase or Destination info */}
                             <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 flex-wrap">
                               {isRemote && (item as any).phase && (
-                                <span className={`font-medium ${isPaused ? "text-amber-600 dark:text-amber-400" : "text-purple-600 dark:text-purple-400"}`}>
+                                <span className={`font-medium ${
+                                  isPausedQuota ? "text-amber-600 dark:text-amber-400 font-semibold" :
+                                  isDiscovering ? "text-indigo-600 dark:text-indigo-400 font-semibold" :
+                                  isPaused ? "text-amber-600 dark:text-amber-400" :
+                                  "text-purple-600 dark:text-purple-400"
+                                }`}>
                                   {(item as any).phase}
                                 </span>
                               )}
@@ -412,6 +428,25 @@ export const Transfers = () => {
                             </Button>
                           )}
 
+                          {isPausedQuota && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 px-2.5 text-xs flex items-center gap-1.5 text-amber-700 border-amber-400 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-600 font-medium shadow-xs"
+                              title="Bypass 24h wait and attempt transfer immediately"
+                              onClick={() => {
+                                if (isGroup) {
+                                  resumeRemoteGroup((item as any).group_id);
+                                } else {
+                                  resumeRemoteGroup(item.id);
+                                }
+                              }}
+                            >
+                              <Play className="w-3.5 h-3.5 fill-current" />
+                              Resume Now
+                            </Button>
+                          )}
+
                           {!isRemote && isTransferring && (
                             <Button
                               variant="outline"
@@ -436,7 +471,7 @@ export const Transfers = () => {
                             </Button>
                           )}
 
-                          {(isTransferring || isPaused || isQueued) && (
+                          {(isTransferring || isPaused || isQueued || isPausedQuota || isDiscovering) && (
                             <Button
                               variant="outline"
                               size="icon"
@@ -484,6 +519,28 @@ export const Transfers = () => {
                         </div>
                       </div>
 
+                      {/* Quota Limit Banner */}
+                      {isPausedQuota && (
+                        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <span className="font-semibold">Google Drive Quota Hit: </span>
+                            Google has temporarily rate-limited downloads. Remaining files are safely paused in queue and will automatically resume once the 24h cooldown expires. Or click <strong>Resume Now</strong> above to retry anytime.
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Folder Discovery Banner */}
+                      {isDiscovering && (
+                        <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-lg p-2.5 text-xs text-indigo-800 dark:text-indigo-200 flex items-center gap-2">
+                          <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin shrink-0" />
+                          <div className="flex-1">
+                            <span className="font-semibold">Analyzing Google Drive Folder: </span>
+                            Crawling files and folder structure in the background. Downloads will start as files are resolved.
+                          </div>
+                        </div>
+                      )}
+
                       {/* Progress Bar */}
                       <Progress
                         value={item.progress}
@@ -512,13 +569,15 @@ export const Transfers = () => {
                                 <div className="flex items-center gap-2 shrink-0">
                                   <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
                                     sub.status === 'completed' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' :
+                                    sub.status === 'paused_quota' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-500/20' :
+                                    sub.status === 'discovering' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300' :
                                     sub.status === 'downloading' || sub.status === 'uploading_tg' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' :
                                     sub.status === 'cancelled' ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' :
-                                    'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                                    'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
                                   }`}>
-                                    {sub.status.toUpperCase()}
+                                    {sub.status === 'paused_quota' ? 'PAUSED (QUOTA)' : sub.status.toUpperCase()}
                                   </span>
-                                  {(sub.status === 'downloading' || sub.status === 'uploading_tg' || sub.status === 'queued') && (
+                                  {(sub.status === 'downloading' || sub.status === 'uploading_tg' || sub.status === 'queued' || sub.status === 'paused_quota') && (
                                     <Button
                                       variant="ghost"
                                       size="icon"

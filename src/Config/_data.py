@@ -32,6 +32,10 @@ SESSION_SECRET_KEY = os.getenv(
     "SESSION_SECRET_KEY",
     "f6d2e3b9a0f43d9a2e6a56b2d3175cd9c05bbfe31d95ed2a7306b57cb1a8b6f0"
 )
+WORKER_SECRET_KEY = os.getenv(
+    "WORKER_SECRET_KEY",
+    "tele_wsec_7f9a2b8c3d4e5f601a2b3c4d5e6f7a8b"
+)
 
 # Admin Credentials & Authorized Emails (Configurable via .env)
 DEFAULT_ADMIN_USERNAME = os.getenv("DEFAULT_ADMIN_USERNAME", "admin")

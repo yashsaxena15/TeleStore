@@ -21,13 +21,14 @@ export interface RemoteTransferItem {
   speed: number;
   eta_seconds: number;
   eta: number;
-  status: 'queued' | 'downloading' | 'uploading_tg' | 'completed' | 'failed' | 'cancelled';
+  status: 'queued' | 'downloading' | 'uploading_tg' | 'completed' | 'failed' | 'cancelled' | 'paused_quota' | 'discovering';
   phase?: string;
   error_message?: string;
   is_vault?: boolean;
+  cooldown_until?: string;
   group_id?: string;
   group_name?: string;
-  group_type?: 'folder' | 'torrent';
+  group_type?: 'folder' | 'torrent' | 'file';
   group_total_items?: number;
   type: 'remote';
   created_at: string;
@@ -69,7 +70,7 @@ export const useTransferManager = () => {
   }, []);
 
   const hasActiveRemote = useMemo(
-    () => remoteTransfers.some(r => r.status === 'downloading' || r.status === 'uploading_tg' || r.status === 'queued'),
+    () => remoteTransfers.some(r => r.status === 'downloading' || r.status === 'uploading_tg' || r.status === 'queued' || r.status === 'discovering' || r.status === 'paused_quota'),
     [remoteTransfers]
   );
 
@@ -98,7 +99,7 @@ export const useTransferManager = () => {
   );
 
   const activeRemote = useMemo(
-    () => remoteTransfers.filter(r => r.status === 'downloading' || r.status === 'uploading_tg' || r.status === 'queued'),
+    () => remoteTransfers.filter(r => r.status === 'downloading' || r.status === 'uploading_tg' || r.status === 'queued' || r.status === 'discovering' || r.status === 'paused_quota'),
     [remoteTransfers]
   );
 
@@ -148,11 +149,20 @@ export const useTransferManager = () => {
   const cancelRemoteGroup = useCallback(async (groupId: string) => {
     try {
       await api.cancelRemoteGroup(groupId);
-      setRemoteTransfers(prev => prev.map(t => t.group_id === groupId && (t.status === 'queued' || t.status === 'downloading' || t.status === 'uploading_tg') ? { ...t, status: 'cancelled', phase: 'Cancelled by user' } : t));
+      setRemoteTransfers(prev => prev.map(t => t.group_id === groupId && (t.status === 'queued' || t.status === 'downloading' || t.status === 'uploading_tg' || t.status === 'discovering' || t.status === 'paused_quota') ? { ...t, status: 'cancelled', phase: 'Cancelled by user' } : t));
     } catch (e) {
       console.error(e);
     }
   }, []);
+
+  const resumeRemoteGroup = useCallback(async (groupId: string) => {
+    try {
+      await api.resumeRemoteGroup(groupId);
+      fetchRemoteTransfers();
+    } catch (e) {
+      console.error(e);
+    }
+  }, [fetchRemoteTransfers]);
 
   const clearCompletedRemote = useCallback(async () => {
     try {
@@ -170,7 +180,7 @@ export const useTransferManager = () => {
     transferManager.cancelAll();
     // Cancel all active remote tasks as well
     remoteTransfers
-      .filter(r => r.status === 'downloading' || r.status === 'uploading_tg' || r.status === 'queued')
+      .filter(r => r.status === 'downloading' || r.status === 'uploading_tg' || r.status === 'queued' || r.status === 'discovering' || r.status === 'paused_quota')
       .forEach(r => cancelRemoteTransfer(r.task_id));
   }, [remoteTransfers, cancelRemoteTransfer]);
 
@@ -198,6 +208,7 @@ export const useTransferManager = () => {
     retryDownload,
     cancelRemoteTransfer,
     cancelRemoteGroup,
+    resumeRemoteGroup,
     clearCompletedRemote,
     refreshRemoteTransfers: fetchRemoteTransfers,
     pauseAll,

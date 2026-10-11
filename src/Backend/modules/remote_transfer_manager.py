@@ -9,11 +9,14 @@ import logging
 import secrets
 import threading
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import aiohttp
 import aiofiles
 import urllib.parse
 from pymongo import MongoClient
+
+import math
+import requests
 
 from src.Config import DATABASE_URL, APP_NAME
 from src.Database import database
@@ -23,6 +26,31 @@ from .torrent_manager import torrent_manager, parse_torrent_bytes
 
 logger = logging.getLogger("remote_transfers")
 
+def get_file_type(fname: str) -> str:
+    ext = os.path.splitext(fname)[1].lower()
+    if ext in ['.mp4', '.mkv', '.avi', '.mov', '.webm']:
+        return "video"
+    elif ext in ['.mp3', '.wav', '.ogg', '.flac', '.m4a']:
+        return "audio"
+    elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+        return "photo"
+    return "document"
+
+class GoogleDriveQuotaExceededError(RuntimeError):
+    """Raised when Google Drive rate limits public downloads due to daily quota exhaustion."""
+    pass
+
+def is_gdrive_quota_error(err: Exception) -> bool:
+    if isinstance(err, GoogleDriveQuotaExceededError):
+        return True
+    msg = str(err).lower()
+    return (
+        "too many users have viewed or downloaded" in msg or
+        "too many users have downloaded" in msg or
+        "quota exceeded" in msg or
+        "download quota" in msg
+    )
+
 def get_remote_db():
     if hasattr(database, "db") and database.db is not None:
         return database.db
@@ -30,6 +58,213 @@ def get_remote_db():
     return client[APP_NAME]
 
 MODERN_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+
+def probe_resource_for_range(
+    url: str,
+    gdrive_id: Optional[str] = None,
+    custom_headers: Optional[Dict[str, str]] = None
+):
+    """
+    Probes whether a URL or Google Drive file supports HTTP Range requests and resolves total file size & filename.
+    Returns: (supports_range: bool, direct_url: str, filesize: int, filename: Optional[str])
+    """
+    import bs4
+
+    session = requests.Session()
+    session.headers.update({"User-Agent": MODERN_USER_AGENT})
+    if custom_headers:
+        session.headers.update(custom_headers)
+
+    # 1. Google Drive Probe & Confirmation Link Resolution
+    if gdrive_id or ("drive.google.com" in url or "docs.google.com" in url):
+        gid = gdrive_id
+        if not gid:
+            m = re.search(r'/file/d/([a-zA-Z0-9_-]+)', url) or re.search(r'id=([a-zA-Z0-9_-]+)', url)
+            if m:
+                gid = m.group(1)
+
+        direct_url = f"https://drive.google.com/uc?id={gid}&export=download" if gid else url
+        final_url = direct_url
+        try:
+            resp = session.get(direct_url, stream=True, allow_redirects=True, timeout=12)
+            content_type = resp.headers.get("Content-Type", "").lower()
+            if content_type.startswith("text/html"):
+                html_bytes = b""
+                for chunk in resp.iter_content(chunk_size=16384):
+                    html_bytes += chunk
+                    if len(html_bytes) >= 131072:
+                        break
+                html_text = html_bytes.decode("utf-8", errors="replace")
+
+                confirm_url = None
+                try:
+                    soup = bs4.BeautifulSoup(html_text, "html.parser")
+                    form = soup.select_one("#download-form") or soup.select_one("#downloadForm") or soup.find("form", action=re.compile(r"download"))
+                    if form and form.get("action"):
+                        action = form["action"]
+                        if not action.startswith("http"):
+                            action = urllib.parse.urljoin("https://drive.usercontent.google.com", action)
+                        query_params = urllib.parse.parse_qs(urllib.parse.urlsplit(action).query)
+                        for param in form.find_all("input", attrs={"type": "hidden"}):
+                            if param.get("name") and param.get("value") is not None:
+                                query_params[param["name"]] = [param["value"]]
+                        url_parts = urllib.parse.urlsplit(action)
+                        new_query = urllib.parse.urlencode(query_params, doseq=True)
+                        confirm_url = urllib.parse.urlunsplit(url_parts._replace(query=new_query))
+                except Exception:
+                    pass
+
+                if not confirm_url:
+                    m_href = re.search(r'href="(\/uc\?export=download[^"]+)"', html_text) or re.search(r'href="(https:\/\/[^"]*drive\.usercontent\.google\.com\/download[^"]+)"', html_text)
+                    if m_href:
+                        confirm_url = m_href.group(1).replace("&amp;", "&")
+                        if not confirm_url.startswith("http"):
+                            confirm_url = "https://docs.google.com" + confirm_url
+
+                if not confirm_url:
+                    for k, v in resp.cookies.items():
+                        if k.startswith("download_warning"):
+                            confirm_url = f"https://drive.usercontent.google.com/download?id={gid}&export=download&confirm={v}"
+                            break
+
+                if confirm_url:
+                    final_url = confirm_url
+
+            # Probe Range 0-0 on resolved Google Drive download URL
+            h = {"Range": "bytes=0-0"}
+            with session.get(final_url, headers=h, stream=True, allow_redirects=True, timeout=8) as r_probe:
+                fname = None
+                cd = r_probe.headers.get("Content-Disposition", "")
+                if "filename=" in cd:
+                    m = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', cd)
+                    if m: fname = m.group(1).strip()
+                if not fname:
+                    fname = f"gdrive_file_{gid}"
+
+                tot = 0
+                if r_probe.status_code == 206:
+                    cr = r_probe.headers.get("Content-Range", "")
+                    if "/" in cr:
+                        try: tot = int(cr.split("/")[-1])
+                        except: pass
+                    return True, final_url, tot, fname
+                elif r_probe.status_code == 200:
+                    tot = int(r_probe.headers.get("Content-Length", 0))
+                    return False, final_url, tot, fname
+        except Exception as e:
+            logger.warning(f"Google Drive probe failed: {e}")
+        return False, url, 0, None
+
+    # 2. Direct HTTP / HTTPS URL Probe
+    try:
+        h = {"Range": "bytes=0-0"}
+        with session.get(url, headers=h, stream=True, allow_redirects=True, timeout=6) as resp:
+            fname = None
+            cd = resp.headers.get("Content-Disposition", "")
+            if "filename=" in cd:
+                m = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', cd)
+                if m: fname = m.group(1).strip()
+            if not fname:
+                fname = os.path.basename(urllib.parse.urlsplit(resp.url).path) or "download.bin"
+
+            if resp.status_code == 206:
+                cr = resp.headers.get("Content-Range", "")
+                tot = 0
+                if "/" in cr:
+                    try: tot = int(cr.split("/")[-1])
+                    except: pass
+                return True, resp.url, tot, fname
+            elif resp.status_code == 200:
+                tot = int(resp.headers.get("Content-Length", 0))
+                return False, resp.url, tot, fname
+    except Exception as e:
+        logger.warning(f"Direct URL probe failed: {e}")
+
+    return False, url, 0, None
+
+async def finalize_multipart_group_if_ready(group_id: str, sample_task_doc: dict) -> bool:
+    coll = get_remote_db()["RemoteTransfers"]
+    now = datetime.now(timezone.utc)
+
+    # 1. Check if any part in this group is still incomplete
+    incomplete_count = coll.count_documents({
+        "group_id": group_id,
+        "is_range_part": True,
+        "status": {"$ne": "completed"}
+    })
+    if incomplete_count > 0:
+        logger.info(f"[MULTI_RANGE] Group {group_id}: {incomplete_count} parts still in progress...")
+        return False
+
+    # 2. Atomically acquire lock on group
+    lock_doc = coll.find_one_and_update(
+        {
+            "group_id": group_id,
+            "is_range_part": True,
+            "is_multipart_finalized": {"$ne": True}
+        },
+        {"$set": {"is_multipart_finalized": True}}
+    )
+    if not lock_doc:
+        logger.info(f"[MULTI_RANGE] Group {group_id} already finalized.")
+        return True
+
+    # 3. Gather all parts sorted by part_index
+    part_docs = list(coll.find({"group_id": group_id, "is_range_part": True}).sort("part_index", 1))
+    parts = []
+    total_file_size = 0
+    for p in part_docs:
+        c_info = p.get("completed_part_info")
+        if c_info:
+            parts.append(c_info)
+            total_file_size += c_info.get("part_size", 0)
+
+    if not parts or len(parts) != len(part_docs):
+        logger.error(f"[MULTI_RANGE] Group {group_id}: Missing completed_part_info (found {len(parts)}/{len(part_docs)})!")
+        return False
+
+    dest_path = sample_task_doc.get("destination_path", "/Home")
+    user_id = sample_task_doc["user_id"]
+    chat_id = sample_task_doc["chat_id"]
+    file_name = sample_task_doc.get("filename") or "download.bin"
+    is_vault = bool(sample_task_doc.get("is_vault", False))
+    file_type = get_file_type(file_name)
+
+    # Ensure folder path exists
+    database.Files.create_folder_path(dest_path, owner_id=str(user_id))
+
+    first_uid = parts[0].get("file_unique_id", f"mp_{parts[0]['message_id']}")
+    PART_MAX_SIZE = 1950 * 1024 * 1024
+    database.Files.add_multipart_file(
+        chat_id=chat_id,
+        thumbnail=parts[0].get("thumbnail"),
+        file_type=file_type,
+        file_unique_id=first_uid,
+        file_size=sample_task_doc.get("total_filesize") or total_file_size,
+        file_name=file_name,
+        file_caption=f"Uploaded multi-part file: {file_name}",
+        parts=parts,
+        file_path=dest_path,
+        owner_id=str(user_id),
+        part_size=PART_MAX_SIZE,
+        is_vault=is_vault
+    )
+
+    coll.update_many(
+        {"group_id": group_id},
+        {
+            "$set": {
+                "phase": f"Completed & Saved to Telegram ({len(parts)} parts) ☁️",
+                "progress": 100.0,
+                "speed_bps": 0,
+                "eta_seconds": 0,
+                "updated_at": now
+            }
+        }
+    )
+    logger.info(f"[MULTI_RANGE] Group {group_id}: Successfully finalized multi-part file '{file_name}' ({len(parts)} parts) into database!")
+    return True
+
 
 class PipelinedStreamWriter:
     """
@@ -241,16 +476,77 @@ class RemoteTransferManager:
                     continue
 
                 coll = get_remote_db()["RemoteTransfers"]
-                # Find queued tasks ordered by created_at ascending
-                queued_cursor = coll.find({"status": "queued"}).sort("created_at", 1).limit(5)
-                queued_tasks = list(queued_cursor)
 
-                for item in queued_tasks:
-                    task_id = item["task_id"]
-                    if task_id not in self.active_tasks:
-                        # Launch task wrapper
-                        t = asyncio.create_task(self._execute_task_wrapper(item))
-                        self.active_tasks[task_id] = t
+                # Auto-resume any tasks whose quota cooldown has expired (e.g. 24h passed)
+                now_utc = datetime.now(timezone.utc)
+                resumed_res = coll.update_many(
+                    {
+                        "status": "paused_quota",
+                        "cooldown_until": {"$lte": now_utc}
+                    },
+                    {
+                        "$set": {
+                            "status": "queued",
+                            "phase": "Queued (Resumed after quota reset)",
+                            "updated_at": now_utc
+                        },
+                        "$unset": {"cooldown_until": ""}
+                    }
+                )
+                if resumed_res.modified_count > 0:
+                    logger.info(f"Auto-resumed {resumed_res.modified_count} tasks from Google Drive quota cooldown.")
+
+                # Watchdog: Re-queue tasks abandoned by dead/offline workers
+                stale_threshold = now_utc - timedelta(seconds=120)
+                abandoned_res = coll.update_many(
+                    {
+                        "status": "downloading",
+                        "claimed_by": {"$nin": [None, "master-vm1"]},
+                        "updated_at": {"$lte": stale_threshold}
+                    },
+                    {
+                        "$set": {
+                            "status": "queued",
+                            "phase": "Re-queued (Worker offline/timeout)",
+                            "updated_at": now_utc
+                        },
+                        "$unset": {"claimed_by": "", "claimed_at": ""}
+                    }
+                )
+                if abandoned_res.modified_count > 0:
+                    logger.warning(f"[WORKER_WATCHDOG] Re-queued {abandoned_res.modified_count} stale tasks from inactive workers.")
+
+                # Concurrency limit for local processing on VM 1 (leave remaining tasks for distributed workers)
+                max_local_concurrent = int(os.getenv("MAX_LOCAL_CONCURRENT", "1"))
+                available_slots = max(0, max_local_concurrent - len(self.active_tasks))
+
+                if available_slots > 0:
+                    # Find queued tasks that have NOT been claimed by an external worker
+                    queued_cursor = coll.find({
+                        "status": "queued",
+                        "claimed_by": {"$exists": False}
+                    }).sort("created_at", 1).limit(available_slots)
+                    queued_tasks = list(queued_cursor)
+
+                    for item in queued_tasks:
+                        task_id = item["task_id"]
+                        if task_id not in self.active_tasks:
+                            # Claim task locally
+                            coll.update_one(
+                                {"task_id": task_id, "status": "queued"},
+                                {
+                                    "$set": {
+                                        "status": "downloading",
+                                        "claimed_by": "master-vm1",
+                                        "claimed_at": now_utc,
+                                        "phase": "Starting local transfer...",
+                                        "updated_at": now_utc
+                                    }
+                                }
+                            )
+                            # Launch task wrapper
+                            t = asyncio.create_task(self._execute_task_wrapper(item))
+                            self.active_tasks[task_id] = t
 
                 await asyncio.sleep(2)
             except asyncio.CancelledError:
@@ -319,28 +615,211 @@ class RemoteTransferManager:
         # Check if Google Drive Folder
         folder_match = re.search(r'/drive/folders/([a-zA-Z0-9_-]+)', url) or re.search(r'id=([a-zA-Z0-9_-]+)', url) if 'folders' in url else None
         
-        created_tasks = []
-
         if folder_match:
             folder_id = folder_match.group(1)
-            logger.info(f"Resolving Google Drive folder: {folder_id}")
-            
-            # Temporary resolve directory to capture root folder name
-            resolve_output_dir = f"/tmp/gdrive_resolve_{secrets.token_hex(4)}/"
-            os.makedirs(resolve_output_dir, exist_ok=True)
+            group_id = f"grp_{secrets.token_hex(6)}"
+            disc_task_id = f"disc_{group_id}"
 
-            def _resolve_folder():
-                from gdown.download_folder import download_folder
-                return download_folder(id=folder_id, output=resolve_output_dir, skip_download=True, quiet=True, user_agent=MODERN_USER_AGENT)
+            # Create placeholder discovery task immediately to return instantly to frontend
+            disc_doc = {
+                "task_id": disc_task_id,
+                "user_id": str(user_id),
+                "chat_id": chat_id,
+                "source_url": url,
+                "gdrive_id": folder_id,
+                "source_type": "gdrive_folder",
+                "destination_path": clean_dest,
+                "filename": "Google Drive Folder",
+                "filesize": 0,
+                "transferred_bytes": 0,
+                "speed_bps": 0,
+                "progress": 0,
+                "eta_seconds": 0,
+                "status": "discovering",
+                "phase": "🔍 Analyzing folder & discovering files in background...",
+                "error_message": None,
+                "is_vault": is_vault,
+                "group_id": group_id,
+                "group_name": "Google Drive Folder",
+                "group_type": "folder",
+                "group_total_items": 0,
+                "created_at": now,
+                "updated_at": now
+            }
+            coll.insert_one(disc_doc)
+            disc_doc["_id"] = str(disc_doc["_id"])
 
-            try:
-                folder_files = await asyncio.to_thread(_resolve_folder)
-            except Exception as e:
-                logger.error(f"Failed to resolve GDrive folder: {e}")
-                raise ValueError(f"Could not access Google Drive folder. Please make sure the folder is public ('Anyone with the link can view'). Error: {e}")
-            finally:
-                shutil.rmtree(resolve_output_dir, ignore_errors=True)
+            # Launch background discovery task without blocking the HTTP request
+            asyncio.create_task(
+                self._async_discover_folder(
+                    disc_task_id=disc_task_id,
+                    group_id=group_id,
+                    folder_id=folder_id,
+                    url=url,
+                    user_id=str(user_id),
+                    chat_id=chat_id,
+                    clean_dest=clean_dest,
+                    is_vault=is_vault
+                )
+            )
 
+            return [disc_doc]
+
+        # Check if Google Drive Single File
+        gdrive_file_id = None
+        file_match = re.search(r'/file/d/([a-zA-Z0-9_-]+)', url) or re.search(r'id=([a-zA-Z0-9_-]+)', url)
+        if file_match and ('drive.google.com' in url or 'docs.google.com' in url):
+            gdrive_file_id = file_match.group(1)
+
+        source_type = "gdrive_file" if gdrive_file_id else "direct_url"
+
+        # Check if Multi-Range Chunking is applicable for Large Single Files
+        PART_MAX_SIZE = int(os.getenv("MULTI_RANGE_PART_SIZE_MB", "1950")) * 1024 * 1024
+        min_split_size = int(os.getenv("MULTI_RANGE_MIN_SIZE_MB", "1950")) * 1024 * 1024
+
+        # Probe resource for Range support, total file size, and direct URL
+        probe_task = asyncio.to_thread(
+            probe_resource_for_range,
+            url=url,
+            gdrive_id=gdrive_file_id,
+            custom_headers=custom_headers
+        )
+        try:
+            supports_range, final_url, probed_size, probed_filename = await asyncio.wait_for(probe_task, timeout=6.0)
+        except Exception as pe:
+            logger.debug(f"Resource probe skipped/timed out: {pe}")
+            supports_range, final_url, probed_size, probed_filename = False, url, (custom_filesize or 0), custom_filename
+
+        effective_size = probed_size or custom_filesize or 0
+        effective_filename = custom_filename or probed_filename or "download.bin"
+
+        # If Range headers are supported AND file exceeds split threshold, split into parallel part tasks!
+        if supports_range and effective_size >= min_split_size:
+            num_parts = math.ceil(effective_size / PART_MAX_SIZE)
+            if num_parts >= 2:
+                mp_group_id = f"grp_mp_{secrets.token_hex(6)}"
+                created_tasks = []
+                for part_idx in range(1, num_parts + 1):
+                    p_start = (part_idx - 1) * PART_MAX_SIZE
+                    p_end = min(effective_size - 1, part_idx * PART_MAX_SIZE - 1)
+                    p_size = p_end - p_start + 1
+                    p_tid = f"rt_{secrets.token_hex(6)}"
+
+                    p_doc = {
+                        "task_id": p_tid,
+                        "user_id": str(user_id),
+                        "chat_id": chat_id,
+                        "source_url": final_url,
+                        "gdrive_id": gdrive_file_id,
+                        "source_type": source_type,
+                        "destination_path": clean_dest,
+                        "filename": effective_filename,
+                        "filesize": p_size,
+                        "total_filesize": effective_size,
+                        "transferred_bytes": 0,
+                        "speed_bps": 0,
+                        "progress": 0,
+                        "eta_seconds": 0,
+                        "status": "queued",
+                        "phase": f"Queued (Part {part_idx}/{num_parts})",
+                        "error_message": None,
+                        "is_vault": is_vault,
+                        "is_range_part": True,
+                        "range_start": p_start,
+                        "range_end": p_end,
+                        "part_index": part_idx,
+                        "total_parts": num_parts,
+                        "part_size": p_size,
+                        "group_id": mp_group_id,
+                        "group_name": effective_filename,
+                        "group_type": "file",
+                        "group_total_items": num_parts,
+                        "created_at": now,
+                        "updated_at": now
+                    }
+                    if custom_headers:
+                        p_doc["custom_headers"] = custom_headers
+                    if post_action_delete:
+                        p_doc["post_action_delete"] = True
+                    if cloud_account_id:
+                        p_doc["cloud_account_id"] = cloud_account_id
+                    if cloud_file_id:
+                        p_doc["cloud_file_id"] = cloud_file_id
+
+                    coll.insert_one(p_doc)
+                    p_doc["_id"] = str(p_doc["_id"])
+                    created_tasks.append(p_doc)
+
+                logger.info(
+                    f"[MULTI_RANGE] Split '{effective_filename}' ({effective_size / 1024 / 1024:.1f} MB) "
+                    f"into {num_parts} parallel range parts under group {mp_group_id}"
+                )
+                return created_tasks
+
+        # Single task fallback if not split
+        task_id = f"rt_{secrets.token_hex(6)}"
+        doc = {
+            "task_id": task_id,
+            "user_id": str(user_id),
+            "chat_id": chat_id,
+            "source_url": final_url if supports_range else url,
+            "gdrive_id": gdrive_file_id,
+            "source_type": source_type,
+            "destination_path": clean_dest,
+            "filename": effective_filename,
+            "filesize": effective_size,
+            "transferred_bytes": 0,
+            "speed_bps": 0,
+            "progress": 0,
+            "eta_seconds": 0,
+            "status": "queued",
+            "phase": "Queued",
+            "error_message": None,
+            "is_vault": is_vault,
+            "created_at": now,
+            "updated_at": now
+        }
+        if custom_headers:
+            doc["custom_headers"] = custom_headers
+        if post_action_delete:
+            doc["post_action_delete"] = True
+        if cloud_account_id:
+            doc["cloud_account_id"] = cloud_account_id
+        if cloud_file_id:
+            doc["cloud_file_id"] = cloud_file_id
+        if group_id:
+            doc["group_id"] = group_id
+            doc["group_name"] = group_name
+            doc["group_total_items"] = group_total_items
+
+        coll.insert_one(doc)
+        doc["_id"] = str(doc["_id"])
+        return [doc]
+
+
+    async def _async_discover_folder(
+        self,
+        disc_task_id: str,
+        group_id: str,
+        folder_id: str,
+        url: str,
+        user_id: str,
+        chat_id: int,
+        clean_dest: str,
+        is_vault: bool
+    ):
+        """Asynchronously discovers files in a Google Drive folder without blocking HTTP requests."""
+        coll = get_remote_db()["RemoteTransfers"]
+        resolve_output_dir = f"/tmp/gdrive_resolve_{secrets.token_hex(4)}/"
+        os.makedirs(resolve_output_dir, exist_ok=True)
+
+        def _resolve_folder():
+            from gdown.download_folder import download_folder
+            return download_folder(id=folder_id, output=resolve_output_dir, skip_download=True, quiet=True, user_agent=MODERN_USER_AGENT)
+
+        try:
+            logger.info(f"[ASYNC_DISCOVERY] Starting background discovery for folder {folder_id} (group {group_id})...")
+            folder_files = await asyncio.to_thread(_resolve_folder)
             if not folder_files:
                 raise ValueError("Google Drive folder is empty or not accessible.")
 
@@ -350,32 +829,27 @@ class RemoteTransferManager:
                     "user_id": str(user_id),
                     "gdrive_id": {"$ne": None},
                     "destination_path": {"$regex": f"^{re.escape(clean_dest)}"},
-                    "status": {"$in": ["queued", "downloading", "uploading_tg", "completed"]}
+                    "status": {"$in": ["queued", "downloading", "uploading_tg", "completed", "paused_quota"]}
                 })
             )
 
-            # Assign unique group identifier and group name for folder batch
-            group_id = f"grp_{secrets.token_hex(6)}"
             root_folder_name = "Google Drive Folder"
             if folder_files:
                 first_rel = os.path.relpath(folder_files[0].local_path, resolve_output_dir).replace("\\", "/").strip("/")
                 parts = [p for p in first_rel.split("/") if p]
-                if len(parts) > 1 and parts[0]:
-                    root_folder_name = parts[0]
-                elif parts:
+                if parts:
                     root_folder_name = parts[0]
 
+            now = datetime.now(timezone.utc)
             docs_to_insert = []
             for gfile in folder_files:
                 if gfile.id in existing_gdrive_ids:
-                    continue  # Skip already queued/downloaded file
+                    continue  # Skip already queued/downloaded/paused file
 
                 task_id = f"rt_{secrets.token_hex(6)}"
-                # gfile.local_path has format: "/tmp/gdrive_resolve_xxx/FolderName/sub/file.ext"
                 rel_from_root = os.path.relpath(gfile.local_path, resolve_output_dir).replace("\\", "/").strip("/")
                 rel_dir = os.path.dirname(rel_from_root).strip("/")
                 fname = os.path.basename(rel_from_root) or f"gdrive_file_{gfile.id}"
-
                 item_dest = f"{clean_dest}/{rel_dir}" if rel_dir else clean_dest
 
                 doc = {
@@ -404,62 +878,43 @@ class RemoteTransferManager:
                     "updated_at": now
                 }
                 docs_to_insert.append(doc)
-                created_tasks.append(doc)
 
             if docs_to_insert:
-                coll.insert_many(docs_to_insert)
-                for doc in docs_to_insert:
-                    doc["_id"] = str(doc["_id"])
-
-            return created_tasks
-
-        # Check if Google Drive Single File
-        gdrive_file_id = None
-        file_match = re.search(r'/file/d/([a-zA-Z0-9_-]+)', url) or re.search(r'id=([a-zA-Z0-9_-]+)', url)
-        if file_match and ('drive.google.com' in url or 'docs.google.com' in url):
-            gdrive_file_id = file_match.group(1)
-
-        task_id = f"rt_{secrets.token_hex(6)}"
-        source_type = "gdrive_file" if gdrive_file_id else "direct_url"
-        filename = custom_filename or "Resolving..."
-
-        doc = {
-            "task_id": task_id,
-            "user_id": str(user_id),
-            "chat_id": chat_id,
-            "source_url": url,
-            "gdrive_id": gdrive_file_id,
-            "source_type": source_type,
-            "destination_path": clean_dest,
-            "filename": filename,
-            "filesize": custom_filesize or 0,
-            "transferred_bytes": 0,
-            "speed_bps": 0,
-            "progress": 0,
-            "eta_seconds": 0,
-            "status": "queued",
-            "phase": "Queued",
-            "error_message": None,
-            "is_vault": is_vault,
-            "created_at": now,
-            "updated_at": now
-        }
-        if custom_headers:
-            doc["custom_headers"] = custom_headers
-        if post_action_delete:
-            doc["post_action_delete"] = True
-        if cloud_account_id:
-            doc["cloud_account_id"] = cloud_account_id
-        if cloud_file_id:
-            doc["cloud_file_id"] = cloud_file_id
-        if group_id:
-            doc["group_id"] = group_id
-            doc["group_name"] = group_name
-            doc["group_total_items"] = group_total_items
-
-        coll.insert_one(doc)
-        doc["_id"] = str(doc["_id"])
-        return [doc]
+                batch_size = 500
+                for i in range(0, len(docs_to_insert), batch_size):
+                    batch = docs_to_insert[i:i + batch_size]
+                    coll.insert_many(batch)
+                coll.delete_one({"task_id": disc_task_id})
+                logger.info(f"[ASYNC_DISCOVERY] Enqueued {len(docs_to_insert)} items for group {group_id} ({root_folder_name}).")
+            else:
+                # All files were already completed or queued!
+                coll.update_one(
+                    {"task_id": disc_task_id},
+                    {"$set": {
+                        "status": "completed",
+                        "filename": root_folder_name,
+                        "group_name": root_folder_name,
+                        "phase": f"All {len(folder_files)} file(s) are already completed! 🎉",
+                        "progress": 100,
+                        "updated_at": datetime.now(timezone.utc)
+                    }}
+                )
+        except Exception as e:
+            logger.error(f"[ASYNC_DISCOVERY] Failed to resolve GDrive folder: {e}", exc_info=True)
+            err_msg = str(e)
+            if "Cannot retrieve the public link" in err_msg or "Check FAQ" in err_msg:
+                err_msg = "Google Drive folder is not accessible (make sure 'Anyone with the link can view' is turned on)."
+            coll.update_one(
+                {"task_id": disc_task_id},
+                {"$set": {
+                    "status": "failed",
+                    "error_message": err_msg,
+                    "phase": f"Discovery failed: {err_msg[:60]}",
+                    "updated_at": datetime.now(timezone.utc)
+                }}
+            )
+        finally:
+            shutil.rmtree(resolve_output_dir, ignore_errors=True)
 
     async def enqueue_torrent_file(
         self,
@@ -745,8 +1200,34 @@ class RemoteTransferManager:
                 logger.info(f"Task {task_id} cancelled.")
                 self._update_task(task_id, {"status": "cancelled", "phase": "Cancelled by user", "speed_bps": 0})
             except Exception as e:
-                logger.error(f"Task {task_id} failed: {e}", exc_info=True)
                 err_text = str(e)
+                if is_gdrive_quota_error(e):
+                    logger.warning(f"Google Drive quota exceeded for task {task_id}: {err_text}")
+                    cooldown_until = datetime.now(timezone.utc) + timedelta(hours=24)
+                    coll = get_remote_db()["RemoteTransfers"]
+                    group_id = task_doc.get("group_id")
+                    target_query = {"user_id": str(task_doc["user_id"]), "status": {"$in": ["queued", "downloading"]}}
+                    if group_id:
+                        target_query["group_id"] = group_id
+                    else:
+                        target_query["task_id"] = task_id
+
+                    coll.update_many(
+                        target_query,
+                        {
+                            "$set": {
+                                "status": "paused_quota",
+                                "cooldown_until": cooldown_until,
+                                "phase": "Google Drive quota exceeded. Auto-resumes in 24h 🕒",
+                                "error_message": "Google Drive 24h download limit reached. Transfer will automatically resume when quota resets.",
+                                "speed_bps": 0,
+                                "updated_at": datetime.now(timezone.utc)
+                            }
+                        }
+                    )
+                    return
+
+                logger.error(f"Task {task_id} failed: {e}", exc_info=True)
                 if "Cannot retrieve the public link" in err_text or "Check FAQ" in err_text:
                     err_text = "Google Drive file is not accessible (it may be deleted, moved to trash, or restricted by the owner)."
                 phase_err = "Failed: " + (err_text[:50] + "..." if len(err_text) > 50 else err_text)
@@ -755,9 +1236,177 @@ class RemoteTransferManager:
                 self.active_tasks.pop(task_id, None)
                 self.cancel_events.pop(task_id, None)
 
+    async def _run_range_part_transfer(self, task_doc: dict, cancel_event: threading.Event):
+        task_id = task_doc["task_id"]
+        source_url = task_doc["source_url"]
+        destination_path = task_doc.get("destination_path", "/Home")
+        user_id = task_doc["user_id"]
+        chat_id = task_doc["chat_id"]
+        is_vault = bool(task_doc.get("is_vault", False))
+        filename = task_doc.get("filename") or "download.bin"
+        range_start = task_doc["range_start"]
+        range_end = task_doc["range_end"]
+        part_index = task_doc["part_index"]
+        total_parts = task_doc["total_parts"]
+        part_size = task_doc["part_size"]
+        group_id = task_doc.get("group_id")
+
+        tg_dir = os.path.join(os.getcwd(), "tg_files", f"remote_{task_id}")
+        os.makedirs(tg_dir, exist_ok=True)
+        part_file_path = os.path.join(tg_dir, f"{filename}.part{part_index}")
+
+        # Wait for available Telegram bot client
+        bot_manager = self._bot_manager
+        client = None
+        for _ in range(30):
+            if cancel_event.is_set():
+                raise InterruptedError("Cancelled by user")
+            client = bot_manager.get_least_busy_client() if bot_manager else None
+            if client:
+                break
+            await asyncio.sleep(1)
+
+        if not client:
+            raise RuntimeError("No Telegram bot client available for upload.")
+
+        self._update_task(task_id, {
+            "status": "downloading",
+            "phase": f"[master-vm1] Connecting to source for Part {part_index}/{total_parts}...",
+            "speed_bps": 0
+        })
+
+        def _download_chunk():
+            req_headers = {
+                "User-Agent": MODERN_USER_AGENT,
+                "Range": f"bytes={range_start}-{range_end}"
+            }
+            if task_doc.get("custom_headers"):
+                req_headers.update(task_doc["custom_headers"])
+
+            with requests.get(source_url, stream=True, timeout=60, headers=req_headers) as resp:
+                if resp.status_code not in [200, 206]:
+                    resp.raise_for_status()
+
+                transferred = 0
+                start_time = time.time()
+                last_rep = start_time
+
+                with open(part_file_path, "wb") as pf:
+                    for chunk in resp.iter_content(chunk_size=2 * 1024 * 1024):
+                        if cancel_event.is_set():
+                            raise InterruptedError("Cancelled by user")
+
+                        if priority_manager.is_user_upload_active():
+                            self._update_task(task_id, {
+                                "status": "paused",
+                                "phase": "Paused: Prioritizing User Upload 👤",
+                                "speed_bps": 0
+                            })
+                            while priority_manager.is_user_upload_active() and not cancel_event.is_set():
+                                priority_manager.wait_if_user_upload_active(timeout=1.0)
+                            self._update_task(task_id, {
+                                "status": "downloading",
+                                "phase": f"[master-vm1] Resumed Part {part_index}/{total_parts} ▶️"
+                            })
+
+                        if chunk:
+                            pf.write(chunk)
+                            transferred += len(chunk)
+                            now = time.time()
+                            if now - last_rep >= 1.0:
+                                last_rep = now
+                                dt = max(0.1, now - start_time)
+                                speed = int(transferred / dt)
+                                prog = min(99.0, round((transferred / part_size) * 100, 1)) if part_size > 0 else 0
+                                eta = int((part_size - transferred) / speed) if (speed > 0 and part_size > transferred) else 0
+                                self._update_task(task_id, {
+                                    "transferred_bytes": transferred,
+                                    "filesize": part_size,
+                                    "progress": prog,
+                                    "speed_bps": speed,
+                                    "eta_seconds": eta,
+                                    "phase": f"[master-vm1] Leeching Part {part_index}/{total_parts} @ {speed/1024/1024:.1f} MB/s ({prog}%)"
+                                })
+
+                return transferred
+
+        downloaded_bytes = await asyncio.to_thread(_download_chunk)
+
+        if cancel_event.is_set():
+            raise InterruptedError("Cancelled by user")
+
+        self._update_task(task_id, {
+            "status": "uploading_tg",
+            "phase": f"[master-vm1] Uploading Part {part_index}/{total_parts} to Telegram Cloud ☁️",
+            "progress": 99.0
+        })
+
+        target_name = f"{filename}.part{part_index}"
+        caption = f"{filename} (Part {part_index})"
+        ftype = get_file_type(filename)
+
+        res = await upload_part_task(
+            part_file_path=part_file_path,
+            part_index=part_index,
+            file_name=filename,
+            start_byte=range_start,
+            part_size=downloaded_bytes,
+            chat_id=chat_id,
+            bot_manager=bot_manager,
+            fallback_client=client,
+            caption=caption,
+            semaphore=None,
+            is_single_part=False,
+            file_type=ftype,
+            progress=None
+        )
+
+        try:
+            shutil.rmtree(tg_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+        part_info = {
+            "part_index": part_index,
+            "chat_id": chat_id,
+            "message_id": res["message_id"],
+            "file_unique_id": res["file_unique_id"],
+            "part_size": downloaded_bytes,
+            "start_byte": range_start,
+            "end_byte": range_start + downloaded_bytes,
+            "thumbnail": res.get("thumbnail")
+        }
+
+        coll = get_remote_db()["RemoteTransfers"]
+        now = datetime.now(timezone.utc)
+        coll.update_one(
+            {"task_id": task_id},
+            {
+                "$set": {
+                    "status": "completed",
+                    "progress": 100.0,
+                    "transferred_bytes": downloaded_bytes,
+                    "filesize": part_size,
+                    "speed_bps": 0,
+                    "eta_seconds": 0,
+                    "completed_part_info": part_info,
+                    "phase": f"Part {part_index}/{total_parts} completed via master-vm1 🎉",
+                    "updated_at": now
+                }
+            }
+        )
+
+        logger.info(f"[MULTI_RANGE] Part {part_index}/{total_parts} for '{filename}' completed locally on master-vm1")
+        if group_id:
+            await finalize_multipart_group_if_ready(group_id, task_doc)
+
     async def _run_download_and_upload(self, task_doc: dict, cancel_event: threading.Event):
         if task_doc.get("source_type") == "telegram_to_gdrive":
             await self._execute_telegram_to_gdrive(task_doc, cancel_event)
+            return
+
+        if task_doc.get("is_range_part"):
+            await self._run_range_part_transfer(task_doc, cancel_event)
             return
 
         task_id = task_doc["task_id"]
@@ -1296,6 +1945,8 @@ class RemoteTransferManager:
                         )
                     except Exception as gerr:
                         err_str = str(gerr)
+                        if is_gdrive_quota_error(gerr):
+                            raise GoogleDriveQuotaExceededError(err_str)
                         logger.warning(f"gdown encountered: {err_str}. Attempting direct HTTP fallback for {gdrive_id}...")
                         import requests
                         import urllib.parse
@@ -1370,9 +2021,8 @@ class RemoteTransferManager:
                                         err_reason = clean_sub
                                 elif "Too many users have viewed or downloaded this file recently" in html_text:
                                     err_reason = "Too many users have downloaded this file recently (Google Drive 24h quota limit exceeded). Please try again later."
-                                elif "Access denied" in html_text or "Permission denied" in html_text:
-                                    err_reason = "Access denied: file is private or requires Google account sign-in."
-                                
+                                if is_gdrive_quota_error(Exception(err_reason)):
+                                    raise GoogleDriveQuotaExceededError(err_reason)
                                 raise RuntimeError(f"Google Drive Error: {err_reason}")
 
                         resp.raise_for_status()
@@ -1654,12 +2304,32 @@ class RemoteTransferManager:
         })
         return res.deleted_count
 
+    def resume_group(self, group_id: str, user_id: str) -> int:
+        """Manually resume any tasks in a group that were paused due to quota cooldown."""
+        coll = get_remote_db()["RemoteTransfers"]
+        res = coll.update_many(
+            {
+                "group_id": group_id,
+                "user_id": str(user_id),
+                "status": "paused_quota"
+            },
+            {
+                "$set": {
+                    "status": "queued",
+                    "phase": "Queued (Resumed by user)",
+                    "updated_at": datetime.now(timezone.utc)
+                },
+                "$unset": {"cooldown_until": ""}
+            }
+        )
+        return res.modified_count
+
     def get_user_tasks(self, user_id: str) -> List[Dict[str, Any]]:
         coll = get_remote_db()["RemoteTransfers"]
-        # Fetch ALL active/running/queued tasks without limit so no active downloads are hidden
+        # Fetch ALL active/running/queued/discovering/paused tasks without limit so no active downloads are hidden
         active_docs = list(coll.find({
             "user_id": str(user_id),
-            "status": {"$in": ["queued", "downloading", "uploading_tg"]}
+            "status": {"$in": ["queued", "downloading", "uploading_tg", "discovering", "paused_quota"]}
         }).sort("created_at", -1))
 
         # Fetch recent completed/cancelled/failed history tasks
@@ -1675,6 +2345,8 @@ class RemoteTransferManager:
                 d["created_at"] = d["created_at"].isoformat()
             if isinstance(d.get("updated_at"), datetime):
                 d["updated_at"] = d["updated_at"].isoformat()
+            if isinstance(d.get("cooldown_until"), datetime):
+                d["cooldown_until"] = d["cooldown_until"].isoformat()
         return docs
 
 remote_transfer_manager = RemoteTransferManager(max_concurrent=2)

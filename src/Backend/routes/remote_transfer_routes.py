@@ -20,6 +20,9 @@ class CancelRemoteTransferModel(BaseModel):
 class CancelRemoteGroupModel(BaseModel):
     group_id: str
 
+class ResumeRemoteGroupModel(BaseModel):
+    group_id: str
+
 @router.post("/add")
 async def add_remote_transfer(
     request: Request,
@@ -141,6 +144,16 @@ async def cancel_remote_group(
     user_id = str(user.telegram_user_id or user.username)
     cancelled_count = remote_transfer_manager.cancel_group(body.group_id, user_id)
     return {"success": True, "cancelled_count": cancelled_count, "message": f"Cancelled {cancelled_count} transfer(s) in folder."}
+
+@router.post("/resume-group")
+async def resume_remote_group(
+    body: ResumeRemoteGroupModel,
+    user: User = Depends(require_auth)
+):
+    """Manually resume all tasks in a group that were paused due to quota cooldown."""
+    user_id = str(user.telegram_user_id or user.username)
+    resumed_count = remote_transfer_manager.resume_group(body.group_id, user_id)
+    return {"success": True, "resumed_count": resumed_count, "message": f"Resumed {resumed_count} transfer(s) in folder."}
 
 @router.post("/clear-completed")
 async def clear_completed_remote_tasks(

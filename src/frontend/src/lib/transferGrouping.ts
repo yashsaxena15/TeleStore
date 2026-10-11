@@ -9,11 +9,12 @@ export interface GroupedRemoteTransfer {
   task_id: string;
   group_id: string;
   group_name: string;
-  group_type?: 'folder' | 'torrent';
+  group_type?: 'folder' | 'torrent' | 'file';
   filename: string;
   destination_path: string;
-  status: 'queued' | 'downloading' | 'uploading_tg' | 'completed' | 'failed' | 'cancelled';
+  status: 'queued' | 'downloading' | 'uploading_tg' | 'completed' | 'failed' | 'cancelled' | 'paused_quota' | 'discovering';
   phase?: string;
+  cooldown_until?: string;
   filesize: number;
   transferred_bytes: number;
   bytesUploaded: number;
@@ -68,11 +69,15 @@ export function groupRemoteTransfers(remoteTransfers: RemoteTransferItem[]) {
     const cancelledCount = subItems.filter(i => i.status === 'cancelled').length;
     const isDownloading = subItems.some(i => i.status === 'downloading');
     const isUploading = subItems.some(i => i.status === 'uploading_tg');
+    const isDiscovering = subItems.some(i => i.status === 'discovering');
+    const isPausedQuota = subItems.some(i => i.status === 'paused_quota');
     const isQueued = subItems.some(i => i.status === 'queued');
 
-    let status: 'queued' | 'downloading' | 'uploading_tg' | 'completed' | 'failed' | 'cancelled' = 'queued';
+    let status: 'queued' | 'downloading' | 'uploading_tg' | 'completed' | 'failed' | 'cancelled' | 'paused_quota' | 'discovering' = 'queued';
     if (isDownloading) status = 'downloading';
     else if (isUploading) status = 'uploading_tg';
+    else if (isDiscovering) status = 'discovering';
+    else if (isPausedQuota) status = 'paused_quota';
     else if (completedCount === subItems.length && subItems.length > 0) status = 'completed';
     else if (cancelledCount === subItems.length && subItems.length > 0) status = 'cancelled';
     else if (failedCount === subItems.length && subItems.length > 0) status = 'failed';
@@ -93,17 +98,32 @@ export function groupRemoteTransfers(remoteTransfers: RemoteTransferItem[]) {
     const groupName = subItems[0].group_name || 'Folder Download';
     const groupType = subItems[0].group_type || 'folder';
     const destPath = subItems[0].destination_path || '/Home';
+    const cooldownItem = subItems.find(i => i.cooldown_until);
+    const cooldownUntil = cooldownItem?.cooldown_until;
 
     let phase = '';
-    if (status === 'completed') {
-      phase = `Completed all ${subItems.length} file(s) 🎉`;
+    if (status === 'discovering') {
+      phase = '🔍 Analyzing folder structure in background...';
+    } else if (status === 'paused_quota') {
+      let targetTime = '24h';
+      if (cooldownUntil) {
+        try {
+          const d = new Date(cooldownUntil);
+          targetTime = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } catch {}
+      }
+      phase = `Google Drive quota limit reached. Auto-resumes at ${targetTime} 🕒`;
+    } else if (status === 'completed') {
+      phase = groupType === 'file' ? `Completed & Assembled (${subItems.length} parts) 🎉` : `Completed all ${subItems.length} file(s) 🎉`;
     } else if (status === 'downloading' || status === 'uploading_tg') {
       const activeSub = subItems.find(i => i.status === 'downloading' || i.status === 'uploading_tg');
-      phase = `Leeching [${completedCount + 1}/${subItems.length}]: ${activeSub?.filename || ''}`;
+      phase = groupType === 'file'
+        ? `Multi-Node Leeching [${completedCount}/${subItems.length} parts done] ⚡`
+        : `Leeching [${completedCount + 1}/${subItems.length}]: ${activeSub?.filename || ''}`;
     } else if (status === 'cancelled') {
-      phase = 'Folder transfer cancelled';
+      phase = groupType === 'file' ? 'File transfer cancelled' : 'Folder transfer cancelled';
     } else {
-      phase = `Queued (${subItems.length} files)`;
+      phase = groupType === 'file' ? `Queued (${subItems.length} parts)` : `Queued (${subItems.length} files)`;
     }
 
     groupedRemoteItems.push({
@@ -118,6 +138,7 @@ export function groupRemoteTransfers(remoteTransfers: RemoteTransferItem[]) {
       destination_path: destPath,
       status,
       phase,
+      cooldown_until: cooldownUntil,
       filesize: totalBytes,
       transferred_bytes: transferredBytes,
       bytesUploaded: transferredBytes,

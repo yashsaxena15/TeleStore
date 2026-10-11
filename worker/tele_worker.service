@@ -1,0 +1,19 @@
+[Unit]
+Description=TelegramFileServer Distributed Leech Worker
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/tele_worker
+Environment="MASTER_URL=https://your-domain.com"
+Environment="WORKER_KEY=your_worker_secret_key"
+Environment="WORKER_ID=vm2-worker"
+ExecStart=/home/ubuntu/tele_worker/venv/bin/python3 /home/ubuntu/tele_worker/worker.py
+Restart=always
+RestartSec=5
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+
