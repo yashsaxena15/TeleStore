@@ -3,28 +3,22 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { downloadManager } from '../lib/downloadManager';
 import { useDownloadManager } from '../hooks/useDownloadManager';
-
-const TestDownload: React.FC = () => {
-  const { downloads, stats, addDownload } = useDownloadManager();
-  const [url, setUrl] = React.useState('/dl/sample-image.jpg');
-  const [filename, setFilename] = React.useState('sample-image.jpg');
-
-  const handleAddDownload = () => {
-    if (url && filename) {
-      addDownload(url, filename);
-    }
-  };
-
-  const handleAddSampleDownloads = () => {
-    addDownload('/dl/sample-image.jpg', 'sample-image.jpg');
-    addDownload('/dl/sample-document.pdf', 'sample-document.pdf');
-    addDownload('/dl/sample-video.mp4', 'sample-video.mp4');
-  };
-
-  return (
-    <div className="container mx-auto py-8">
+const TestDownload = () => {
+    const { downloads, stats, addDownload } = useDownloadManager();
+    const [url, setUrl] = React.useState('/dl/sample-image.jpg');
+    const [filename, setFilename] = React.useState('sample-image.jpg');
+    const handleAddDownload = () => {
+        if (url && filename) {
+            addDownload(url, filename);
+        }
+    };
+    const handleAddSampleDownloads = () => {
+        addDownload('/dl/sample-image.jpg', 'sample-image.jpg');
+        addDownload('/dl/sample-document.pdf', 'sample-document.pdf');
+        addDownload('/dl/sample-video.mp4', 'sample-video.mp4');
+    };
+    return (<div className="container mx-auto py-8">
       <Card className="max-w-2xl mx-auto">
         <CardHeader>
           <CardTitle>Download Test</CardTitle>
@@ -39,22 +33,12 @@ const TestDownload: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="url">URL</Label>
-                <Input
-                  id="url"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="Enter file URL"
-                />
+                <Input id="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Enter file URL"/>
               </div>
               
               <div className="space-y-2">
                 <Label htmlFor="filename">Filename</Label>
-                <Input
-                  id="filename"
-                  value={filename}
-                  onChange={(e) => setFilename(e.target.value)}
-                  placeholder="Enter filename"
-                />
+                <Input id="filename" value={filename} onChange={(e) => setFilename(e.target.value)} placeholder="Enter filename"/>
               </div>
             </div>
             
@@ -96,32 +80,22 @@ const TestDownload: React.FC = () => {
             </div>
           </div>
           
-          {downloads.length > 0 && (
-            <div className="space-y-4">
+          {downloads.length > 0 && (<div className="space-y-4">
               <h3 className="text-lg font-medium">Current Downloads</h3>
               <div className="space-y-3">
-                {downloads.map((download) => (
-                  <div key={download.id} className="p-3 border rounded-lg">
+                {downloads.map((download) => (<div key={download.id} className="p-3 border rounded-lg">
                     <div className="flex justify-between">
                       <div className="font-medium">{download.filename}</div>
                       <div className="text-sm capitalize">{download.status}</div>
                     </div>
                     <div className="text-sm text-muted-foreground truncate">{download.url}</div>
-                    {download.status === 'downloading' && (
-                      <div className="text-sm mt-1">Progress: {download.progress}%</div>
-                    )}
-                    {download.status === 'failed' && (
-                      <div className="text-sm text-red-500 mt-1">Error: {download.error}</div>
-                    )}
-                  </div>
-                ))}
+                    {download.status === 'downloading' && (<div className="text-sm mt-1">Progress: {download.progress}%</div>)}
+                    {download.status === 'failed' && (<div className="text-sm text-red-500 mt-1">Error: {download.error}</div>)}
+                  </div>))}
               </div>
-            </div>
-          )}
+            </div>)}
         </CardContent>
       </Card>
-    </div>
-  );
+    </div>);
 };
-
 export default TestDownload;

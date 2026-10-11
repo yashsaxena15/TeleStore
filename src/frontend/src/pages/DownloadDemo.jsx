@@ -2,10 +2,8 @@ import React from 'react';
 import DownloadButton from '../components/DownloadButton';
 import AdvancedDownloadButton from '../components/AdvancedDownloadButton';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
-
-const DownloadDemo: React.FC = () => {
-  return (
-    <div className="container mx-auto py-8">
+const DownloadDemo = () => {
+    return (<div className="container mx-auto py-8">
       <Card className="max-w-2xl mx-auto">
         <CardHeader>
           <CardTitle>File Download Demo</CardTitle>
@@ -23,20 +21,14 @@ const DownloadDemo: React.FC = () => {
                   <h4 className="font-medium">Sample Image</h4>
                   <p className="text-sm text-muted-foreground">Basic download button</p>
                   <div className="mt-2">
-                    <DownloadButton 
-                      path="/dl/sample-image.jpg" 
-                      filename="sample-image.jpg"
-                    />
+                    <DownloadButton path="/dl/sample-image.jpg" filename="sample-image.jpg"/>
                   </div>
                 </div>
                 <div>
                   <h4 className="font-medium">Sample Image (Advanced)</h4>
                   <p className="text-sm text-muted-foreground">Advanced download with progress</p>
                   <div className="mt-2">
-                    <AdvancedDownloadButton 
-                      path="/dl/sample-image.jpg" 
-                      filename="sample-image.jpg"
-                    />
+                    <AdvancedDownloadButton path="/dl/sample-image.jpg" filename="sample-image.jpg"/>
                   </div>
                 </div>
               </div>
@@ -46,20 +38,14 @@ const DownloadDemo: React.FC = () => {
                   <h4 className="font-medium">Sample Document</h4>
                   <p className="text-sm text-muted-foreground">Basic download button</p>
                   <div className="mt-2">
-                    <DownloadButton 
-                      path="/dl/sample-document.pdf" 
-                      filename="sample-document.pdf"
-                    />
+                    <DownloadButton path="/dl/sample-document.pdf" filename="sample-document.pdf"/>
                   </div>
                 </div>
                 <div>
                   <h4 className="font-medium">Sample Document (Advanced)</h4>
                   <p className="text-sm text-muted-foreground">Advanced download with progress</p>
                   <div className="mt-2">
-                    <AdvancedDownloadButton 
-                      path="/dl/sample-document.pdf" 
-                      filename="sample-document.pdf"
-                    />
+                    <AdvancedDownloadButton path="/dl/sample-document.pdf" filename="sample-document.pdf"/>
                   </div>
                 </div>
               </div>
@@ -69,20 +55,14 @@ const DownloadDemo: React.FC = () => {
                   <h4 className="font-medium">Sample Video</h4>
                   <p className="text-sm text-muted-foreground">Basic download button</p>
                   <div className="mt-2">
-                    <DownloadButton 
-                      path="/dl/sample-video.mp4" 
-                      filename="sample-video.mp4"
-                    />
+                    <DownloadButton path="/dl/sample-video.mp4" filename="sample-video.mp4"/>
                   </div>
                 </div>
                 <div>
                   <h4 className="font-medium">Sample Video (Advanced)</h4>
                   <p className="text-sm text-muted-foreground">Advanced download with progress</p>
                   <div className="mt-2">
-                    <AdvancedDownloadButton 
-                      path="/dl/sample-video.mp4" 
-                      filename="sample-video.mp4"
-                    />
+                    <AdvancedDownloadButton path="/dl/sample-video.mp4" filename="sample-video.mp4"/>
                   </div>
                 </div>
               </div>
@@ -120,8 +100,6 @@ const DownloadDemo: React.FC = () => {
           </div>
         </CardContent>
       </Card>
-    </div>
-  );
+    </div>);
 };
-
 export default DownloadDemo;
