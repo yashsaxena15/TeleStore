@@ -9,8 +9,7 @@ This is the frontend component of the TeleStore application, built with modern w
 This project is built with:
 
 - Vite
-- TypeScript
-- React
+- React (JavaScript)
 - shadcn-ui
 - Tailwind CSS
 
