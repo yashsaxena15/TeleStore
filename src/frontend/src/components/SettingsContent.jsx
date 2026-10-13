@@ -5,13 +5,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { getApiBaseUrl, resetApiBaseUrl, api } from "@/lib/api";
-import { X } from "lucide-react";
+import { X, Sun, Moon, Monitor } from "lucide-react";
 import { toast } from "sonner";
 // Add the Tauri dialog import
 import { open } from '@tauri-apps/plugin-dialog';
 // Add Tauri path import for getting user profile directory
 import { homeDir } from '@tauri-apps/api/path';
 import authService from "@/lib/authService";
+import { getStoredTheme, setTheme, THEMES } from "@/lib/theme.js";
 export const SettingsContent = ({ onBack }) => {
     const navigate = useNavigate();
     const [serverUrl, setServerUrl] = useState("");
@@ -21,6 +22,13 @@ export const SettingsContent = ({ onBack }) => {
     const [indexChatId, setIndexChatId] = useState(null);
     const [tempIndexChatId, setTempIndexChatId] = useState("");
     const [error, setError] = useState("");
+    const [selectedTheme, setSelectedTheme] = useState(() => getStoredTheme());
+
+    const handleThemeChange = (newTheme) => {
+        setTheme(newTheme);
+        setSelectedTheme(newTheme);
+        toast.success(`Theme set to ${newTheme}`);
+    };
     // Load server URL, download folder, and index chat ID from localStorage/API on component mount
     useEffect(() => {
         const currentUrl = getApiBaseUrl();
@@ -238,6 +246,56 @@ export const SettingsContent = ({ onBack }) => {
         </div>
         
         <div className="flex-1 overflow-y-auto custom-scrollbar space-y-6">
+          {/* Appearance & Theme Card */}
+          <Card className="bg-card border-border text-card-foreground shadow-sm rounded-lg">
+            <CardHeader className="pb-4 pt-5 px-6">
+              <CardTitle className="text-xl">Appearance & Theme</CardTitle>
+              <CardDescription className="text-muted-foreground text-sm">
+                Select your preferred visual appearance across TeleStore
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="py-2 px-6">
+              <div className="grid grid-cols-3 gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleThemeChange(THEMES.DARK)}
+                  className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-sm font-medium transition-all ${
+                    selectedTheme === THEMES.DARK
+                      ? "border-primary bg-primary/10 text-primary ring-1 ring-primary"
+                      : "border-border hover:bg-muted text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Moon className="h-5 w-5" />
+                  <span>Dark</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleThemeChange(THEMES.LIGHT)}
+                  className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-sm font-medium transition-all ${
+                    selectedTheme === THEMES.LIGHT
+                      ? "border-primary bg-primary/10 text-primary ring-1 ring-primary"
+                      : "border-border hover:bg-muted text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Sun className="h-5 w-5" />
+                  <span>Light</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleThemeChange(THEMES.SYSTEM)}
+                  className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-sm font-medium transition-all ${
+                    selectedTheme === THEMES.SYSTEM
+                      ? "border-primary bg-primary/10 text-primary ring-1 ring-primary"
+                      : "border-border hover:bg-muted text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Monitor className="h-5 w-5" />
+                  <span>System</span>
+                </button>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Server Configuration Card */}
           <Card className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm rounded-lg">
             <CardHeader className="pb-4 pt-5 px-6">

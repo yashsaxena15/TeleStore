@@ -55,6 +55,34 @@ export default {
   				'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
   				border: 'hsl(var(--sidebar-border))',
   				ring: 'hsl(var(--sidebar-ring))'
+  			},
+  			success: {
+  				DEFAULT: 'hsl(var(--success, 142 70% 45%))',
+  				foreground: 'hsl(var(--success-foreground, 0 0% 98%))'
+  			},
+  			warning: {
+  				DEFAULT: 'hsl(var(--warning, 38 92% 50%))',
+  				foreground: 'hsl(var(--warning-foreground, 0 0% 98%))'
+  			},
+  			info: {
+  				DEFAULT: 'hsl(var(--info, 199 89% 60%))',
+  				foreground: 'hsl(var(--info-foreground, 0 0% 98%))'
+  			},
+  			cloud: {
+  				DEFAULT: 'hsl(var(--cloud, 262 83% 66%))',
+  				foreground: 'hsl(var(--cloud-foreground, 0 0% 98%))'
+  			},
+  			surface: {
+  				1: 'hsl(var(--surface-1, var(--card)))',
+  				2: 'hsl(var(--surface-2, var(--popover)))'
+  			},
+  			type: {
+  				folder: 'hsl(var(--type-folder, 217 91% 60%))',
+  				video: 'hsl(var(--type-video, 262 83% 66%))',
+  				audio: 'hsl(var(--type-audio, 330 81% 60%))',
+  				image: 'hsl(var(--type-image, 142 70% 45%))',
+  				doc: 'hsl(var(--type-doc, 200 98% 39%))',
+  				archive: 'hsl(var(--type-archive, 38 92% 50%))'
   			}
   		},
   		borderRadius: {
@@ -108,6 +136,7 @@ export default {
   				'serif'
   			],
   			mono: [
+  				'JetBrains Mono',
   				'Space Mono',
   				'ui-monospace',
   				'SFMono-Regular',
