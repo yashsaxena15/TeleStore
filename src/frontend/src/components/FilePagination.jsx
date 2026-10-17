@@ -40,29 +40,29 @@ export const FilePagination = ({ pagination, currentPage, pageSize, onPageChange
 
       {/* Center: Pagination controls */}
       {!isAll && total_pages > 1 && (<div className="flex items-center gap-1 sm:gap-1.5">
-          <Button variant="outline" size="icon" className="h-8 w-8 rounded-md" onClick={() => onPageChange(1)} disabled={!has_prev || currentPage <= 1 || isLoading} title="First page">
+          <Button variant="outline" size="icon" className="h-8 w-8 rounded-md" onClick={() => onPageChange(1)} disabled={!has_prev || currentPage <= 1 || isLoading} aria-label="First page" title="First page">
             <ChevronsLeft className="h-4 w-4"/>
           </Button>
 
-          <Button variant="outline" size="icon" className="h-8 w-8 rounded-md" onClick={() => onPageChange(currentPage - 1)} disabled={!has_prev || currentPage <= 1 || isLoading} title="Previous page">
+          <Button variant="outline" size="icon" className="h-8 w-8 rounded-md" onClick={() => onPageChange(currentPage - 1)} disabled={!has_prev || currentPage <= 1 || isLoading} aria-label="Previous page" title="Previous page">
             <ChevronLeft className="h-4 w-4"/>
           </Button>
 
           {/* Page indicator & quick jump */}
           <div className="flex items-center mx-1 text-xs sm:text-sm font-medium">
             {isEditingPage ? (<form onSubmit={handleJumpSubmit} className="flex items-center">
-                <input type="number" min={1} max={total_pages} value={jumpPage} onChange={(e) => setJumpPage(e.target.value)} onBlur={handleJumpSubmit} autoFocus className="w-12 h-7 px-1 text-center font-bold bg-muted border border-primary rounded text-xs focus:outline-none"/>
+                <input type="number" min={1} max={total_pages} value={jumpPage} onChange={(e) => setJumpPage(e.target.value)} onBlur={handleJumpSubmit} autoFocus aria-label="Jump to page number" className="w-12 h-7 px-1 text-center font-bold bg-muted border border-primary rounded text-xs focus:outline-none"/>
                 <span className="ml-1 text-muted-foreground">/ {total_pages}</span>
-              </form>) : (<button type="button" onClick={() => setIsEditingPage(true)} className="px-2 py-1 rounded hover:bg-muted/80 text-foreground transition-colors cursor-pointer" title="Click to jump to page">
+              </form>) : (<button type="button" onClick={() => setIsEditingPage(true)} aria-label="Current page, click to jump to page" className="px-2 py-1 rounded hover:bg-muted/80 text-foreground transition-colors cursor-pointer" title="Click to jump to page">
                 Page <span className="font-semibold text-primary">{currentPage}</span> of <span className="font-semibold">{total_pages}</span>
               </button>)}
           </div>
 
-          <Button variant="outline" size="icon" className="h-8 w-8 rounded-md" onClick={() => onPageChange(currentPage + 1)} disabled={!has_next || currentPage >= total_pages || isLoading} title="Next page">
+          <Button variant="outline" size="icon" className="h-8 w-8 rounded-md" onClick={() => onPageChange(currentPage + 1)} disabled={!has_next || currentPage >= total_pages || isLoading} aria-label="Next page" title="Next page">
             <ChevronRight className="h-4 w-4"/>
           </Button>
 
-          <Button variant="outline" size="icon" className="h-8 w-8 rounded-md" onClick={() => onPageChange(total_pages)} disabled={!has_next || currentPage >= total_pages || isLoading} title="Last page">
+          <Button variant="outline" size="icon" className="h-8 w-8 rounded-md" onClick={() => onPageChange(total_pages)} disabled={!has_next || currentPage >= total_pages || isLoading} aria-label="Last page" title="Last page">
             <ChevronsRight className="h-4 w-4"/>
           </Button>
         </div>)}
@@ -71,7 +71,7 @@ export const FilePagination = ({ pagination, currentPage, pageSize, onPageChange
       <div className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground ml-auto sm:ml-0">
         <span className="hidden sm:inline">Per page:</span>
         <Select value={pageSize.toString()} onValueChange={(val) => onPageSizeChange(parseInt(val, 10))} disabled={isLoading}>
-          <SelectTrigger className="h-8 w-[84px] text-xs">
+          <SelectTrigger className="h-8 w-[84px] text-xs" aria-label="Items per page">
             <SelectValue placeholder={isAll ? "All" : `${pageSize}`}/>
           </SelectTrigger>
           <SelectContent side="top">

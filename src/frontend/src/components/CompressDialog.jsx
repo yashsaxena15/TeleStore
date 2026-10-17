@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter, } from "@/components/ui/dialog";
 import { Archive, Loader2, Sparkles } from "lucide-react";
 import { getApiBaseUrl, fetchWithTimeout } from "@/lib/api";
 import { toast } from "sonner";
@@ -49,9 +49,9 @@ export const CompressDialog = ({ isOpen, onClose, selectedItemIds, selectedItemN
         }
     };
     return (<Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-md bg-zinc-900 border-zinc-800 text-zinc-100 p-6">
+      <DialogContent className="max-w-md bg-card border-border text-card-foreground p-6">
         <form onSubmit={handleCompress}>
-          <DialogHeader className="border-b border-zinc-800 pb-4">
+          <DialogHeader className="border-b border-border pb-4">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-primary/10 text-primary rounded-lg">
                 <Archive className="w-5 h-5"/>
@@ -60,28 +60,28 @@ export const CompressDialog = ({ isOpen, onClose, selectedItemIds, selectedItemN
                 <DialogTitle className="text-base font-semibold">
                   Compress to Cloud ZIP
                 </DialogTitle>
-                <p className="text-xs text-zinc-400 mt-0.5">
+                <DialogDescription className="text-xs text-muted-foreground mt-0.5">
                   {selectedItemIds.length} item(s) selected for compression
-                </p>
+                </DialogDescription>
               </div>
             </div>
           </DialogHeader>
 
           <div className="py-5 space-y-3">
-            <label className="text-xs text-zinc-300 font-medium block">
+            <label htmlFor="compress-zip-name" className="text-xs text-foreground font-medium block">
               Archive File Name
             </label>
-            <input type="text" required value={zipName} onChange={(e) => setZipName(e.target.value)} placeholder="e.g. MyFiles.zip" className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-md text-sm text-zinc-100 focus:outline-none focus:border-primary font-mono"/>
-            <p className="text-xs text-zinc-500">
+            <input id="compress-zip-name" aria-label="Archive File Name" type="text" required value={zipName} onChange={(e) => setZipName(e.target.value)} placeholder="e.g. MyFiles.zip" className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent font-mono"/>
+            <p className="text-xs text-muted-foreground">
               Files will be packed directly on the server into your Telegram cloud drive.
             </p>
           </div>
 
-          <DialogFooter className="border-t border-zinc-800 pt-4 flex flex-row items-center justify-end gap-2">
-            <button type="button" onClick={onClose} disabled={isCompressing} className="px-4 py-2 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition">
+          <DialogFooter className="border-t border-border pt-4 flex flex-row items-center justify-end gap-2">
+            <button type="button" onClick={onClose} disabled={isCompressing} className="px-4 py-2 rounded-md bg-secondary hover:bg-secondary/80 text-secondary-foreground text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1">
               Cancel
             </button>
-            <button type="submit" disabled={isCompressing || !zipName.trim()} className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition disabled:opacity-50">
+            <button type="submit" disabled={isCompressing || !zipName.trim()} className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1">
               {isCompressing ? (<>
                   <Loader2 className="w-4 h-4 animate-spin"/>
                   Compressing...

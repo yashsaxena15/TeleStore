@@ -9,6 +9,15 @@ disableDelete = false, // Destructure the new prop with default value
 onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false, isVideo = false, onCopyStreamUrl, selectedCount = 1, isStarred = false, onToggleStar, isTrashMode = false, onRestore, isVaultMode = false, onMoveToVault, onMoveToHome, isCloudMode = false, isVirtualFolder = false, isRestrictedEmptyArea = false, }) => {
     const menuRef = useRef(null);
     const isMobile = useIsMobile();
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            const firstItem = menuRef.current?.querySelector('button[role="menuitem"]:not([disabled])');
+            firstItem?.focus();
+        }, 50);
+        return () => clearTimeout(timer);
+    }, []);
+
     useEffect(() => {
         const handleClickOutside = (event) => {
             if (menuRef.current && !menuRef.current.contains(event.target)) {
@@ -18,18 +27,36 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
         const handleScroll = () => {
             onClose();
         };
-        const handleEscape = (event) => {
+        const handleKeyDown = (event) => {
             if (event.key === "Escape") {
+                event.preventDefault();
                 onClose();
+                return;
+            }
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                if (!menuRef.current) return;
+                const items = Array.from(
+                    menuRef.current.querySelectorAll('button[role="menuitem"]:not([disabled])')
+                );
+                if (items.length === 0) return;
+                const currentIndex = items.indexOf(document.activeElement);
+                let nextIndex = 0;
+                if (event.key === "ArrowDown") {
+                    nextIndex = currentIndex < items.length - 1 ? currentIndex + 1 : 0;
+                } else {
+                    nextIndex = currentIndex > 0 ? currentIndex - 1 : items.length - 1;
+                }
+                items[nextIndex]?.focus();
             }
         };
         document.addEventListener("mousedown", handleClickOutside);
         document.addEventListener("wheel", handleScroll);
-        document.addEventListener("keydown", handleEscape);
+        document.addEventListener("keydown", handleKeyDown);
         return () => {
             document.removeEventListener("mousedown", handleClickOutside);
             document.removeEventListener("wheel", handleScroll);
-            document.removeEventListener("keydown", handleEscape);
+            document.removeEventListener("keydown", handleKeyDown);
         };
     }, [onClose]);
     const handleAction = async (action) => {
@@ -418,7 +445,7 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs transition-opacity" onClick={onClose}/>
 
         {/* Bottom Sheet Card */}
-        <div ref={menuRef} className="fixed inset-x-0 bottom-0 z-50 bg-background border-t border-border rounded-t-2xl shadow-2xl overflow-hidden pb-6 pt-3 px-4 max-h-[85vh] overflow-y-auto animate-in slide-in-from-bottom duration-200" onContextMenu={(e) => {
+        <div ref={menuRef} role="menu" aria-label={itemName ? `Actions for ${itemName}` : "Folder actions"} className="fixed inset-x-0 bottom-0 z-50 bg-background border-t border-border rounded-t-2xl shadow-2xl overflow-hidden pb-6 pt-3 px-4 max-h-[85vh] overflow-y-auto animate-in slide-in-from-bottom duration-200" onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
             }}>
@@ -438,7 +465,7 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                 }
                 const Icon = item.icon;
                 const isDisabled = item.disabled || (item.action === "paste" && (!hasClipboard || !hasClipboard()));
-                return (<button key={item.action} onClick={() => !isDisabled && handleAction(item.action)} disabled={isDisabled} className={`w-full flex items-center justify-between px-4 py-3 min-h-[44px] rounded-xl text-left text-sm transition-colors ${isDisabled
+                return (<button key={item.action} role="menuitem" tabIndex={isDisabled ? -1 : 0} onClick={() => !isDisabled && handleAction(item.action)} disabled={isDisabled} className={`w-full flex items-center justify-between px-4 py-3 min-h-[44px] rounded-xl text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset ${isDisabled
                         ? "text-muted-foreground/40 cursor-not-allowed"
                         : item.danger
                             ? "text-destructive hover:bg-destructive/10 active:bg-destructive/20"
@@ -451,7 +478,7 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
             })}
           </div>
 
-          <button onClick={onClose} className="w-full mt-3 py-2.5 min-h-[44px] rounded-xl border border-border text-center text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent active:bg-accent/80 transition-colors">
+          <button onClick={onClose} className="w-full mt-3 py-2.5 min-h-[44px] rounded-xl border border-border text-center text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent active:bg-accent/80 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
             Cancel
           </button>
         </div>
@@ -466,7 +493,7 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
       {/* Backdrop for better visibility */}
       <div className="fixed inset-0 z-40" style={{ background: "transparent" }} onClick={onClose}/>
 
-      <div ref={menuRef} className="fixed z-50 bg-background/80 backdrop-blur-md border border-border/50 rounded-xl shadow-2xl overflow-hidden" style={{
+      <div ref={menuRef} role="menu" aria-label={itemName ? `Actions for ${itemName}` : "Folder actions"} className="fixed z-50 bg-background/80 backdrop-blur-md border border-border/50 rounded-xl shadow-2xl overflow-hidden" style={{
             left: `${adjustedX}px`,
             top: `${adjustedY}px`,
             width: `${menuWidth}px`,
@@ -479,7 +506,7 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
             }
             const Icon = item.icon;
             const isDisabled = item.disabled || (item.action === "paste" && (!hasClipboard || !hasClipboard()));
-            return (<button key={item.action} onClick={() => !isDisabled && handleAction(item.action)} disabled={isDisabled} className={`w-full flex items-center justify-between px-3 py-2 text-left text-sm transition-colors group ${isDisabled
+            return (<button key={item.action} role="menuitem" tabIndex={isDisabled ? -1 : 0} onClick={() => !isDisabled && handleAction(item.action)} disabled={isDisabled} className={`w-full flex items-center justify-between px-3 py-2 text-left text-sm transition-colors group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset ${isDisabled
                     ? "text-muted-foreground/50 cursor-not-allowed"
                     : item.danger
                         ? "text-foreground hover:bg-destructive hover:text-destructive-foreground"

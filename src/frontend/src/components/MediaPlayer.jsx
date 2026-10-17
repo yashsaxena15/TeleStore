@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { Play, Pause, RotateCcw, RotateCw, Volume2, Volume1, VolumeX, Settings, Maximize, Minimize, PictureInPicture2, Captions, Check, Download, X, ArrowLeft, Info, FileAudio, ChevronRight, Search, SlidersHorizontal, FileText, List, ExternalLink, Upload, } from "lucide-react";
+import { Play, Pause, RotateCcw, RotateCw, Volume2, Volume1, VolumeX, Settings, Maximize, Minimize, PictureInPicture2, Captions, Check, Download, X, ArrowLeft, Info, FileAudio, ChevronRight, Search, SlidersHorizontal, FileText, List, ExternalLink, Upload, Minimize2, Maximize2, } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { downloadManager } from "@/lib/downloadManager";
 import { toast } from "sonner";
@@ -73,6 +73,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
     const [isPiPActive, setIsPiPActive] = useState(false);
     const [canPiP, setCanPiP] = useState(false);
     const [hasPlaybackError, setHasPlaybackError] = useState(false);
+    const [isMini, setIsMini] = useState(false);
     // UI visibility states
     const [areControlsVisible, setAreControlsVisible] = useState(true);
     const [isScrubbing, setIsScrubbing] = useState(false);
@@ -801,33 +802,31 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
         return Math.min(100, Math.max(0, (bufferedEnd / duration) * 100));
     }, [bufferedEnd, duration]);
     const fileExt = useMemo(() => getFileExtension(fileName), [fileName]);
-    // If file is Audio or Voice, render Google Drive dark glassmorphic audio widget
+    // If file is Audio or Voice, render Google Drive dark glassmorphic audio widget in center dock
     if (isAudio) {
-        return (<div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:w-96 backdrop-blur-xl bg-zinc-950/95 text-white border border-white/10 rounded-2xl shadow-2xl z-50 p-4 transition-all duration-300 select-none animate-in fade-in slide-in-from-bottom-4" style={{
-                boxShadow: "0 20px 40px -15px rgba(0,0,0,0.8), 0 0 1px 1px rgba(255,255,255,0.1)",
-            }}>
+        return (<div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-2rem)] sm:w-[420px] max-w-[calc(100vw-2rem)] backdrop-blur-xl bg-card/95 text-card-foreground border border-border rounded-2xl shadow-2xl p-4 transition-all duration-300 select-none animate-in fade-in slide-in-from-bottom-4">
         <audio ref={mediaElementRef} src={mediaUrl} preload="auto" autoPlay onTimeUpdate={handleTimeUpdate} onProgress={handleProgress} onLoadedMetadata={handleLoadedMetadata} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onWaiting={() => setIsBuffering(true)} onPlaying={() => setIsBuffering(false)} onCanPlay={() => setIsBuffering(false)} onError={() => setIsBuffering(false)}/>
 
         {/* Top bar with Title & Badge */}
-        <div className="flex items-center justify-between pb-3 border-b border-white/10">
+        <div className="flex items-center justify-between pb-3 border-b border-border">
           <div className="flex items-center space-x-2.5 min-w-0 pr-2">
-            <div className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center flex-shrink-0 border border-blue-500/30">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center flex-shrink-0 border border-primary/20">
               <FileAudio className="w-4 h-4"/>
             </div>
             <div className="min-w-0">
-              <div className="text-sm font-medium truncate text-white/95">{fileName}</div>
-              <div className="flex items-center space-x-2 text-[11px] text-white/50">
-                <span className="font-mono uppercase">{fileExt}</span>
+              <div className="text-sm font-medium truncate text-foreground">{fileName}</div>
+              <div className="flex items-center space-x-2 text-[11px] text-muted-foreground">
+                <span className="font-mono uppercase text-primary font-semibold">{fileExt}</span>
                 <span>•</span>
                 <span>{fileType === "voice" ? "Voice Message" : "Audio Track"}</span>
               </div>
             </div>
           </div>
           <div className="flex items-center space-x-1 flex-shrink-0">
-            <button onClick={handleDownloadAction} className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors" title="Download audio" aria-label="Download audio">
+            <button onClick={handleDownloadAction} className="p-1.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Download audio" aria-label="Download audio">
               <Download className="w-4 h-4"/>
             </button>
-            <button onClick={onClose} className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors" title="Close player" aria-label="Close player">
+            <button onClick={onClose} className="p-1.5 rounded-full hover:bg-muted text-muted-foreground hover:text-destructive transition-colors" title="Close player" aria-label="Close player">
               <X className="w-4 h-4"/>
             </button>
           </div>
@@ -836,15 +835,15 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
         {/* Timeline */}
         <div className="pt-3 pb-1">
           <div ref={timelineRef} onPointerDown={handleTimelinePointerDown} onPointerMove={handleTimelinePointerMove} onPointerUp={handleTimelinePointerUp} onPointerLeave={handleTimelinePointerLeave} className="group relative h-4 flex items-center cursor-pointer touch-none">
-            <div className="w-full h-1.5 bg-white/20 rounded-full relative overflow-hidden group-hover:h-2 transition-all">
-              <div className="absolute left-0 top-0 h-full bg-white/30 rounded-full transition-all duration-150" style={{ width: `${bufferedPercent}%` }}/>
-              <div className="absolute left-0 top-0 h-full bg-blue-500 rounded-full transition-all duration-100" style={{ width: `${playedPercent}%` }}/>
+            <div className="w-full h-1.5 bg-secondary rounded-full relative overflow-hidden group-hover:h-2 transition-all">
+              <div className="absolute left-0 top-0 h-full bg-muted-foreground/30 rounded-full transition-all duration-150" style={{ width: `${bufferedPercent}%` }}/>
+              <div className="absolute left-0 top-0 h-full bg-primary rounded-full transition-all duration-100" style={{ width: `${playedPercent}%` }}/>
             </div>
             {/* Scrubber thumb */}
-            <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 bg-white rounded-full shadow-md scale-0 group-hover:scale-100 transition-transform pointer-events-none" style={{ left: `${playedPercent}%` }}/>
+            <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 bg-primary rounded-full shadow-md scale-0 group-hover:scale-100 transition-transform pointer-events-none" style={{ left: `${playedPercent}%` }}/>
           </div>
 
-          <div className="flex items-center justify-between text-xs text-white/60 font-mono pt-1">
+          <div className="flex items-center justify-between text-xs text-muted-foreground font-mono pt-1">
             <span>{formatTime(currentTime)}</span>
             <span>{formatTime(duration)}</span>
           </div>
@@ -853,14 +852,14 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
         {/* Audio Controls */}
         <div className="flex items-center justify-between pt-1">
           <div className="flex items-center space-x-1">
-            <button onClick={() => seekRelative(-10)} className="p-2 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-colors relative" title="Rewind 10 seconds" aria-label="Rewind 10 seconds">
+            <button onClick={() => seekRelative(-10)} className="p-2 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors relative" title="Rewind 10 seconds" aria-label="Rewind 10 seconds">
               <RotateCcw className="w-4 h-4"/>
               <span className="absolute text-[8px] font-bold top-2 left-2">10</span>
             </button>
-            <button onClick={togglePlay} className="p-2.5 rounded-full bg-blue-600 hover:bg-blue-500 text-white shadow-lg transition-transform active:scale-95" title={isPlaying ? "Pause" : "Play"} aria-label={isPlaying ? "Pause" : "Play"}>
+            <button onClick={togglePlay} className="p-2.5 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg transition-transform active:scale-95" title={isPlaying ? "Pause" : "Play"} aria-label={isPlaying ? "Pause" : "Play"}>
               {isPlaying ? <Pause className="w-5 h-5 fill-current"/> : <Play className="w-5 h-5 fill-current ml-0.5"/>}
             </button>
-            <button onClick={() => seekRelative(10)} className="p-2 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-colors relative" title="Forward 10 seconds" aria-label="Forward 10 seconds">
+            <button onClick={() => seekRelative(10)} className="p-2 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors relative" title="Forward 10 seconds" aria-label="Forward 10 seconds">
               <RotateCw className="w-4 h-4"/>
               <span className="absolute text-[8px] font-bold top-2 left-2">10</span>
             </button>
@@ -872,18 +871,50 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
                 const nextRates = [1, 1.25, 1.5, 2, 0.75];
                 const next = nextRates[(nextRates.indexOf(playbackRate) + 1) % nextRates.length];
                 handlePlaybackRateChange(next);
-            }} className="px-2 py-1 text-xs font-mono rounded-md hover:bg-white/10 text-white/75 hover:text-white border border-white/10 transition-colors" title="Playback speed">
+            }} className="px-2 py-1 text-xs font-mono rounded-md hover:bg-muted text-muted-foreground hover:text-foreground border border-border transition-colors" title="Playback speed">
               {playbackRate}x
             </button>
             <div className="flex items-center space-x-1 group">
-              <button onClick={toggleMute} className="p-1.5 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-colors" title={isMuted ? "Unmute" : "Mute"} aria-label={isMuted ? "Unmute" : "Mute"}>
-                {isMuted || volume === 0 ? (<VolumeX className="w-4 h-4"/>) : volume < 0.5 ? (<Volume1 className="w-4 h-4"/>) : (<Volume2 className="w-4 h-4"/>)}
+              <button onClick={toggleMute} className="p-1.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title={isMuted ? "Unmute" : "Mute"} aria-label={isMuted ? "Unmute" : "Mute"}>
+                {isMuted || volume === 0 ? (<VolumeX className="w-4 h-4 text-destructive"/>) : volume < 0.5 ? (<Volume1 className="w-4 h-4"/>) : (<Volume2 className="w-4 h-4"/>)}
               </button>
-              <input type="range" min="0" max="1" step="0.05" value={isMuted ? 0 : volume} onChange={(e) => handleVolumeChange(parseFloat(e.target.value))} className="w-16 h-1 accent-blue-500 bg-white/20 rounded-full cursor-pointer" aria-label="Volume slider"/>
+              <input type="range" min="0" max="1" step="0.05" value={isMuted ? 0 : volume} onChange={(e) => handleVolumeChange(parseFloat(e.target.value))} className="w-16 h-1 accent-primary bg-muted rounded-full cursor-pointer" aria-label="Volume slider"/>
             </div>
           </div>
         </div>
       </div>);
+    }
+    // Mini video player mode docked at bottom center
+    if (isMini) {
+        return (<div ref={containerRef} className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-2rem)] sm:w-96 aspect-video bg-black/95 rounded-2xl shadow-2xl border border-border overflow-hidden select-none animate-in fade-in slide-in-from-bottom-4 flex flex-col justify-between group">
+          <video ref={mediaElementRef} src={activeStreamUrl} preload="auto" playsInline crossOrigin="anonymous" className="w-full h-full object-contain pointer-events-none" onTimeUpdate={handleTimeUpdate} onProgress={handleProgress} onLoadedMetadata={handleLoadedMetadata} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onWaiting={() => setIsBuffering(true)} onPlaying={() => {
+                setIsBuffering(false);
+                setHasPlaybackError(false);
+            }} onCanPlay={() => {
+                setIsBuffering(false);
+                setHasPlaybackError(false);
+            }}/>
+          {/* Mini overlay controls on hover / touch */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-black/70 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity p-2.5 flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-white truncate max-w-[200px] drop-shadow-sm">{fileName}</span>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setIsMini(false)} className="p-1 rounded-md hover:bg-white/20 text-white transition-colors" aria-label="Expand to theater mode" title="Expand to theater mode">
+                  <Maximize2 className="w-4 h-4"/>
+                </button>
+                <button onClick={onClose} className="p-1 rounded-md hover:bg-white/20 text-white hover:text-red-400 transition-colors" aria-label="Close video" title="Close video">
+                  <X className="w-4 h-4"/>
+                </button>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <button onClick={togglePlay} className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition-transform active:scale-95" aria-label={isPlaying ? "Pause video" : "Play video"}>
+                {isPlaying ? <Pause className="w-4 h-4 fill-current"/> : <Play className="w-4 h-4 fill-current ml-0.5"/>}
+              </button>
+              <span className="text-[10px] font-mono text-white/90">{formatTime(currentTime)} / {formatTime(duration)}</span>
+            </div>
+          </div>
+        </div>);
     }
     // =========================================================================
     // Google Drive Style Video Player
@@ -1023,6 +1054,12 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
           </button>
           <button onClick={() => setActiveMenu((prev) => (prev === "info" ? "none" : "info"))} className={`p-2 rounded-full hover:bg-white/10 text-white/90 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[40px] min-h-[40px] flex items-center justify-center ${activeMenu === "info" ? "bg-white/20 text-white" : ""}`} title="File details" aria-label="File details">
             <Info className="w-5 h-5"/>
+          </button>
+          <button onClick={() => {
+            setIsMini(true);
+            showControls(3000);
+        }} className="p-2 rounded-full hover:bg-white/10 text-white/90 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[40px] min-h-[40px] flex items-center justify-center" title="Minimize to dock" aria-label="Minimize to dock">
+            <Minimize2 className="w-5 h-5"/>
           </button>
           <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10 text-white/90 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[40px] min-h-[40px] flex items-center justify-center" title="Close viewer" aria-label="Close viewer">
             <X className="w-5 h-5 sm:w-6 sm:h-6"/>
@@ -1235,7 +1272,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
             {/* Playback Speed Submenu */}
             {activeMenu === "speed" && (<div className="space-y-1">
                 <div className="flex items-center space-x-2 px-2 py-2 border-b border-white/10 text-sm font-medium">
-                  <button onClick={() => setActiveMenu("settings")} className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white">
+                  <button onClick={() => setActiveMenu("settings")} className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white" aria-label="Back to settings menu">
                     <ArrowLeft className="w-4 h-4"/>
                   </button>
                   <span>Playback Speed</span>
@@ -1256,7 +1293,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
             {/* Quality Submenu */}
             {activeMenu === "quality" && (<div className="space-y-1">
                 <div className="flex items-center space-x-2 px-2 py-2 border-b border-white/10 text-sm font-medium">
-                  <button onClick={() => setActiveMenu("settings")} className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white">
+                  <button onClick={() => setActiveMenu("settings")} className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white" aria-label="Back to settings menu">
                     <ArrowLeft className="w-4 h-4"/>
                   </button>
                   <span>Video Quality</span>
@@ -1289,7 +1326,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
             {/* Audio Tracks Submenu */}
             {activeMenu === "audio" && (<div className="space-y-1">
                 <div className="flex items-center space-x-2 px-2 py-2 border-b border-white/10 text-sm font-medium">
-                  <button onClick={() => setActiveMenu("settings")} className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white">
+                  <button onClick={() => setActiveMenu("settings")} className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white" aria-label="Back to settings menu">
                     <ArrowLeft className="w-4 h-4"/>
                   </button>
                   <span>Audio Tracks</span>
@@ -1310,7 +1347,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
             {/* Subtitles Submenu */}
             {activeMenu === "subtitles" && (<div className="space-y-2">
                 <div className="flex items-center space-x-2 px-2 py-2 border-b border-white/10 text-sm font-medium">
-                  <button onClick={() => setActiveMenu("settings")} className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white">
+                  <button onClick={() => setActiveMenu("settings")} className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white" aria-label="Back to settings menu">
                     <ArrowLeft className="w-4 h-4"/>
                   </button>
                   <span>Subtitles / CC</span>
@@ -1352,7 +1389,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
             {/* Chapters Submenu */}
             {activeMenu === "chapters" && (<div className="space-y-2">
                 <div className="flex items-center space-x-2 px-2 py-2 border-b border-white/10 text-sm font-medium">
-                  <button onClick={() => setActiveMenu("settings")} className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white">
+                  <button onClick={() => setActiveMenu("settings")} className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white" aria-label="Back to settings menu">
                     <ArrowLeft className="w-4 h-4"/>
                   </button>
                   <span>Chapters</span>
@@ -1366,7 +1403,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
             {/* Transcript Submenu */}
             {activeMenu === "transcript" && (<div className="space-y-2">
                 <div className="flex items-center space-x-2 px-2 py-2 border-b border-white/10 text-sm font-medium">
-                  <button onClick={() => setActiveMenu("settings")} className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white">
+                  <button onClick={() => setActiveMenu("settings")} className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white" aria-label="Back to settings menu">
                     <ArrowLeft className="w-4 h-4"/>
                   </button>
                   <span>Transcript</span>
@@ -1374,7 +1411,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
                 <div className="px-2 pt-1">
                   <div className="relative mb-3">
                     <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-white/40"/>
-                    <input type="text" placeholder="Search transcript..." value={transcriptSearch} onChange={(e) => setTranscriptSearch(e.target.value)} className="w-full pl-8 pr-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs text-white placeholder-white/40 focus:outline-none focus:ring-1 focus:ring-blue-500"/>
+                    <input type="text" placeholder="Search transcript..." value={transcriptSearch} onChange={(e) => setTranscriptSearch(e.target.value)} aria-label="Search transcript" className="w-full pl-8 pr-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs text-white placeholder-white/40 focus:outline-none focus:ring-1 focus:ring-blue-500"/>
                   </div>
                   <div className="p-4 text-center text-white/50 text-xs bg-white/5 rounded-xl border border-white/10">
                     <FileText className="w-8 h-8 mx-auto mb-2 text-white/30"/>

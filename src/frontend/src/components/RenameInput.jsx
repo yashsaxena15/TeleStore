@@ -49,5 +49,5 @@ export const RenameInput = ({ initialName, onSave, onCancel }) => {
             onCancel();
         }
     };
-    return (<Input ref={inputRef} value={value} onChange={(e) => setValue(e.target.value)} onBlur={handleSubmit} onKeyDown={handleKeyDown} className="h-7 text-xs bg-background" onClick={(e) => e.stopPropagation()}/>);
+    return (<Input ref={inputRef} value={value} onChange={(e) => setValue(e.target.value)} onBlur={handleSubmit} onKeyDown={handleKeyDown} aria-label="Rename item" className="h-7 text-xs bg-background" onClick={(e) => e.stopPropagation()}/>);
 };

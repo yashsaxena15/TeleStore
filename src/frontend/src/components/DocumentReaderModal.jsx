@@ -50,15 +50,44 @@ export const DocumentReaderModal = ({ url, fileName, fileExtension, onClose, }) 
     const [comicPageIndex, setComicPageIndex] = useState(0);
     const modalRef = useRef(null);
     const docxContainerRef = useRef(null);
-    // Keyboard shortcut for Escape
+    const previousActiveElement = useRef(null);
+
+    // Keyboard shortcut for Escape and focus trapping
     useEffect(() => {
+        previousActiveElement.current = document.activeElement;
         const handleKeyDown = (e) => {
             if (e.key === "Escape") {
                 onClose();
+                return;
+            }
+            if (e.key === "Tab") {
+                if (!modalRef.current) return;
+                const focusables = modalRef.current.querySelectorAll(
+                    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+                );
+                if (focusables.length === 0) return;
+                const first = focusables[0];
+                const last = focusables[focusables.length - 1];
+                if (e.shiftKey) {
+                    if (document.activeElement === first) {
+                        e.preventDefault();
+                        last.focus();
+                    }
+                } else {
+                    if (document.activeElement === last) {
+                        e.preventDefault();
+                        first.focus();
+                    }
+                }
             }
         };
         document.addEventListener("keydown", handleKeyDown);
-        return () => document.removeEventListener("keydown", handleKeyDown);
+        return () => {
+            document.removeEventListener("keydown", handleKeyDown);
+            if (previousActiveElement.current && typeof previousActiveElement.current.focus === "function") {
+                previousActiveElement.current.focus();
+            }
+        };
     }, [onClose]);
     // Load document content depending on type
     useEffect(() => {
@@ -168,7 +197,7 @@ export const DocumentReaderModal = ({ url, fileName, fileExtension, onClose, }) 
         }
     };
     const downloadUrl = `${url}&download=1`;
-    return (<div ref={modalRef} className="fixed inset-0 z-50 bg-black/90 flex flex-col backdrop-blur-sm animate-in fade-in duration-200">
+    return (<div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="doc-reader-title" className="fixed inset-0 z-50 bg-black/90 flex flex-col backdrop-blur-sm animate-in fade-in duration-200">
       {/* Top Navigation Bar */}
       <header className="h-14 bg-zinc-900/90 border-b border-zinc-800 px-4 flex items-center justify-between select-none shrink-0 z-20">
         <div className="flex items-center gap-3 min-w-0 pr-4">
@@ -176,7 +205,7 @@ export const DocumentReaderModal = ({ url, fileName, fileExtension, onClose, }) 
             {isPdf ? (<FileText className="w-5 h-5 text-red-400"/>) : isEpub || isComic ? (<BookOpen className="w-5 h-5 text-emerald-400"/>) : isDocx ? (<FileText className="w-5 h-5 text-blue-400"/>) : isSpreadsheet ? (<FileSpreadsheet className="w-5 h-5 text-emerald-400"/>) : isPresentation ? (<Presentation className="w-5 h-5 text-orange-400"/>) : (<FileText className="w-5 h-5 text-amber-400"/>)}
           </div>
           <div className="min-w-0">
-            <h2 className="text-sm sm:text-base font-medium text-zinc-100 truncate max-w-xs sm:max-w-md md:max-w-lg">
+            <h2 id="doc-reader-title" className="text-sm sm:text-base font-medium text-zinc-100 truncate max-w-xs sm:max-w-md md:max-w-lg">
               {fileName}
             </h2>
             <p className="text-xs text-zinc-400 uppercase tracking-wider font-semibold">
@@ -193,28 +222,28 @@ export const DocumentReaderModal = ({ url, fileName, fileExtension, onClose, }) 
         <div className="flex items-center gap-1.5 sm:gap-2">
           {/* Code/Text Zoom Controls */}
           {(isCodeOrText || isMarkdown) && (<div className="hidden sm:flex items-center gap-1 bg-zinc-800 rounded p-0.5 mr-2">
-              <button onClick={() => setFontSize((s) => Math.max(10, s - 2))} className="p-1.5 text-zinc-400 hover:text-white rounded hover:bg-zinc-700 transition" title="Decrease font size">
+              <button onClick={() => setFontSize((s) => Math.max(10, s - 2))} aria-label="Decrease font size" className="p-1.5 text-zinc-400 hover:text-white rounded hover:bg-zinc-700 transition" title="Decrease font size">
                 <ZoomOut className="w-4 h-4"/>
               </button>
               <span className="text-xs text-zinc-300 px-1 font-mono">{fontSize}px</span>
-              <button onClick={() => setFontSize((s) => Math.min(24, s + 2))} className="p-1.5 text-zinc-400 hover:text-white rounded hover:bg-zinc-700 transition" title="Increase font size">
+              <button onClick={() => setFontSize((s) => Math.min(24, s + 2))} aria-label="Increase font size" className="p-1.5 text-zinc-400 hover:text-white rounded hover:bg-zinc-700 transition" title="Increase font size">
                 <ZoomIn className="w-4 h-4"/>
               </button>
             </div>)}
 
           {/* Copy Button for text files */}
-          {(isCodeOrText || isMarkdown) && textContent && (<button onClick={handleCopy} className="p-2 text-zinc-400 hover:text-white rounded hover:bg-zinc-800 transition" title="Copy content">
+          {(isCodeOrText || isMarkdown) && textContent && (<button onClick={handleCopy} aria-label="Copy content" className="p-2 text-zinc-400 hover:text-white rounded hover:bg-zinc-800 transition" title="Copy content">
               {copied ? <Check className="w-4 h-4 text-emerald-400"/> : <Copy className="w-4 h-4"/>}
             </button>)}
 
           {/* Comic Mode Toggle */}
           {isComic && comicImages.length > 0 && (<div className="flex items-center bg-zinc-800 rounded p-0.5 mr-2">
-              <button onClick={() => setComicMode("webtoon")} className={`px-2 py-1 text-xs rounded transition ${comicMode === "webtoon"
+              <button onClick={() => setComicMode("webtoon")} aria-label="Continuous vertical scroll mode" className={`px-2 py-1 text-xs rounded transition ${comicMode === "webtoon"
                 ? "bg-primary text-primary-foreground font-semibold"
                 : "text-zinc-400 hover:text-white"}`} title="Continuous Vertical Scroll (Webtoon mode)">
                 Scroll
               </button>
-              <button onClick={() => setComicMode("paginated")} className={`px-2 py-1 text-xs rounded transition ${comicMode === "paginated"
+              <button onClick={() => setComicMode("paginated")} aria-label="Paginated page flip mode" className={`px-2 py-1 text-xs rounded transition ${comicMode === "paginated"
                 ? "bg-primary text-primary-foreground font-semibold"
                 : "text-zinc-400 hover:text-white"}`} title="Page Flip Mode">
                 Flip
@@ -222,22 +251,22 @@ export const DocumentReaderModal = ({ url, fileName, fileExtension, onClose, }) 
             </div>)}
 
           {/* Open in New Tab Button */}
-          <a href={url} target="_blank" rel="noopener noreferrer" className="p-2 text-zinc-400 hover:text-white rounded hover:bg-zinc-800 transition" title="Open in new browser tab">
+          <a href={url} target="_blank" rel="noopener noreferrer" aria-label="Open in new browser tab" className="p-2 text-zinc-400 hover:text-white rounded hover:bg-zinc-800 transition" title="Open in new browser tab">
             <ExternalLink className="w-4 h-4"/>
           </a>
 
           {/* Download Direct */}
-          <a href={downloadUrl} className="p-2 text-zinc-400 hover:text-white rounded hover:bg-zinc-800 transition" title="Download file">
+          <a href={downloadUrl} aria-label="Download file" className="p-2 text-zinc-400 hover:text-white rounded hover:bg-zinc-800 transition" title="Download file">
             <Download className="w-4 h-4"/>
           </a>
 
           {/* Fullscreen Toggle */}
-          <button onClick={toggleFullscreen} className="p-2 text-zinc-400 hover:text-white rounded hover:bg-zinc-800 transition" title="Toggle fullscreen">
+          <button onClick={toggleFullscreen} aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"} className="p-2 text-zinc-400 hover:text-white rounded hover:bg-zinc-800 transition" title="Toggle fullscreen">
             {isFullscreen ? <Minimize2 className="w-4 h-4"/> : <Maximize2 className="w-4 h-4"/>}
           </button>
 
           {/* Close Modal */}
-          <button onClick={onClose} className="p-2 text-zinc-400 hover:text-red-400 rounded hover:bg-zinc-800 transition ml-1" title="Close (Esc)">
+          <button onClick={onClose} aria-label="Close document reader" className="p-2 text-zinc-400 hover:text-red-400 rounded hover:bg-zinc-800 transition ml-1" title="Close (Esc)">
             <X className="w-5 h-5"/>
           </button>
         </div>
@@ -283,13 +312,13 @@ export const DocumentReaderModal = ({ url, fileName, fileExtension, onClose, }) 
                   <img src={comicImages[comicPageIndex]} alt={`Page ${comicPageIndex + 1}`} className="max-h-full max-w-full object-contain shadow-2xl"/>
                 </div>
                 <div className="h-14 flex items-center gap-4 text-sm text-zinc-300">
-                  <button disabled={comicPageIndex === 0} onClick={() => setComicPageIndex((p) => Math.max(0, p - 1))} className="px-4 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 transition font-medium">
+                  <button disabled={comicPageIndex === 0} onClick={() => setComicPageIndex((p) => Math.max(0, p - 1))} aria-label="Previous page" className="px-4 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 transition font-medium">
                     Previous
                   </button>
                   <span className="font-mono text-xs">
                     {comicPageIndex + 1} / {comicImages.length}
                   </span>
-                  <button disabled={comicPageIndex === comicImages.length - 1} onClick={() => setComicPageIndex((p) => Math.min(comicImages.length - 1, p + 1))} className="px-4 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 transition font-medium">
+                  <button disabled={comicPageIndex === comicImages.length - 1} onClick={() => setComicPageIndex((p) => Math.min(comicImages.length - 1, p + 1))} aria-label="Next page" className="px-4 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 transition font-medium">
                     Next
                   </button>
                 </div>
