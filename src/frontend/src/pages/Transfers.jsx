@@ -10,7 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { groupRemoteTransfers } from "@/lib/transferGrouping";
 export const Transfers = () => {
     const navigate = useNavigate();
-    const { uploads, downloads, remoteTransfers, stats, pauseUpload, resumeUpload, cancelUpload, retryUpload, pauseDownload, resumeDownload, cancelDownload, retryDownload, cancelRemoteTransfer, cancelRemoteGroup, resumeRemoteGroup, pauseAll, resumeAll, cancelAll, clearCompleted } = useTransferManager();
+    const { uploads, downloads, remoteTransfers, stats, pauseUpload, resumeUpload, cancelUpload, retryUpload, pauseDownload, resumeDownload, cancelDownload, retryDownload, cancelRemoteTransfer, cancelRemoteGroup, resumeRemoteGroup, retryRemoteTransfer, pauseAll, resumeAll, cancelAll, clearCompleted } = useTransferManager();
     const [activeTab, setActiveTab] = useState("all");
     const [expandedGroups, setExpandedGroups] = useState({});
     const toggleGroup = (groupId) => {
@@ -273,7 +273,7 @@ export const Transfers = () => {
                               {expandedGroups[item.group_id] ? (<>Hide Files <ChevronUp className="w-3.5 h-3.5"/></>) : (<>Show Files ({item.items.length}) <ChevronDown className="w-3.5 h-3.5"/></>)}
                             </Button>)}
 
-                          {isPausedQuota && (<Button variant="outline" size="sm" className="h-8 px-2.5 text-xs flex items-center gap-1.5 text-amber-700 border-amber-400 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-600 font-medium shadow-xs" title="Bypass 24h wait and attempt transfer immediately" onClick={() => {
+                          {(isPausedQuota || (isGroup && (item.items?.some(i => i.status === 'paused_quota' || i.status === 'failed') || (isQueued && item.completedCount > 0)))) && (<Button variant="outline" size="sm" className="h-8 px-2.5 text-xs flex items-center gap-1.5 text-amber-700 border-amber-400 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-600 font-medium shadow-xs" title={isPausedQuota ? "Bypass 24h wait and attempt transfer immediately" : "Resume or retry remaining files"} onClick={() => {
                             if (isGroup) {
                                 resumeRemoteGroup(item.group_id);
                             }
@@ -281,8 +281,7 @@ export const Transfers = () => {
                                 resumeRemoteGroup(item.id);
                             }
                         }}>
-                              <Play className="w-3.5 h-3.5 fill-current"/>
-                              Resume Now
+                              {isPausedQuota ? (<><Play className="w-3.5 h-3.5 fill-current"/> Resume Now</>) : (<><RotateCcw className="w-3.5 h-3.5"/> Resume Remaining</>)}
                             </Button>)}
 
                           {!isRemote && isTransferring && (<Button variant="outline" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" title="Pause" onClick={() => isUpload ? pauseUpload(item.id) : pauseDownload(item.id)}>
@@ -311,6 +310,10 @@ export const Transfers = () => {
                             </Button>)}
 
                           {isFailed && !isRemote && (<Button variant="outline" size="icon" className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30" title="Retry" onClick={() => isUpload ? retryUpload(item.id) : retryDownload(item)}>
+                              <RotateCcw className="w-4 h-4"/>
+                            </Button>)}
+
+                          {isFailed && isRemote && (<Button variant="outline" size="icon" className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30" title="Retry transfer" onClick={() => isGroup ? resumeRemoteGroup(item.group_id) : retryRemoteTransfer(item.id)}>
                               <RotateCcw className="w-4 h-4"/>
                             </Button>)}
 
@@ -365,6 +368,9 @@ export const Transfers = () => {
                                                 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
                                     {sub.status === 'paused_quota' ? 'PAUSED (QUOTA)' : sub.status.toUpperCase()}
                                   </span>
+                                  {sub.status === 'failed' && (<Button variant="ghost" size="icon" className="h-6 w-6 text-blue-500 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30" onClick={() => retryRemoteTransfer(sub.id)} title="Retry this file">
+                                      <RotateCcw className="w-3 h-3"/>
+                                    </Button>)}
                                   {(sub.status === 'downloading' || sub.status === 'uploading_tg' || sub.status === 'queued' || sub.status === 'paused_quota') && (<Button variant="ghost" size="icon" className="h-6 w-6 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30" onClick={() => cancelRemoteTransfer(sub.id)} title="Cancel this file">
                                       <X className="w-3 h-3"/>
                                     </Button>)}

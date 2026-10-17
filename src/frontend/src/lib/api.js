@@ -1083,6 +1083,19 @@ export const api = {
         }
         return response.json();
     },
+    async retryRemoteTransfer(task_id) {
+        const response = await fetchWithTimeout(`${getApiBaseUrl()}/transfers/remote/retry`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ task_id }),
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || 'Failed to retry remote transfer');
+        }
+        return response.json();
+    },
     async clearCompletedRemoteTasks() {
         const response = await fetchWithTimeout(`${getApiBaseUrl()}/transfers/remote/clear-completed`, {
             method: 'POST',
