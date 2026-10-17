@@ -15,6 +15,7 @@ import authService from "@/lib/authService";
 // Import the error provider
 import { ErrorProvider } from "@/contexts/ErrorHandlerContext";
 import { MediaPlayerProvider } from "@/contexts/MediaPlayerContext";
+import { initTheme } from "@/lib/theme";
 const queryClient = new QueryClient();
 // Debug component to log current route
 const RouteDebugger = () => {
@@ -60,25 +61,8 @@ const App = () => {
         checkAuth();
     }, []);
     useEffect(() => {
-        // Check system preference
-        const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-        const handleChange = (e) => {
-            if (e.matches) {
-                document.documentElement.classList.add('dark');
-                logger.info("Dark mode enabled");
-            }
-            else {
-                document.documentElement.classList.remove('dark');
-                logger.info("Light mode enabled");
-            }
-        };
-        // Initial check
-        handleChange(mediaQuery);
-        // Listen for changes
-        mediaQuery.addEventListener('change', handleChange);
-        return () => {
-            mediaQuery.removeEventListener('change', handleChange);
-        };
+        // Initialize theme preference (dark / light / system) with listener cleanup
+        return initTheme();
     }, []);
     return (<QueryClientProvider client={queryClient}>
       <ErrorProvider>

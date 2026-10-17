@@ -22,6 +22,17 @@ import { toast } from "sonner";
 import { trackArchiveTask } from "@/lib/archiveTracker";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, } from "@/components/ui/alert-dialog";
 import authService from "@/lib/authService";
+import {
+    calculateNextIndex,
+    computeRangeSelection,
+    isInputOrModalActive,
+    isInsideFileGrid,
+    isButtonOrLink,
+    canRenameItem,
+    isSystemProtectedFolder,
+    ARROW_KEYS
+} from "@/lib/fileKeyboardNavigation";
+import { getItemDuration, isItemStarred } from "@/lib/fileCardHelpers";
 export const getItemKey = (item) => item.id || item.file_unique_id || item.name;
 export const FileGrid = ({ items, viewMode, onNavigate, itemCount, onCopy, onCut, onPaste, onDelete, onRename, onMove, onDownload, renamingItem, onRenameConfirm, onRenameCancel, currentFolder, onNewFolder, onUploadFiles, // Add this
 onUploadFolder, // Add this
@@ -58,6 +69,11 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
     const [isBatchDeleting, setIsBatchDeleting] = useState(false);
     const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false);
     const [propertiesItem, setPropertiesItem] = useState(null);
+    const [focusedIndex, setFocusedIndex] = useState(null);
+    const gridContainerRef = useRef(null);
+    const listContainerRef = useRef(null);
+    const itemElementsRef = useRef([]);
+    const stateRef = useRef({});
     const lastTapRef = useRef(null);
     const lastOpenTimeRef = useRef(0);
     // If selectedItems becomes empty, automatically turn off selection mode
@@ -66,13 +82,95 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             setIsSelectionMode(false);
         }
     }, [selectedItems.size]);
-    // Clear selection when navigating folders
+    // Clear selection and focus when navigating folders
     useEffect(() => {
         setSelectedItems(new Set());
         setLastSelectedIndex(null);
         lastTapRef.current = null;
         setIsSelectionMode(false);
+        setFocusedIndex(null);
     }, [currentFolder, currentApiPath]);
+    // Keep focusedIndex within range when items change
+    useEffect(() => {
+        if (focusedIndex !== null && items && items.length > 0 && focusedIndex >= items.length) {
+            setFocusedIndex(items.length - 1);
+        } else if ((!items || items.length === 0) && focusedIndex !== null) {
+            setFocusedIndex(null);
+        }
+    }, [items, focusedIndex]);
+    // Prune selectedItems if items are removed, filtered, or deleted
+    useEffect(() => {
+        setSelectedItems(prev => {
+            if (!prev || prev.size === 0) return prev;
+            if (!items || items.length === 0) {
+                setLastSelectedIndex(null);
+                return new Set();
+            }
+            const currentItemKeys = new Set(items.map(getItemKey));
+            let changed = false;
+            const nextSelected = new Set();
+            for (const key of prev) {
+                if (currentItemKeys.has(key)) {
+                    nextSelected.add(key);
+                } else {
+                    changed = true;
+                }
+            }
+            if (changed) {
+                if (nextSelected.size === 0) {
+                    setLastSelectedIndex(null);
+                }
+                return nextSelected;
+            }
+            return prev;
+        });
+    }, [items]);
+    // Keep active focused DOM element in view and focused
+    useEffect(() => {
+        if (focusedIndex !== null && itemElementsRef.current[focusedIndex]) {
+            const el = itemElementsRef.current[focusedIndex];
+            const active = typeof document !== 'undefined' ? document.activeElement : null;
+            const isTyping = active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable);
+            if (!isTyping) {
+                try {
+                    el.focus({ preventScroll: true });
+                } catch (_) {}
+            }
+            try {
+                el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+            } catch (_) {}
+        }
+    }, [focusedIndex]);
+    const getGridColumns = () => {
+        if (viewMode === "list") return 1;
+        const container = gridContainerRef.current;
+        if (container) {
+            const children = container.children;
+            if (children.length > 1) {
+                const firstTop = children[0].offsetTop;
+                let cols = 0;
+                for (let i = 0; i < children.length; i++) {
+                    if (Math.abs(children[i].offsetTop - firstTop) < 12) {
+                        cols++;
+                    } else {
+                        break;
+                    }
+                }
+                if (cols > 0 && cols < children.length) {
+                    return cols;
+                }
+            }
+            const width = container.clientWidth || 0;
+            if (width >= 1536) return 12;
+            if (width >= 1280) return 9;
+            if (width >= 1024) return 8;
+            if (width >= 768) return 6;
+            if (width >= 640) return 4;
+            if (width >= 480) return 3;
+            return 2;
+        }
+        return 1;
+    };
     // Warn user if they try to close or refresh the page while an upload is in progress
     useEffect(() => {
         const isAnyUploading = Object.values(uploadProgressMap).some(f => f.status === 'uploading');
@@ -105,62 +203,273 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             window.removeEventListener("indexChatNotFound", handleIndexChatNotFound);
         };
     }, [onRefresh, onFileUploaded]);
-    // Keyboard shortcuts: Escape to clear selection, Ctrl+A / Cmd+A to select all, Alt+Enter for Properties
+    // Keyboard shortcuts: Escape to clear selection, Ctrl+A / Cmd+A to select all, Alt+Enter for Properties, Arrow keys, Space, Enter, F2, Delete
     useEffect(() => {
         const handleKeyDown = (e) => {
+            const s = stateRef.current;
             const target = e.target;
-            if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+
+            // 1. Guard against firing while typing in inputs, textareas, selects, editable elements,
+            // open dialogs (Radix modals), or when user is navigating the sidebar/header.
+            const isModalActive = Boolean(
+                s.propertiesItem ||
+                s.batchDeleteDialogOpen ||
+                s.imageViewer ||
+                s.documentReader ||
+                s.archiveInspect ||
+                s.compressDialog ||
+                s.showTelegramVerificationDialog ||
+                s.showIndexChatDialog ||
+                s.renamingItem ||
+                (typeof document !== 'undefined' && document.querySelector('[role="dialog"], [role="alertdialog"]'))
+            );
+
+            if (isInputOrModalActive({ target, isModalOpen: isModalActive })) {
                 return;
             }
+
+            // Guard against shortcuts firing when focus is outside the file grid
+            if (!isInsideFileGrid(target)) {
+                return;
+            }
+
+            // Guard against Space / Enter hijacking native button or link actions
+            if (isButtonOrLink(target) && (e.key === " " || e.code === "Space" || e.key === "Enter")) {
+                return;
+            }
+
+            // 2. Escape: clear selection, cancel selection mode, close context menu
             if (e.key === "Escape") {
-                if (selectedItems.size > 0) {
+                if (s.selectedItems && s.selectedItems.size > 0) {
+                    e.preventDefault();
                     setSelectedItems(new Set());
                     setLastSelectedIndex(null);
                     setIsSelectionMode(false);
                 }
+                if (s.contextMenu) {
+                    setContextMenu(null);
+                }
+                return;
             }
-            else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
-                e.preventDefault();
-                const allKeys = items.map(getItemKey);
-                setSelectedItems(new Set(allKeys));
-                setIsSelectionMode(true);
+
+            // If there are no items to interact with, ignore remaining shortcuts
+            if (!s.items || s.items.length === 0) {
+                return;
             }
-            else if (e.altKey && e.key === "Enter") {
+
+            // 3. Arrow Keys / Home / End / PageUp / PageDown Navigation
+            if (ARROW_KEYS.has(e.key)) {
                 e.preventDefault();
-                if (selectedItems.size === 1) {
-                    const selectedKey = Array.from(selectedItems)[0];
-                    const found = items.find(i => getItemKey(i) === selectedKey);
-                    if (found) {
-                        setPropertiesItem(found);
+                e.stopPropagation();
+                e.stopImmediatePropagation?.();
+
+                const cols = s.getGridColumns ? s.getGridColumns() : 1;
+                const nextIdx = calculateNextIndex({
+                    currentIndex: s.focusedIndex,
+                    totalItems: s.items.length,
+                    key: e.key,
+                    viewMode: s.viewMode,
+                    cols,
+                });
+
+                if (e.shiftKey) {
+                    // Range selection with Shift + Arrow
+                    const anchor = s.lastSelectedIndex !== null ? s.lastSelectedIndex : (s.focusedIndex ?? 0);
+                    if (s.lastSelectedIndex === null) {
+                        setLastSelectedIndex(anchor);
+                    }
+                    const range = computeRangeSelection({
+                        anchorIndex: anchor,
+                        targetIndex: nextIdx,
+                        items: s.items,
+                        getItemKey,
+                    });
+                    setSelectedItems(range);
+                    setIsSelectionMode(true);
+                    setFocusedIndex(nextIdx);
+                } else {
+                    // Arrow navigation without Shift
+                    setFocusedIndex(nextIdx);
+                    if (!s.isSelectionMode) {
+                        setLastSelectedIndex(nextIdx);
+                        if (s.selectedItems && s.selectedItems.size === 1) {
+                            const targetItem = s.items[nextIdx];
+                            if (targetItem) {
+                                setSelectedItems(new Set([getItemKey(targetItem)]));
+                            }
+                        }
                     }
                 }
+                return;
             }
-            else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
-                if (selectedItems.size > 0) {
+
+            // 4. Space: Toggle item selection for focused item
+            if (e.key === " " || e.code === "Space") {
+                if (s.focusedIndex !== null && s.items[s.focusedIndex]) {
                     e.preventDefault();
-                    const selectedList = items.filter(it => selectedItems.has(getItemKey(it)));
-                    if (selectedList.length > 0)
-                        onCopy(selectedList);
+                    e.stopPropagation();
+                    e.stopImmediatePropagation?.();
+
+                    const item = s.items[s.focusedIndex];
+                    const itemKey = getItemKey(item);
+                    const nextSelected = new Set(s.selectedItems || []);
+                    if (nextSelected.has(itemKey)) {
+                        nextSelected.delete(itemKey);
+                        if (nextSelected.size === 0) {
+                            setIsSelectionMode(false);
+                        }
+                    } else {
+                        nextSelected.add(itemKey);
+                        setIsSelectionMode(true);
+                    }
+                    setSelectedItems(nextSelected);
+                    setLastSelectedIndex(s.focusedIndex);
                 }
+                return;
             }
-            else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x") {
-                if (selectedItems.size > 0) {
-                    e.preventDefault();
-                    const selectedList = items.filter(it => selectedItems.has(getItemKey(it)));
-                    if (selectedList.length > 0)
-                        onCut(selectedList);
+
+            // 5. Enter: Open item (folder navigation or preview)
+            if (e.key === "Enter" && !e.altKey && !e.ctrlKey && !e.metaKey) {
+                let targetItem = null;
+                if (s.focusedIndex !== null && s.items[s.focusedIndex]) {
+                    targetItem = s.items[s.focusedIndex];
+                } else if (s.selectedItems && s.selectedItems.size === 1) {
+                    const selKey = Array.from(s.selectedItems)[0];
+                    targetItem = s.items.find(i => getItemKey(i) === selKey);
                 }
+                if (targetItem && s.handleItemOpen) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    s.handleItemOpen(targetItem);
+                }
+                return;
             }
-            else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
-                if (hasClipboard && hasClipboard() && onPaste) {
-                    e.preventDefault();
-                    onPaste();
+
+            // 6. F2: Safe Rename flow
+            if (e.key === "F2") {
+                e.preventDefault();
+                e.stopPropagation();
+                let targetItem = null;
+                let targetIndex = null;
+                if (s.selectedItems && s.selectedItems.size === 1) {
+                    const selKey = Array.from(s.selectedItems)[0];
+                    targetIndex = s.items.findIndex(i => getItemKey(i) === selKey);
+                    if (targetIndex !== -1) {
+                        targetItem = s.items[targetIndex];
+                    }
+                } else if (s.focusedIndex !== null && s.items[s.focusedIndex]) {
+                    targetItem = s.items[s.focusedIndex];
+                    targetIndex = s.focusedIndex;
                 }
+
+                if (targetItem && targetIndex !== null && s.onRename) {
+                    const check = canRenameItem({
+                        item: targetItem,
+                        isTrashMode: s.isTrashMode,
+                        isEffectiveInboxMode: s.isEffectiveInboxMode,
+                        isCloudVirtualSection: s.isCloudVirtualSection,
+                        currentFolder: s.currentFolder,
+                        currentApiPath: s.currentApiPath,
+                        currentPath: s.currentPath,
+                    });
+                    if (!check.allowed) {
+                        toast.error(check.reason);
+                        return;
+                    }
+                    s.onRename(targetItem, targetIndex);
+                }
+                return;
+            }
+
+            // 7. Delete / Cmd+Backspace: Safe Delete flow (NEVER bypasses confirmation)
+            if (e.key === "Delete" || ((e.metaKey || e.ctrlKey) && e.key === "Backspace")) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (s.selectedItems && s.selectedItems.size > 0) {
+                    setBatchDeleteDialogOpen(true);
+                } else if (s.focusedIndex !== null && s.items[s.focusedIndex]) {
+                    const item = s.items[s.focusedIndex];
+                    if (isSystemProtectedFolder(item, s.currentPath)) {
+                        toast.error("Cannot delete default system folders");
+                        return;
+                    }
+                    if (s.onDelete) {
+                        s.onDelete(item, s.focusedIndex);
+                    }
+                }
+                return;
+            }
+
+            // 8. Alt+Enter: Properties dialog
+            if (e.altKey && e.key === "Enter") {
+                e.preventDefault();
+                e.stopPropagation();
+                let targetItem = null;
+                if (s.selectedItems && s.selectedItems.size === 1) {
+                    const selKey = Array.from(s.selectedItems)[0];
+                    targetItem = s.items.find(i => getItemKey(i) === selKey);
+                } else if (s.focusedIndex !== null && s.items[s.focusedIndex]) {
+                    targetItem = s.items[s.focusedIndex];
+                }
+                if (targetItem) {
+                    setPropertiesItem(targetItem);
+                }
+                return;
+            }
+
+            // 9. Ctrl/Cmd + A: Select All
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+                e.preventDefault();
+                e.stopPropagation();
+                const allKeys = s.items.map(getItemKey);
+                setSelectedItems(new Set(allKeys));
+                setIsSelectionMode(true);
+                return;
+            }
+
+            // 10. Ctrl/Cmd + C: Copy
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+                if (s.selectedItems && s.selectedItems.size > 0 && s.onCopy) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const selectedList = s.items.filter(it => s.selectedItems.has(getItemKey(it)));
+                    if (selectedList.length > 0) s.onCopy(selectedList);
+                } else if (s.focusedIndex !== null && s.items[s.focusedIndex] && s.onCopy) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    s.onCopy([s.items[s.focusedIndex]]);
+                }
+                return;
+            }
+
+            // 11. Ctrl/Cmd + X: Cut
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x") {
+                if (s.selectedItems && s.selectedItems.size > 0 && s.onCut) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const selectedList = s.items.filter(it => s.selectedItems.has(getItemKey(it)));
+                    if (selectedList.length > 0) s.onCut(selectedList);
+                } else if (s.focusedIndex !== null && s.items[s.focusedIndex] && s.onCut) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    s.onCut([s.items[s.focusedIndex]]);
+                }
+                return;
+            }
+
+            // 12. Ctrl/Cmd + V: Paste
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+                if (s.hasClipboard && s.hasClipboard() && s.onPaste) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    s.onPaste();
+                }
+                return;
             }
         };
-        window.addEventListener("keydown", handleKeyDown);
-        return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [items, selectedItems]);
+        window.addEventListener("keydown", handleKeyDown, { capture: true });
+        return () => window.removeEventListener("keydown", handleKeyDown, { capture: true });
+    }, []);
     const dragCounter = useRef(0); // Track drag enter/leave events
     const draggedItemRef = useRef(null); // Ref for dragged item to access in Tauri events    // Update the ref whenever draggedItem changes
     useEffect(() => {
@@ -481,6 +790,39 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             onDownload(item);
         }
     };
+    // Keep stateRef fresh for capture-phase keyboard navigation
+    stateRef.current = {
+        items,
+        selectedItems,
+        focusedIndex,
+        lastSelectedIndex,
+        isSelectionMode,
+        viewMode,
+        isTrashMode,
+        isEffectiveInboxMode,
+        isCloudVirtualSection,
+        currentFolder,
+        currentApiPath,
+        currentPath,
+        onRename,
+        onDelete,
+        onCopy,
+        onCut,
+        onPaste,
+        hasClipboard,
+        propertiesItem,
+        batchDeleteDialogOpen,
+        imageViewer,
+        documentReader,
+        archiveInspect,
+        compressDialog,
+        showTelegramVerificationDialog,
+        showIndexChatDialog,
+        renamingItem,
+        contextMenu,
+        handleItemOpen,
+        getGridColumns,
+    };
     const handleItemClick = (e, item, index) => {
         if (isLongPressRef.current) {
             isLongPressRef.current = false;
@@ -497,6 +839,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             }
             setSelectedItems(newSelected);
             setIsSelectionMode(true);
+            setFocusedIndex(index);
             return;
         }
         else if (e.ctrlKey || e.metaKey) {
@@ -514,6 +857,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             }
             setSelectedItems(newSelected);
             setLastSelectedIndex(index);
+            setFocusedIndex(index);
             return;
         }
         // When multi-selection mode is active (activated via circle checkbox or select all)
@@ -530,6 +874,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             }
             setSelectedItems(newSelected);
             setLastSelectedIndex(index);
+            setFocusedIndex(index);
             return;
         }
         // Normal mode: Single click/tap OPENS IMMEDIATELY! (Both folders and files)
@@ -537,6 +882,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
         setSelectedItems(new Set());
         setLastSelectedIndex(null);
         setIsSelectionMode(false);
+        setFocusedIndex(index);
         handleItemOpen(item);
     };
     const handleCheckboxClick = (e, item, index) => {
@@ -556,6 +902,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
         }
         setSelectedItems(newSelected);
         setLastSelectedIndex(index);
+        setFocusedIndex(index);
     };
     const handleSelectAllToggle = () => {
         if (selectedItems.size === items.length) {
@@ -1383,7 +1730,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
         // For folders, use the Folder icon directly
         if (item.type === "folder") {
             // Use smaller icons for list view
-            const folderIconSize = viewMode === 'list' ? 'w-5 h-5' : 'w-20 h-20';
+            const folderIconSize = viewMode === 'list' ? 'w-4 h-4' : 'w-14 h-14 sm:w-16 sm:h-16';
             return <Folder className={`${folderIconSize} text-primary`}/>;
         }
         // Use the new Thumbnail component with pre-loaded data for better performance
@@ -1446,11 +1793,12 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                 setIsDirectoryUpload(false);
             }}/>)}
       
-      <div className={`flex-1 overflow-y-auto overflow-x-hidden p-4 pb-28 sm:pb-20 min-h-0 custom-scrollbar ${isDragActive ? 'bg-blue-50 border-2 border-dashed border-blue-500 rounded-lg' : ''}`} onClick={(e) => {
+      <div className={`flex-1 overflow-y-auto overflow-x-hidden p-4 pb-28 sm:pb-20 min-h-0 custom-scrollbar ${isDragActive ? 'bg-primary/5 border-2 border-dashed border-primary rounded-lg' : ''}`} onClick={(e) => {
             const target = e.target;
             if (target === e.currentTarget || target.getAttribute('data-grid-background') === "true") {
                 setSelectedItems(new Set());
                 setLastSelectedIndex(null);
+                setFocusedIndex(null);
             }
         }} onContextMenu={(e) => {
             e.preventDefault();
@@ -1473,32 +1821,32 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
         {/* Upload indicator when dragging files over */}
         {isDragActive && (<div className="absolute inset-0 flex items-center justify-center bg-background/80 rounded-lg z-50 pointer-events-none border-2 border-dashed border-primary">
             <div className="text-center p-6 bg-background rounded-lg shadow-lg pointer-events-auto border border-border">
-              <div className="text-2xl mb-2">📁</div>
+              <Folder className="w-10 h-10 text-primary mx-auto mb-2"/>
               <p className="text-lg font-semibold text-foreground">Drop files here to upload</p>
               <p className="text-muted-foreground">Upload to {currentFolder}</p>
             </div>
           </div>)}
 
-        {/* Google Drive-style Selection Action Bar */}
-        {selectedItems.size > 0 && (<div className="sticky top-0 z-30 mb-3 flex items-center justify-between gap-2 px-3 py-2 bg-blue-500/10 dark:bg-blue-500/20 backdrop-blur-md border border-blue-500/30 rounded-xl shadow-sm animate-in fade-in slide-in-from-top-2 duration-200">
+        {/* Modernized Floating Selection Action Bar */}
+        {selectedItems.size > 0 && (<div className="sticky top-1 z-30 mb-3 flex items-center justify-between gap-2 px-3 py-2 bg-card/95 dark:bg-card/90 backdrop-blur-md border border-border/70 rounded-xl shadow-lg ring-1 ring-border/20 animate-in fade-in slide-in-from-top-2 duration-200">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <button type="button" onClick={() => {
                 setSelectedItems(new Set());
                 setLastSelectedIndex(null);
-            }} className="p-1.5 rounded-full hover:bg-background/80 active:bg-background text-muted-foreground hover:text-foreground transition-colors" title="Clear selection (Esc)" aria-label="Clear selection">
+            }} className="p-1.5 rounded-lg hover:bg-accent active:bg-accent/80 text-muted-foreground hover:text-foreground transition-colors" title="Clear selection (Esc)" aria-label="Clear selection">
                 <X className="w-4 h-4"/>
               </button>
-              <span className="text-sm font-semibold text-blue-600 dark:text-blue-400 truncate">
-                {selectedItems.size} {selectedItems.size === 1 ? "selected" : "selected"}
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-primary/15 text-primary border border-primary/20 shrink-0">
+                {selectedItems.size} selected
               </span>
-              <div className="h-4 w-px bg-blue-500/20 hidden sm:block"/>
+              <div className="h-4 w-px bg-border/60 hidden sm:block"/>
               <button type="button" onClick={handleSelectAllToggle} className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline transition-colors hidden sm:inline-block">
                 {selectedItems.size === items.length ? "Deselect all" : "Select all"}
               </button>
             </div>
 
             <div className="flex items-center gap-1.5 sm:gap-2">
-              <button type="button" onClick={handleBatchDownload} disabled={selectedFilesCount === 0} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-background hover:bg-accent border border-border/60 text-foreground transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed" title="Download selected files">
+              <button type="button" onClick={handleBatchDownload} disabled={selectedFilesCount === 0} className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 hover:border-border transition-all shadow-xs active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed" title="Download selected files">
                 <Download className="w-3.5 h-3.5"/>
                 <span className="hidden sm:inline">Download</span>
                 {selectedFilesCount > 0 && <span className="text-[11px] text-muted-foreground">({selectedFilesCount})</span>}
@@ -1508,7 +1856,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                 const selectedList = items.filter(it => selectedItems.has(getItemKey(it)));
                 if (selectedList.length > 0)
                     onCut(selectedList);
-            }} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-background hover:bg-accent border border-border/60 text-foreground transition-colors shadow-sm" title="Cut selected items (Ctrl+X)">
+            }} className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 hover:border-border transition-all shadow-xs active:scale-[0.98]" title="Cut selected items (Ctrl+X)">
                 <Scissors className="w-3.5 h-3.5"/>
                 <span className="hidden sm:inline">Cut</span>
                 <span className="text-[11px] text-muted-foreground">({selectedItems.size})</span>
@@ -1518,7 +1866,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                 const selectedList = items.filter(it => selectedItems.has(getItemKey(it)));
                 if (selectedList.length > 0)
                     onCopy(selectedList);
-            }} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-background hover:bg-accent border border-border/60 text-foreground transition-colors shadow-sm" title="Copy selected items (Ctrl+C)">
+            }} className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 hover:border-border transition-all shadow-xs active:scale-[0.98]" title="Copy selected items (Ctrl+C)">
                 <Copy className="w-3.5 h-3.5"/>
                 <span className="hidden sm:inline">Copy</span>
                 <span className="text-[11px] text-muted-foreground">({selectedItems.size})</span>
@@ -1530,12 +1878,12 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                     if (found) {
                         setPropertiesItem(found);
                     }
-                }} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-background hover:bg-accent border border-border/60 text-foreground transition-colors shadow-sm" title="View Properties (Alt+Enter)">
+                }} className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 hover:border-border transition-all shadow-xs active:scale-[0.98]" title="View Properties (Alt+Enter)">
                   <Info className="w-3.5 h-3.5"/>
                   <span className="hidden sm:inline">Properties</span>
                 </button>)}
 
-              <button type="button" onClick={() => setBatchDeleteDialogOpen(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive border border-destructive/20 transition-colors shadow-sm" title="Delete selected items">
+              <button type="button" onClick={() => setBatchDeleteDialogOpen(true)} className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive border border-destructive/20 transition-all shadow-xs active:scale-[0.98]" title="Delete selected items">
                 <Trash2 className="w-3.5 h-3.5"/>
                 <span className="hidden sm:inline">Delete</span>
                 <span className="text-[11px]">({selectedItems.size})</span>
@@ -1550,13 +1898,13 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             </div>
           </div>) : items.length === 0 ? (<div className="flex-1 flex flex-col items-center justify-center min-h-[320px] text-center p-6 select-none pointer-events-none">
             <div className="w-14 h-14 rounded-2xl bg-muted/60 flex items-center justify-center mb-3 text-2xl shadow-inner">
-              📁
+              <Folder className="w-7 h-7 text-muted-foreground/60"/>
             </div>
             <h3 className="text-sm font-semibold text-foreground mb-1">No items found</h3>
             <p className="text-xs text-muted-foreground max-w-xs">
               No files or folders match your search or filter criteria in this view.
             </p>
-          </div>) : viewMode === "grid" ? (<div data-grid-background="true" className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-9 2xl:grid-cols-12 gap-2 sm:gap-1.5">
+          </div>) : viewMode === "grid" ? (<div ref={gridContainerRef} role="grid" aria-label="Files and folders grid" tabIndex={-1} data-grid-background="true" className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-9 2xl:grid-cols-12 gap-2 sm:gap-1.5 focus:outline-none">
             {items.map((item, index) => {
                 const itemKey = getItemKey(item);
                 const isRenaming = renamingItem?.index === index;
@@ -1564,7 +1912,10 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                 const isCut = Boolean((cutItems && cutItems.some(ci => (ci.id && item.id ? ci.id === item.id : ci.name === item.name))) ||
                     (cutItem && (cutItem.id && item.id ? cutItem.id === item.id : cutItem.name === item.name)));
                 const isSelected = selectedItems.has(itemKey);
-                return (<div key={itemKey || index} draggable={!isRenaming} onDragStart={(e) => handleDragStart(e, item)} onDragEnd={handleDragEnd} onDragOver={item.type === "folder" ? (e) => handleItemDragOver(e, item) : undefined} onDrop={item.type === "folder" ? (e) => handleItemDrop(e, item) : undefined} onContextMenu={(e) => {
+                const isFocused = index === focusedIndex;
+                const starred = isItemStarred(item);
+                const duration = isVideoItem(item) ? getItemDuration(item) : null;
+                return (<div key={itemKey || index} ref={(el) => { itemElementsRef.current[index] = el; }} role="row" tabIndex={index === (focusedIndex ?? 0) ? 0 : -1} aria-selected={isSelected} aria-label={`${item.name}, ${item.type === 'folder' ? 'Folder' : (item.fileType || 'File')}${isSelected ? ', selected' : ''}`} data-grid-item="true" data-item-index={index} onFocus={() => setFocusedIndex(index)} draggable={!isRenaming} onDragStart={(e) => handleDragStart(e, item)} onDragEnd={handleDragEnd} onDragOver={item.type === "folder" ? (e) => handleItemDragOver(e, item) : undefined} onDrop={item.type === "folder" ? (e) => handleItemDrop(e, item) : undefined} onContextMenu={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
                         // Additional prevention of default context menu
@@ -1574,6 +1925,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                                 setSelectedItems(new Set([itemKey]));
                                 setLastSelectedIndex(index);
                             }
+                            setFocusedIndex(index);
                             handleContextMenu(e, item, index);
                         }
                     }} onTouchStart={(e) => handleTouchStart(e, item, index)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onClick={(e) => {
@@ -1584,24 +1936,28 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                         if (!isRenaming) {
                             e.preventDefault();
                             e.stopPropagation();
+                            setFocusedIndex(index);
                             handleItemOpen(item);
                         }
-                    }} className={`group relative flex flex-col items-center p-2 sm:p-1.5 rounded-xl sm:rounded-lg border transition-all duration-200 cursor-pointer select-none
+                    }} className={`group relative flex flex-col items-center p-2 sm:p-1.5 rounded-xl sm:rounded-lg border transition-all duration-200 cursor-pointer select-none outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background
                     ${isSelected
-                        ? "bg-blue-500/15 dark:bg-blue-500/25 border-blue-500 ring-2 ring-blue-500/30 shadow-sm"
-                        : "border-transparent hover:border-border/40 hover:bg-accent/20 hover:scale-[1.02] hover:shadow-md"}
+                        ? "bg-primary/15 dark:bg-primary/25 border-primary ring-2 ring-primary/30 shadow-sm"
+                        : isFocused
+                            ? "border-primary/60 bg-accent/30 ring-2 ring-primary/50 shadow-sm"
+                            : "border-transparent hover:border-border/40 hover:bg-accent/20 hover:scale-[1.02] hover:shadow-md"}
                     active:scale-[0.98] 
                     ${isDragging ? "opacity-50 scale-95" : ""}
                     ${isCut ? "opacity-50" : ""}
                     ${item.type === "folder" && draggedItem && draggedItem.name !== item.name
                         ? "scale-105 transition-all duration-200 ring-2 ring-primary/50"
                         : ""}`}>
+                  <div role="gridcell" className="contents">
                   {/* Google Drive circular checkbox */}
                   {!isRenaming && (<button type="button" onClick={(e) => handleCheckboxClick(e, item, index)} className={`absolute top-1.5 left-1.5 w-5 h-5 rounded-full flex items-center justify-center transition-all z-20 ${isSelected
-                            ? "bg-blue-600 text-white shadow-sm ring-1 ring-background scale-100 opacity-100"
+                            ? "bg-primary text-primary-foreground shadow-sm ring-1 ring-background scale-100 opacity-100"
                             : selectedItems.size > 0
-                                ? "border-2 border-muted-foreground/70 bg-background/90 hover:border-blue-500 hover:bg-background opacity-80 sm:opacity-75 hover:opacity-100"
-                                : "border-2 border-muted-foreground/40 bg-background/80 hover:border-blue-500 opacity-0 group-hover:opacity-90"}`} title={isSelected ? "Deselect" : "Select"} aria-label={isSelected ? "Deselect" : "Select"}>
+                                ? "border-2 border-muted-foreground/70 bg-background/90 hover:border-primary hover:bg-background opacity-80 sm:opacity-75 hover:opacity-100 focus:opacity-100"
+                                : "border-2 border-muted-foreground/40 bg-background/80 hover:border-primary opacity-0 group-hover:opacity-90 focus:opacity-100"}`} title={isSelected ? "Deselect" : "Select"} aria-label={isSelected ? `Deselect ${item.name}` : `Select ${item.name}`}>
                       <Check className={`w-3 h-3 stroke-[3] transition-opacity ${isSelected ? "opacity-100" : "opacity-0"}`}/>
                     </button>)}
 
@@ -1610,16 +1966,16 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                             e.preventDefault();
                             e.stopPropagation();
                             onRestoreItem?.(item);
-                        }} className="absolute top-1 right-7 p-1 rounded-full text-blue-500 hover:text-blue-600 hover:bg-background/80 active:bg-accent transition-colors z-10" title="Restore" aria-label="Restore">
-                        <RotateCcw className="w-4 h-4"/>
+                        }} className="absolute top-1.5 right-7.5 p-1 rounded-full bg-background/80 dark:bg-card/85 backdrop-blur-xs border border-border/40 shadow-xs text-primary hover:text-primary/80 hover:bg-background active:bg-accent transition-colors z-10" title="Restore" aria-label="Restore">
+                        <RotateCcw className="w-3.5 h-3.5"/>
                       </button>) : (<button type="button" onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
                             onToggleStar?.(item);
-                        }} className={`absolute top-1 right-7 p-1 rounded-full transition-colors z-10 ${item.starred
-                            ? "text-amber-500 opacity-100"
-                            : "text-muted-foreground hover:text-amber-500 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"}`} title={item.starred ? "Remove from starred" : "Add to starred"} aria-label={item.starred ? "Remove from starred" : "Add to starred"}>
-                        <Star className={`w-4 h-4 ${item.starred ? "fill-amber-500 text-amber-500" : ""}`}/>
+                        }} className={`absolute top-1.5 right-7.5 p-1 rounded-full bg-background/80 dark:bg-card/85 backdrop-blur-xs border border-border/40 shadow-xs transition-all z-10 ${starred
+                            ? "text-amber-500 dark:text-amber-400 opacity-100"
+                            : "text-muted-foreground hover:text-amber-500 dark:hover:text-amber-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"}`} title={starred ? "Remove from starred" : "Add to starred"} aria-label={starred ? "Remove from starred" : "Add to starred"}>
+                        <Star className={`w-3.5 h-3.5 ${starred ? "fill-amber-500 dark:fill-amber-400 text-amber-500 dark:text-amber-400" : ""}`}/>
                       </button>))}
 
                   {/* 3-dots action button for touch access */}
@@ -1627,36 +1983,44 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                             e.preventDefault();
                             e.stopPropagation();
                             openItemContextMenu(item, index, e.clientX, e.clientY);
-                        }} className="absolute top-1 right-1 p-1 rounded-full text-muted-foreground hover:text-foreground hover:bg-background/80 active:bg-accent transition-colors z-10 opacity-100 sm:opacity-0 sm:group-hover:opacity-100" title="Options" aria-label="Options">
-                      <MoreVertical className="w-4 h-4"/>
+                        }} className="absolute top-1.5 right-1.5 p-1 rounded-full bg-background/80 dark:bg-card/85 backdrop-blur-xs border border-border/40 shadow-xs text-muted-foreground hover:text-foreground hover:bg-background active:bg-accent transition-colors z-10 opacity-100 sm:opacity-0 sm:group-hover:opacity-100" title="Options" aria-label="Options">
+                      <MoreVertical className="w-3.5 h-3.5"/>
                     </button>)}
 
                   <div className="flex flex-col items-center w-full rounded-md p-1 transition-all duration-200 pointer-events-none">
-                    <div className="mb-1">{getFileIcon(item)}</div>
-                    {isRenaming ? (<div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+                    <div className="relative w-full aspect-[4/3] max-h-24 sm:max-h-28 rounded-lg bg-muted/20 flex items-center justify-center overflow-hidden mb-1.5">
+                      {getFileIcon(item)}
+                      {duration && (
+                        <span data-testid="duration-badge" className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/75 text-[10px] text-white font-mono font-medium leading-none pointer-events-none shadow-sm backdrop-blur-xs">
+                          {duration}
+                        </span>
+                      )}
+                    </div>
+                    {isRenaming ? (<div className="pointer-events-auto w-full" onClick={(e) => e.stopPropagation()}>
                         <RenameInput initialName={item.name} onSave={onRenameConfirm} onCancel={onRenameCancel}/>
-                      </div>) : (<span className={`text-xs text-center break-words w-full line-clamp-2 transition-colors ${isSelected ? "font-semibold text-blue-600 dark:text-blue-400" : "text-foreground group-hover:text-accent-foreground"}`}>
+                      </div>) : (<span className={`text-xs text-center break-words w-full line-clamp-2 transition-colors ${isSelected ? "font-semibold text-primary" : "text-foreground group-hover:text-accent-foreground"}`}>
                         {item.name}
                       </span>)}
                   </div>
+                  </div>
                 </div>);
             })}
-          </div>) : (<div data-grid-background="true" className="flex flex-col">
+          </div>) : (<div ref={listContainerRef} role="grid" aria-label="Files and folders list" tabIndex={-1} data-grid-background="true" className="flex flex-col focus:outline-none">
             {/* Table header - hidden on small mobile screens */}
-            <div className="hidden md:grid grid-cols-12 gap-4 px-4 py-2 text-xs font-medium text-muted-foreground border-b border-border bg-muted/50 items-center">
-              <div className="col-span-5 flex items-center gap-2">
-                <button type="button" onClick={handleSelectAllToggle} className={`w-4 h-4 rounded flex items-center justify-center border transition-all ${selectedItems.size === items.length && items.length > 0
-                ? "bg-blue-600 border-blue-600 text-white"
+            <div role="row" className="hidden md:grid grid-cols-12 gap-3 px-3 py-1 text-xs font-medium text-muted-foreground border-b border-border bg-muted/40 items-center">
+              <div role="columnheader" className="col-span-5 flex items-center gap-2.5">
+                <button type="button" onClick={handleSelectAllToggle} className={`w-3.5 h-3.5 rounded flex items-center justify-center border transition-all ${selectedItems.size === items.length && items.length > 0
+                ? "bg-primary border-primary text-primary-foreground"
                 : selectedItems.size > 0
-                    ? "bg-blue-600/30 border-blue-600 text-blue-600"
+                    ? "bg-primary/20 border-primary text-primary"
                     : "border-muted-foreground/40 hover:border-foreground"}`} title={selectedItems.size === items.length ? "Deselect all" : "Select all"}>
-                  <Check className={`w-3 h-3 stroke-[3] ${selectedItems.size > 0 ? "opacity-100" : "opacity-0"}`}/>
+                  <Check className={`w-2.5 h-2.5 stroke-[3] ${selectedItems.size > 0 ? "opacity-100" : "opacity-0"}`}/>
                 </button>
                 <span>Name</span>
               </div>
-              <div className="col-span-3">Modified Date</div>
-              <div className="col-span-2">Type</div>
-              <div className="col-span-2 text-right">Size</div>
+              <div role="columnheader" className="col-span-3">Modified Date</div>
+              <div role="columnheader" className="col-span-2">Type</div>
+              <div role="columnheader" className="col-span-2 text-right">Size</div>
             </div>
             <div className="space-y-1 sm:space-y-0.5">
               {items.map((item, index) => {
@@ -1666,7 +2030,9 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                 const isCut = Boolean((cutItems && cutItems.some(ci => (ci.id && item.id ? ci.id === item.id : ci.name === item.name))) ||
                     (cutItem && (cutItem.id && item.id ? cutItem.id === item.id : cutItem.name === item.name)));
                 const isSelected = selectedItems.has(itemKey);
-                return (<div key={itemKey || index} draggable={!isRenaming} onDragStart={(e) => handleDragStart(e, item)} onDragEnd={handleDragEnd} onDragOver={item.type === "folder" ? (e) => handleItemDragOver(e, item) : undefined} onDrop={item.type === "folder" ? (e) => handleItemDrop(e, item) : undefined} onContextMenu={(e) => {
+                const isFocused = index === focusedIndex;
+                const starred = isItemStarred(item);
+                return (<div key={itemKey || index} ref={(el) => { itemElementsRef.current[index] = el; }} role="row" tabIndex={index === (focusedIndex ?? 0) ? 0 : -1} aria-selected={isSelected} aria-label={`${item.name}, ${item.type === 'folder' ? 'Folder' : (item.fileType || 'File')}${isSelected ? ', selected' : ''}`} data-grid-item="true" data-item-index={index} onFocus={() => setFocusedIndex(index)} draggable={!isRenaming} onDragStart={(e) => handleDragStart(e, item)} onDragEnd={handleDragEnd} onDragOver={item.type === "folder" ? (e) => handleItemDragOver(e, item) : undefined} onDrop={item.type === "folder" ? (e) => handleItemDrop(e, item) : undefined} onContextMenu={(e) => {
                         if (!isRenaming) {
                             e.preventDefault();
                             e.stopPropagation();
@@ -1674,6 +2040,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                                 setSelectedItems(new Set([itemKey]));
                                 setLastSelectedIndex(index);
                             }
+                            setFocusedIndex(index);
                             handleContextMenu(e, item, index);
                         }
                     }} onTouchStart={(e) => handleTouchStart(e, item, index)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onClick={(e) => {
@@ -1684,51 +2051,57 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                         if (!isRenaming) {
                             e.preventDefault();
                             e.stopPropagation();
+                            setFocusedIndex(index);
                             handleItemOpen(item);
                         }
-                    }} className={`transition-all duration-200 cursor-pointer select-none ${isSelected
-                        ? "bg-blue-500/15 dark:bg-blue-500/25 border-blue-500 ring-1 ring-blue-500/30 rounded-lg sm:rounded"
-                        : "hover:bg-accent/40 rounded-lg sm:rounded border border-transparent"} ${isDragging ? "opacity-50" : ""} 
+                    }} className={`group transition-all duration-200 cursor-pointer select-none outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-background ${isSelected
+                        ? "bg-primary/15 dark:bg-primary/25 border-primary ring-1 ring-primary/30 rounded-lg sm:rounded"
+                        : isFocused
+                            ? "bg-accent/35 border-primary/50 ring-1 ring-primary/50 rounded-lg sm:rounded"
+                            : "hover:bg-accent/40 rounded-lg sm:rounded border border-transparent"} ${isDragging ? "opacity-50" : ""}
                       ${isCut ? "opacity-50" : ""}
                       ${item.type === "folder" && draggedItem && draggedItem.name !== item.name
                         ? "scale-[1.01] ring-2 ring-primary/50"
                         : ""}`}>
-                    {/* Desktop table row (md and above) */}
-                    <div className="hidden md:grid col-span-12 w-full grid-cols-12 gap-4 p-2 items-center">
-                      <div className="col-span-5 flex items-center gap-3 min-w-0">
-                        {!isRenaming && (<button type="button" onClick={(e) => handleCheckboxClick(e, item, index)} className={`w-4 h-4 rounded flex items-center justify-center transition-all flex-shrink-0 ${isSelected
-                            ? "bg-blue-600 text-white border border-blue-600"
+                    {/* Desktop table row (md and above): dense 32px height */}
+                    <div className="hidden md:grid col-span-12 w-full grid-cols-12 gap-3 px-3 h-8 items-center text-xs">
+                      <div role="gridcell" className="col-span-5 flex items-center gap-2.5 min-w-0">
+                        {!isRenaming && (<button type="button" onClick={(e) => handleCheckboxClick(e, item, index)} className={`w-3.5 h-3.5 rounded flex items-center justify-center transition-all flex-shrink-0 ${isSelected
+                            ? "bg-primary text-primary-foreground border border-primary"
                             : selectedItems.size > 0
-                                ? "border border-muted-foreground/60 bg-background/80 hover:border-blue-500 opacity-80"
-                                : "border border-muted-foreground/40 bg-background/60 hover:border-blue-500 opacity-0 group-hover:opacity-100"}`} title={isSelected ? "Deselect" : "Select"}>
-                            <Check className={`w-3 h-3 stroke-[3] ${isSelected ? "opacity-100" : "opacity-0"}`}/>
+                                ? "border border-muted-foreground/60 bg-background/80 hover:border-primary opacity-80"
+                                : "border border-muted-foreground/40 bg-background/60 hover:border-primary opacity-0 group-hover:opacity-100 focus:opacity-100"}`} title={isSelected ? "Deselect" : "Select"} aria-label={isSelected ? `Deselect ${item.name}` : `Select ${item.name}`}>
+                            <Check className={`w-2.5 h-2.5 stroke-[3] ${isSelected ? "opacity-100" : "opacity-0"}`}/>
                           </button>)}
-                        <div className="flex-shrink-0 w-5 h-5 pointer-events-none">{getFileIcon(item)}</div>
+                        <div className="flex-shrink-0 w-4 h-4 flex items-center justify-center pointer-events-none">{getFileIcon(item)}</div>
                         {isRenaming ? (<div className="flex-1 pointer-events-auto" onClick={(e) => e.stopPropagation()}>
                             <RenameInput initialName={item.name} onSave={onRenameConfirm} onCancel={onRenameCancel}/>
-                          </div>) : (<span className={`text-sm truncate pointer-events-none ${isSelected ? "font-medium text-blue-600 dark:text-blue-400" : "text-foreground group-hover:text-accent-foreground"}`}>
+                          </div>) : (<span className={`truncate pointer-events-none ${isSelected ? "font-medium text-primary" : "text-foreground group-hover:text-accent-foreground"}`}>
                             {item.name}
                           </span>)}
+                        {starred && (
+                          <Star className="w-3 h-3 fill-amber-500 dark:fill-amber-400 text-amber-500 dark:text-amber-400 shrink-0 pointer-events-none"/>
+                        )}
                       </div>
-                      <div className="col-span-3 flex items-center text-xs text-muted-foreground pointer-events-none">
+                      <div role="gridcell" className="col-span-3 flex items-center text-muted-foreground pointer-events-none truncate">
                         {item.modified ? new Date(item.modified).toLocaleDateString() : ''}
                       </div>
-                      <div className="col-span-2 flex items-center text-xs text-muted-foreground capitalize pointer-events-none">
+                      <div role="gridcell" className="col-span-2 flex items-center text-muted-foreground capitalize pointer-events-none truncate">
                         {item.type === 'folder' ? 'Folder' : (item.fileType || 'File')}
                       </div>
-                      <div className="col-span-2 flex items-center justify-end text-xs text-muted-foreground pointer-events-none">
+                      <div role="gridcell" className="col-span-2 flex items-center justify-end text-muted-foreground pointer-events-none truncate">
                         {item.type === 'folder' ? '' : (item.size ? formatFileSize(item.size) : '')}
                       </div>
                     </div>
 
-                    {/* Mobile optimized list row (< md) */}
-                    <div className="md:hidden flex items-center justify-between p-2.5 rounded-xl gap-3 border border-border/30">
+                    {/* Mobile optimized list row (< md): comfortable touch target */}
+                    <div role="gridcell" className="md:hidden flex items-center justify-between min-h-[44px] p-2.5 rounded-xl gap-3 border border-border/30">
                       {/* Selection checkbox */}
                       {!isRenaming && (<button type="button" onClick={(e) => handleCheckboxClick(e, item, index)} className={`w-5 h-5 rounded-full flex items-center justify-center transition-all shrink-0 ${isSelected
-                            ? "bg-blue-600 text-white ring-1 ring-background scale-100 opacity-100"
+                            ? "bg-primary text-primary-foreground ring-1 ring-background scale-100 opacity-100"
                             : selectedItems.size > 0
-                                ? "border-2 border-muted-foreground/70 bg-background/90 hover:border-blue-500 opacity-90"
-                                : "border-2 border-muted-foreground/40 bg-background/70 opacity-0 group-hover:opacity-70 w-0 p-0 border-0 overflow-hidden"}`} title={isSelected ? "Deselect" : "Select"}>
+                                ? "border-2 border-muted-foreground/70 bg-background/90 hover:border-primary opacity-90"
+                                : "border-2 border-muted-foreground/40 bg-background/70 opacity-0 group-hover:opacity-70 w-0 p-0 border-0 overflow-hidden"}`} title={isSelected ? "Deselect" : "Select"} aria-label={isSelected ? `Deselect ${item.name}` : `Select ${item.name}`}>
                           <Check className={`w-3 h-3 stroke-[3] ${isSelected ? "opacity-100" : "opacity-0"}`}/>
                         </button>)}
 
@@ -1740,7 +2113,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                           {isRenaming ? (<div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
                               <RenameInput initialName={item.name} onSave={onRenameConfirm} onCancel={onRenameCancel}/>
                             </div>) : (<>
-                              <p className={`text-sm font-medium truncate ${isSelected ? "text-blue-600 dark:text-blue-400" : "text-foreground"}`}>
+                              <p className={`text-sm font-medium truncate ${isSelected ? "text-primary" : "text-foreground"}`}>
                                 {item.name}
                               </p>
                               <p className="text-xs text-muted-foreground truncate">
@@ -1757,16 +2130,16 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                                 e.preventDefault();
                                 e.stopPropagation();
                                 onRestoreItem?.(item);
-                            }} className="p-1.5 sm:p-2 rounded-full text-blue-500 hover:text-blue-600 hover:bg-accent active:bg-accent/80 transition-colors" title="Restore" aria-label="Restore">
+                            }} className="p-1.5 sm:p-2 rounded-full text-primary hover:text-primary/80 hover:bg-accent active:bg-accent/80 transition-colors" title="Restore" aria-label="Restore">
                               <RotateCcw className="w-4 h-4"/>
                             </button>) : (<button type="button" onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 onToggleStar?.(item);
-                            }} className={`p-1.5 sm:p-2 rounded-full transition-colors ${item.starred
-                                ? "text-amber-500 opacity-100"
-                                : "text-muted-foreground hover:text-amber-500 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"}`} title={item.starred ? "Remove from starred" : "Add to starred"} aria-label={item.starred ? "Remove from starred" : "Add to starred"}>
-                              <Star className={`w-4 h-4 ${item.starred ? "fill-amber-500 text-amber-500" : ""}`}/>
+                            }} className={`p-1.5 sm:p-2 rounded-full transition-colors ${starred
+                                ? "text-amber-500 dark:text-amber-400 opacity-100"
+                                : "text-muted-foreground hover:text-amber-500 dark:hover:text-amber-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"}`} title={starred ? "Remove from starred" : "Add to starred"} aria-label={starred ? "Remove from starred" : "Add to starred"}>
+                              <Star className={`w-4 h-4 ${starred ? "fill-amber-500 dark:fill-amber-400 text-amber-500 dark:text-amber-400" : ""}`}/>
                             </button>)}
                           <button type="button" onClick={(e) => {
                             e.preventDefault();
@@ -1868,7 +2241,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                     }
                 }} onCompress={() => {
                     setCompressDialog(true);
-                }} isStarred={contextMenu.item?.starred || Boolean(contextMenu.item?.is_starred)} onToggleStar={() => contextMenu.item && onToggleStar?.(contextMenu.item)} isTrashMode={isTrashMode || cloudFolderId === "trash" || Boolean(contextMenu.item?.is_trashed)} onRestore={() => contextMenu.item && onRestoreItem?.(contextMenu.item)} isCloudMode={isCloudMode} isVirtualFolder={Boolean(contextMenu.item?.is_virtual)} isRestrictedEmptyArea={isRestrictedEmptyArea}/>);
+                }} isStarred={isItemStarred(contextMenu.item)} onToggleStar={() => contextMenu.item && onToggleStar?.(contextMenu.item)} isTrashMode={isTrashMode || cloudFolderId === "trash" || Boolean(contextMenu.item?.is_trashed)} onRestore={() => contextMenu.item && onRestoreItem?.(contextMenu.item)} isCloudMode={isCloudMode} isVirtualFolder={Boolean(contextMenu.item?.is_virtual)} isRestrictedEmptyArea={isRestrictedEmptyArea}/>);
         })()}
 
       {/* Image Viewer */}

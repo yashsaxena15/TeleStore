@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTransferManager } from "@/hooks/useTransferManager";
-import { formatBytes } from "@/lib/utils";
+import { useMediaPlayer } from "@/contexts/MediaPlayerContext";
+import { formatBytes, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ArrowUpDown, ArrowUp, ArrowDown, CloudDownload, Pause, Play, X, ChevronDown, ChevronUp, ExternalLink, Magnet, FolderArchive } from "lucide-react";
@@ -9,6 +10,8 @@ import { groupRemoteTransfers } from "@/lib/transferGrouping";
 export const TransfersWidget = () => {
     const navigate = useNavigate();
     const { uploads, downloads, remoteTransfers, activeUploads, activeDownloads, activeRemote, totalActiveCount, stats, pauseUpload, resumeUpload, cancelUpload, pauseDownload, resumeDownload, cancelDownload, cancelRemoteTransfer, cancelRemoteGroup, resumeRemoteGroup, pauseAll, resumeAll } = useTransferManager();
+    const { activeAudioTrack, isAudioMinimized } = useMediaPlayer?.() || {};
+    const needsDockElevation = Boolean(activeAudioTrack && !isAudioMinimized);
     const [isExpanded, setIsExpanded] = useState(false);
     const [isDismissed, setIsDismissed] = useState(false);
     // Auto-expand when a new transfer begins
@@ -46,45 +49,50 @@ export const TransfersWidget = () => {
             return "";
         return `${formatBytes(bytesPerSec)}/s`;
     };
-    return (<div className="fixed bottom-4 right-4 z-40 w-[calc(100vw-2rem)] sm:w-96 shadow-2xl rounded-xl border border-border bg-card text-card-foreground overflow-hidden transition-all duration-300 ease-in-out">
+    return (<div role="region" aria-label="Transfers monitor" aria-live="polite" className={cn("fixed right-4 z-40 w-[calc(100vw-2rem)] sm:w-80 md:w-96 max-w-[calc(100vw-2rem)] shadow-2xl rounded-xl border border-border bg-card text-card-foreground overflow-hidden transition-all duration-300 ease-in-out", needsDockElevation ? "bottom-28 sm:bottom-24 2xl:bottom-4" : "bottom-4")}>
       {/* Header Bar */}
       <div className="px-4 py-2.5 bg-card hover:bg-muted/15 border-b border-border flex items-center justify-between transition-colors">
-        <div className="flex items-center gap-2 cursor-pointer select-none flex-1" onClick={() => setIsExpanded(!isExpanded)}>
+        <div role="button" tabIndex={0} aria-expanded={isExpanded} aria-label={isExpanded ? "Collapse transfers panel" : "Expand transfers panel"} className="flex items-center gap-2 cursor-pointer select-none flex-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 rounded-md" onClick={() => setIsExpanded(!isExpanded)} onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setIsExpanded(!isExpanded);
+            }
+        }}>
           <div className="p-1.5 rounded-lg bg-primary/10 text-primary">
             <ArrowUpDown className="w-4 h-4"/>
           </div>
           <span className="font-semibold text-xs text-foreground">
             Transfers {totalActiveCount > 0 ? `(${totalActiveCount} active)` : ""}
           </span>
-          {activeRemote.length > 0 && (<span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-600 dark:text-purple-400 font-medium flex items-center gap-0.5 border border-purple-500/20">
+          {activeRemote.length > 0 && (<span className="text-[10px] px-1.5 py-0.5 rounded bg-cloud/15 text-cloud font-medium flex items-center gap-0.5 border border-cloud/20">
               <CloudDownload className="w-2.5 h-2.5"/> {activeRemote.length}
             </span>)}
-          {activeUploads.length > 0 && (<span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-600 dark:text-blue-400 font-medium flex items-center gap-0.5 border border-blue-500/20">
+          {activeUploads.length > 0 && (<span className="text-[10px] px-1.5 py-0.5 rounded bg-info/15 text-info font-medium flex items-center gap-0.5 border border-info/20">
               <ArrowUp className="w-2.5 h-2.5"/> {activeUploads.length}
             </span>)}
-          {activeDownloads.length > 0 && (<span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-0.5 border border-emerald-500/20">
+          {activeDownloads.length > 0 && (<span className="text-[10px] px-1.5 py-0.5 rounded bg-success/15 text-success font-medium flex items-center gap-0.5 border border-success/20">
               <ArrowDown className="w-2.5 h-2.5"/> {activeDownloads.length}
             </span>)}
         </div>
 
         <div className="flex items-center gap-1">
-          {totalActiveCount > 0 && (<Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={pauseAll} title="Pause All">
+          {totalActiveCount > 0 && (<Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); pauseAll(); }} aria-label="Pause all transfers" title="Pause All">
               <Pause className="w-3.5 h-3.5"/>
             </Button>)}
-          {stats.pausedCount > 0 && (<Button variant="ghost" size="icon" className="h-7 w-7 text-primary hover:text-primary/80" onClick={resumeAll} title="Resume All">
+          {stats.pausedCount > 0 && (<Button variant="ghost" size="icon" className="h-7 w-7 text-primary hover:text-primary/80" onClick={(e) => { e.stopPropagation(); resumeAll(); }} aria-label="Resume all transfers" title="Resume All">
               <Play className="w-3.5 h-3.5"/>
             </Button>)}
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => setIsExpanded(!isExpanded)} title={isExpanded ? "Collapse" : "Expand"}>
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }} aria-label={isExpanded ? "Collapse transfers panel" : "Expand transfers panel"} aria-expanded={isExpanded} title={isExpanded ? "Collapse" : "Expand"}>
             {isExpanded ? <ChevronDown className="w-4 h-4"/> : <ChevronUp className="w-4 h-4"/>}
           </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => setIsDismissed(true)} title="Dismiss widget">
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); setIsDismissed(true); }} aria-label="Dismiss transfers widget" title="Dismiss widget">
             <X className="w-4 h-4"/>
           </Button>
         </div>
       </div>
 
-      {/* Expanded Transfers List */}
-      {isExpanded && (<div className="max-h-72 overflow-y-auto p-3 flex flex-col gap-2.5 custom-scrollbar">
+      {/* Expanded Transfers List - Expands upward with viewport-constrained scroll */}
+      {isExpanded && (<div className="max-h-[min(20rem,calc(100vh-14rem))] overflow-y-auto p-3 flex flex-col gap-2.5 custom-scrollbar">
           {recentItems.length === 0 ? (<p className="text-center text-xs text-muted-foreground py-4">No active transfers</p>) : (recentItems.map(item => {
                 const isGroup = Boolean(item.isGroup);
                 const isRemote = item.type === "remote";
@@ -99,25 +107,25 @@ export const TransfersWidget = () => {
                   <div className="flex items-center justify-between gap-2 mb-1.5">
                     <div className="flex items-center gap-1.5 min-w-0 flex-1">
                       <span className={`p-1 rounded shrink-0 ${isPausedQuota
-                        ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                        ? "bg-warning/15 text-warning"
                         : isDiscovering
-                            ? "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 animate-pulse"
+                            ? "bg-info/15 text-info animate-pulse"
                             : isRemote
-                                ? "bg-purple-500/15 text-purple-600 dark:text-purple-400"
+                                ? "bg-cloud/15 text-cloud"
                                 : isUpload
-                                    ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
-                                    : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"}`}>
+                                    ? "bg-primary/15 text-primary"
+                                    : "bg-success/15 text-success"}`}>
                         {isGroup ? (<FolderArchive className="w-3 h-3"/>) : isRemote ? (item.source_type === "magnet" || item.source_type === "torrent_file" ? (<Magnet className="w-3 h-3"/>) : (<CloudDownload className="w-3 h-3"/>)) : isUpload ? (<ArrowUp className="w-3 h-3"/>) : (<ArrowDown className="w-3 h-3"/>)}
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-medium text-foreground truncate flex items-center gap-1.5">
                           {item.filename || item.name}
-                          {isGroup && (<span className="text-[9px] px-1 py-0.2 rounded font-semibold bg-indigo-500/20 text-indigo-400">
+                          {isGroup && (<span className="text-[9px] px-1 py-0.2 rounded font-semibold bg-cloud/20 text-cloud">
                               {item.completedCount}/{item.totalCount} files
                             </span>)}
-                          {isRemote && !isGroup && (<span className={`text-[9px] px-1 py-0.2 rounded font-normal ${isPausedQuota ? "bg-amber-500/20 text-amber-500 font-semibold" :
-                            isDiscovering ? "bg-indigo-500/20 text-indigo-400 font-semibold" :
-                                isPaused ? "bg-amber-500/20 text-amber-500" : "bg-purple-500/20 text-purple-400"}`}>
+                          {isRemote && !isGroup && (<span className={`text-[9px] px-1 py-0.2 rounded font-normal ${isPausedQuota ? "bg-warning/20 text-warning font-semibold" :
+                            isDiscovering ? "bg-info/20 text-info font-semibold" :
+                                isPaused ? "bg-warning/20 text-warning" : "bg-cloud/20 text-cloud"}`}>
                               {isPausedQuota
                             ? "Quota 24h"
                             : isDiscovering
@@ -130,13 +138,13 @@ export const TransfersWidget = () => {
                                             ? "Torrent"
                                             : "Cloud Leech"}
                             </span>)}
-                          {isRemote && item.peer_count > 0 && (<span className="text-[9px] px-1 py-0.2 rounded font-semibold bg-amber-500/20 text-amber-500">
+                          {isRemote && item.peer_count > 0 && (<span className="text-[9px] px-1 py-0.2 rounded font-semibold bg-warning/20 text-warning">
                               ⚡ {item.peer_count}
                             </span>)}
                         </div>
-                        {isRemote && item.phase && (<div className={`text-[10px] truncate ${isPausedQuota ? "text-amber-500 font-medium" :
-                            isDiscovering ? "text-indigo-400 font-medium" :
-                                isPaused ? "text-amber-500 font-medium" :
+                        {isRemote && item.phase && (<div className={`text-[10px] truncate ${isPausedQuota ? "text-warning font-medium" :
+                            isDiscovering ? "text-info font-medium" :
+                                isPaused ? "text-warning font-medium" :
                                     "text-muted-foreground"}`}>
                             {item.phase}
                           </div>)}
@@ -144,23 +152,23 @@ export const TransfersWidget = () => {
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
-                      {isPausedQuota && (<button className="p-1 text-amber-500 hover:text-amber-600 rounded" onClick={() => {
+                      {isPausedQuota && (<button className="p-1 text-warning hover:text-warning/80 rounded" onClick={() => {
                             if (isGroup) {
                                 resumeRemoteGroup(item.group_id);
                             }
                             else {
                                 resumeRemoteGroup(item.id);
                             }
-                        }} title="Resume Now">
+                        }} aria-label={`Resume transfer ${item.filename || item.name || ''}`.trim()} title="Resume Now">
                           <Play className="w-3.5 h-3.5 fill-current"/>
                         </button>)}
-                      {!isRemote && isTransferring && (<button className="p-1 text-muted-foreground hover:text-foreground rounded" onClick={() => isUpload ? pauseUpload(item.id) : pauseDownload(item.id)} title="Pause">
+                      {!isRemote && isTransferring && (<button className="p-1 text-muted-foreground hover:text-foreground rounded" onClick={() => isUpload ? pauseUpload(item.id) : pauseDownload(item.id)} aria-label={`Pause transfer ${item.filename || item.name || ''}`.trim()} title="Pause">
                           <Pause className="w-3.5 h-3.5"/>
                         </button>)}
-                      {!isRemote && isPaused && (<button className="p-1 text-primary hover:text-primary/80 rounded" onClick={() => isUpload ? resumeUpload(item.id) : resumeDownload(item.id)} title="Resume">
+                      {!isRemote && isPaused && (<button className="p-1 text-primary hover:text-primary/80 rounded" onClick={() => isUpload ? resumeUpload(item.id) : resumeDownload(item.id)} aria-label={`Resume transfer ${item.filename || item.name || ''}`.trim()} title="Resume">
                           <Play className="w-3.5 h-3.5"/>
                         </button>)}
-                      <button className="p-1 text-red-500 hover:text-red-600 rounded" onClick={() => {
+                      <button className="p-1 text-muted-foreground hover:text-destructive rounded" onClick={() => {
                         if (isGroup) {
                             cancelRemoteGroup(item.group_id);
                         }
@@ -173,21 +181,21 @@ export const TransfersWidget = () => {
                         else {
                             cancelDownload(item.id);
                         }
-                    }} title={isGroup ? "Cancel entire folder" : "Cancel"}>
+                    }} aria-label={`${isGroup ? "Cancel entire folder" : "Cancel transfer"} ${item.filename || item.name || ''}`.trim()} title={isGroup ? "Cancel entire folder" : "Cancel"}>
                         <X className="w-3.5 h-3.5"/>
                       </button>
                     </div>
                   </div>
 
                   {/* Progress Bar */}
-                  <Progress value={item.progress} className={`h-1 w-full ${isPausedQuota || isPaused ? "[&>div]:bg-amber-500" : isDiscovering ? "[&>div]:bg-indigo-500" : isRemote ? "[&>div]:bg-purple-500" : ""}`}/>
+                  <Progress value={item.progress} className={cn("h-1 w-full", (isPausedQuota || isPaused) ? "[&>div]:bg-warning" : isDiscovering ? "[&>div]:bg-info" : isRemote ? "[&>div]:bg-cloud" : "[&>div]:bg-primary")}/>
 
                   {/* Stats */}
                   <div className="flex items-center justify-between text-[10px] text-muted-foreground mt-1">
                     <span>
                       {Math.round(item.progress)}% {total > 0 ? `• ${formatBytes(transferred)} of ${formatBytes(total)}` : (transferred > 0 ? `• ${formatBytes(transferred)}` : "")}
                     </span>
-                    {isTransferring && item.speed ? (<span>{formatSpeed(item.speed)}</span>) : isPausedQuota ? (<span className="text-amber-500 font-medium">Quota Hit (24h)</span>) : isDiscovering ? (<span className="text-indigo-400 font-medium">Scanning...</span>) : (<span className="capitalize">{item.status}</span>)}
+                    {isTransferring && item.speed ? (<span>{formatSpeed(item.speed)}</span>) : isPausedQuota ? (<span className="text-warning font-medium">Quota Hit (24h)</span>) : isDiscovering ? (<span className="text-info font-medium">Scanning...</span>) : (<span className="capitalize">{item.status}</span>)}
                   </div>
                 </div>);
             }))}

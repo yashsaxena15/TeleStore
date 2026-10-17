@@ -20,6 +20,11 @@ export default defineConfig(({ mode }) => ({
       ignored: ['**/src-tauri/**']
     },
     proxy: {
+      '/api': {
+        target: 'http://localhost:8148',
+        changeOrigin: true,
+        secure: false,
+      },
       '/auth': {
         target: 'http://localhost:8148',
         changeOrigin: true,

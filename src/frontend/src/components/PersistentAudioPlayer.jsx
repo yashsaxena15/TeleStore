@@ -25,7 +25,7 @@ function formatFileSize(bytes) {
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
     return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
-export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onTrackChange, onClose, }) => {
+export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onTrackChange, onClose, isMinimized: propMinimized, onToggleMinimize, }) => {
     const audioRef = useRef(null);
     // Playback state
     const [isPlaying, setIsPlaying] = useState(true);
@@ -43,8 +43,17 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
     const [isShuffle, setIsShuffle] = useState(false);
     const [repeatMode, setRepeatMode] = useState("off");
     const [playbackRate, setPlaybackRate] = useState(1.0);
-    // UI state
-    const [isMinimized, setIsMinimized] = useState(false);
+    // UI state - controlled via MediaPlayerContext or fallback to local state
+    const [internalMinimized, setInternalMinimized] = useState(false);
+    const isMinimized = propMinimized !== undefined ? propMinimized : internalMinimized;
+    const setIsMinimized = (val) => {
+        const next = typeof val === "function" ? val(isMinimized) : val;
+        if (onToggleMinimize) {
+            onToggleMinimize(next);
+        } else {
+            setInternalMinimized(next);
+        }
+    };
     const [isPlaylistOpen, setIsPlaylistOpen] = useState(false);
     const [isScrubbing, setIsScrubbing] = useState(false);
     const [scrubValue, setScrubValue] = useState(0);
@@ -276,62 +285,62 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
     const progressPercent = duration > 0 ? (effectiveCurrentTime / duration) * 100 : 0;
     const bufferedPercent = duration > 0 ? (buffered / duration) * 100 : 0;
     // -------------------------------------------------------------
-    // Compact / Minimized View
+    // Compact / Minimized View (Centered Floating Dock Pill)
     // -------------------------------------------------------------
     if (isMinimized) {
-        return (<div className="fixed bottom-4 right-4 z-50 flex items-center gap-3 bg-slate-900/95 dark:bg-slate-950/95 backdrop-blur-xl border border-cyan-500/40 shadow-2xl rounded-full px-3.5 py-2 transition-all duration-300 animate-in fade-in slide-in-from-bottom-3 text-slate-100">
+        return (<div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-card/95 backdrop-blur-xl border border-border shadow-2xl rounded-full px-3.5 py-2 transition-all duration-300 animate-in fade-in slide-in-from-bottom-3 text-card-foreground select-none max-w-[calc(100vw-2rem)]">
         <audio ref={audioRef} onTimeUpdate={handleTimeUpdate} onLoadedMetadata={handleLoadedMetadata} onEnded={handleEnded} onError={() => {
                 setHasError(true);
                 setIsLoading(false);
             }} onWaiting={() => setIsLoading(true)} onPlaying={() => setIsLoading(false)}/>
 
         {/* Animated Disc */}
-        <div onClick={() => setIsMinimized(false)} className="relative w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-600 to-indigo-600 p-[2px] cursor-pointer hover:scale-105 transition-transform" title="Click to expand player">
-          <div className={cn("w-full h-full rounded-full bg-slate-950 flex items-center justify-center text-cyan-400", isPlaying && "animate-[spin_4s_linear_infinite]")}>
+        <div onClick={() => setIsMinimized(false)} className="relative w-8 h-8 rounded-full bg-gradient-to-tr from-primary/30 to-primary/80 p-[2px] cursor-pointer hover:scale-105 transition-transform" title="Click to expand player">
+          <div className={cn("w-full h-full rounded-full bg-card border border-border flex items-center justify-center text-primary", isPlaying && "animate-[spin_4s_linear_infinite]")}>
             <Disc className="w-4 h-4"/>
           </div>
         </div>
 
         {/* Info */}
         <div onClick={() => setIsMinimized(false)} className="flex flex-col cursor-pointer max-w-[140px] md:max-w-[200px]" title={cleanTrackTitle}>
-          <span className="text-xs font-semibold text-slate-200 truncate">
+          <span className="text-xs font-semibold text-foreground truncate">
             {cleanTrackTitle}
           </span>
-          <span className="text-[10px] text-cyan-400 font-mono">
+          <span className="text-[10px] text-muted-foreground font-mono">
             {formatTime(effectiveCurrentTime)} / {formatTime(duration)}
           </span>
         </div>
 
         {/* Controls */}
         <div className="flex items-center gap-1">
-          <Button size="icon" variant="ghost" className="w-7 h-7 text-slate-300 hover:text-white hover:bg-slate-800 rounded-full" onClick={togglePlay}>
+          <Button size="icon" variant="ghost" className="w-7 h-7 text-muted-foreground hover:text-foreground hover:bg-muted rounded-full" onClick={togglePlay} aria-label={isPlaying ? "Pause audio" : "Play audio"} title={isPlaying ? "Pause" : "Play"}>
             {isPlaying ? <Pause className="w-3.5 h-3.5 fill-current"/> : <Play className="w-3.5 h-3.5 fill-current ml-0.5"/>}
           </Button>
 
-          <Button size="icon" variant="ghost" className="w-7 h-7 text-slate-300 hover:text-white hover:bg-slate-800 rounded-full" onClick={handleNext} title="Next Track">
+          <Button size="icon" variant="ghost" className="w-7 h-7 text-muted-foreground hover:text-foreground hover:bg-muted rounded-full" onClick={handleNext} aria-label="Next track" title="Next Track">
             <SkipForward className="w-3.5 h-3.5"/>
           </Button>
 
-          <Button size="icon" variant="ghost" className="w-7 h-7 text-slate-300 hover:text-cyan-400 hover:bg-slate-800 rounded-full" onClick={() => setIsMinimized(false)} title="Expand Full Bar">
+          <Button size="icon" variant="ghost" className="w-7 h-7 text-muted-foreground hover:text-primary hover:bg-muted rounded-full" onClick={() => setIsMinimized(false)} aria-label="Expand audio player" title="Expand Full Bar">
             <Maximize2 className="w-3.5 h-3.5"/>
           </Button>
 
-          <Button size="icon" variant="ghost" className="w-7 h-7 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-full" onClick={onClose} title="Close Audio Player">
+          <Button size="icon" variant="ghost" className="w-7 h-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-full" onClick={onClose} aria-label="Close audio player" title="Close Audio Player">
             <X className="w-3.5 h-3.5"/>
           </Button>
         </div>
       </div>);
     }
     // -------------------------------------------------------------
-    // Full Spotify-Style Floating Bottom Player Bar
+    // Full Media Dock - Centered Floating Bottom Player Bar
     // -------------------------------------------------------------
-    return (<div className="fixed bottom-3 inset-x-3 md:inset-x-6 z-50 select-none animate-in fade-in slide-in-from-bottom-4 duration-300">
+    return (<div className="fixed bottom-3 left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-1.5rem)] sm:w-[calc(100vw-2rem)] md:w-[calc(100vw-4rem)] lg:max-w-4xl xl:max-w-5xl select-none animate-in fade-in slide-in-from-bottom-4 duration-300 pointer-events-none">
       <audio ref={audioRef} onTimeUpdate={handleTimeUpdate} onLoadedMetadata={handleLoadedMetadata} onEnded={handleEnded} onError={() => {
             setHasError(true);
             setIsLoading(false);
         }} onWaiting={() => setIsLoading(true)} onPlaying={() => setIsLoading(false)}/>
 
-      <div className="relative bg-slate-900/95 dark:bg-slate-950/95 backdrop-blur-2xl border border-slate-700/60 dark:border-slate-800/80 shadow-[0_12px_45px_rgba(0,0,0,0.65)] rounded-2xl p-2.5 md:p-3 text-slate-100 flex flex-col md:flex-row items-center justify-between gap-3 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-[2px] before:bg-gradient-to-r before:from-transparent before:via-cyan-500 before:to-transparent">
+      <div className="relative pointer-events-auto bg-card/95 backdrop-blur-2xl border border-border shadow-[0_12px_45px_rgba(0,0,0,0.5)] rounded-2xl p-2.5 md:p-3 text-card-foreground flex flex-col md:flex-row items-center justify-between gap-3 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-[2px] before:bg-gradient-to-r before:from-transparent before:via-primary before:to-transparent">
         
         {/* ============================================================ */}
         {/* LEFT SECTION: Track Info & Vinyl Art */}
@@ -339,33 +348,33 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
         <div className="flex items-center gap-3 w-full md:w-[28%] min-w-0 justify-between md:justify-start">
           <div className="flex items-center gap-3 min-w-0">
             {/* Vinyl Record */}
-            <div className="relative flex-shrink-0 w-11 h-11 md:w-12 md:h-12 rounded-full bg-gradient-to-tr from-cyan-600/40 via-indigo-600/40 to-purple-600/40 p-[2px] shadow-md shadow-cyan-950">
-              <div className={cn("w-full h-full rounded-full bg-slate-950 border border-slate-800 flex items-center justify-center text-cyan-400 relative overflow-hidden", isPlaying && "animate-[spin_6s_linear_infinite]")} style={{
+            <div className="relative flex-shrink-0 w-11 h-11 md:w-12 md:h-12 rounded-full bg-gradient-to-tr from-primary/30 via-primary/50 to-primary/80 p-[2px] shadow-md shadow-black/20">
+              <div className={cn("w-full h-full rounded-full bg-card border border-border flex items-center justify-center text-primary relative overflow-hidden", isPlaying && "animate-[spin_6s_linear_infinite]")} style={{
             animationPlayState: isPlaying ? "running" : "paused",
         }}>
                 {/* Vinyl Grooves */}
-                <div className="absolute inset-1 rounded-full border border-slate-800/60"/>
-                <div className="absolute inset-2.5 rounded-full border border-slate-800/80"/>
-                <Disc className="w-5 h-5 text-cyan-400 relative z-10"/>
-                <div className="absolute w-2 h-2 rounded-full bg-cyan-400/80 shadow-[0_0_8px_rgba(34,211,238,0.8)]"/>
+                <div className="absolute inset-1 rounded-full border border-border/60"/>
+                <div className="absolute inset-2.5 rounded-full border border-border/80"/>
+                <Disc className="w-5 h-5 text-primary relative z-10"/>
+                <div className="absolute w-2 h-2 rounded-full bg-primary/80 shadow-[0_0_8px_rgba(99,102,241,0.8)]"/>
               </div>
             </div>
 
             {/* Title & Metadata */}
             <div className="min-w-0 flex flex-col">
               <div className="flex items-center gap-1.5">
-                <span className="font-semibold text-sm md:text-base text-slate-100 truncate hover:text-cyan-400 transition-colors" title={cleanTrackTitle}>
+                <span className="font-semibold text-sm md:text-base text-foreground truncate hover:text-primary transition-colors" title={cleanTrackTitle}>
                   {cleanTrackTitle}
                 </span>
               </div>
-              <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
-                <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-mono tracking-wider border-cyan-500/40 text-cyan-400 bg-cyan-950/30">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-mono tracking-wider border-primary/40 text-primary bg-primary/10">
                   {trackExtension}
                 </Badge>
-                <span className="text-[11px] text-slate-400 truncate">
+                <span className="text-[11px] text-muted-foreground truncate">
                   Track {currentIndex + 1} of {playlist.length}
                 </span>
-                {activeTrack.size && (<span className="text-[10px] text-slate-500 hidden sm:inline">
+                {activeTrack.size && (<span className="text-[10px] text-muted-foreground/75 hidden sm:inline">
                     • {formatFileSize(activeTrack.size)}
                   </span>)}
               </div>
@@ -374,10 +383,10 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
 
           {/* Mobile Right Controls: Close & Minimize */}
           <div className="flex md:hidden items-center gap-1">
-            <Button size="icon" variant="ghost" className="w-7 h-7 text-slate-400 hover:text-white" onClick={() => setIsMinimized(true)}>
+            <Button size="icon" variant="ghost" className="w-7 h-7 text-muted-foreground hover:text-foreground" onClick={() => setIsMinimized(true)} aria-label="Minimize audio player" title="Minimize">
               <Minimize2 className="w-3.5 h-3.5"/>
             </Button>
-            <Button size="icon" variant="ghost" className="w-7 h-7 text-slate-400 hover:text-red-400" onClick={onClose}>
+            <Button size="icon" variant="ghost" className="w-7 h-7 text-muted-foreground hover:text-destructive" onClick={onClose} aria-label="Close audio player" title="Close">
               <X className="w-3.5 h-3.5"/>
             </Button>
           </div>
@@ -391,37 +400,37 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
           <div className="flex items-center gap-3 md:gap-5">
             {/* Shuffle */}
             <Button size="icon" variant="ghost" className={cn("w-8 h-8 rounded-full transition-colors", isShuffle
-            ? "text-cyan-400 bg-cyan-950/40 hover:bg-cyan-900/50"
-            : "text-slate-400 hover:text-white hover:bg-slate-800/60")} onClick={() => setIsShuffle((prev) => !prev)} title={isShuffle ? "Shuffle On" : "Shuffle Off"}>
+            ? "text-primary bg-primary/15 hover:bg-primary/25"
+            : "text-muted-foreground hover:text-foreground hover:bg-muted")} onClick={() => setIsShuffle((prev) => !prev)} aria-label={isShuffle ? "Disable shuffle" : "Enable shuffle"} title={isShuffle ? "Shuffle On" : "Shuffle Off"}>
               <Shuffle className="w-4 h-4"/>
             </Button>
 
             {/* Prev */}
-            <Button size="icon" variant="ghost" className="w-8 h-8 text-slate-300 hover:text-white hover:bg-slate-800/60 rounded-full" onClick={handlePrev} title="Previous Track">
+            <Button size="icon" variant="ghost" className="w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-muted rounded-full" onClick={handlePrev} aria-label="Previous track" title="Previous Track">
               <SkipBack className="w-4 h-4 fill-current"/>
             </Button>
 
             {/* Play/Pause Main Button */}
-            <Button size="icon" className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-lg shadow-cyan-500/25 hover:scale-105 active:scale-95 transition-all flex items-center justify-center relative" onClick={togglePlay} title={isPlaying ? "Pause (Space)" : "Play (Space)"}>
-              {isLoading ? (<div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"/>) : isPlaying ? (<Pause className="w-5 h-5 fill-current"/>) : (<Play className="w-5 h-5 fill-current ml-0.5"/>)}
+            <Button size="icon" className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/25 hover:scale-105 active:scale-95 transition-all flex items-center justify-center relative" onClick={togglePlay} aria-label={isPlaying ? "Pause audio" : "Play audio"} title={isPlaying ? "Pause (Space)" : "Play (Space)"}>
+              {isLoading ? (<div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin"/>) : isPlaying ? (<Pause className="w-5 h-5 fill-current"/>) : (<Play className="w-5 h-5 fill-current ml-0.5"/>)}
             </Button>
 
             {/* Next */}
-            <Button size="icon" variant="ghost" className="w-8 h-8 text-slate-300 hover:text-white hover:bg-slate-800/60 rounded-full" onClick={handleNext} title="Next Track">
+            <Button size="icon" variant="ghost" className="w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-muted rounded-full" onClick={handleNext} aria-label="Next track" title="Next Track">
               <SkipForward className="w-4 h-4 fill-current"/>
             </Button>
 
             {/* Repeat */}
             <Button size="icon" variant="ghost" className={cn("w-8 h-8 rounded-full relative transition-colors", repeatMode !== "off"
-            ? "text-cyan-400 bg-cyan-950/40 hover:bg-cyan-900/50"
-            : "text-slate-400 hover:text-white hover:bg-slate-800/60")} onClick={cycleRepeatMode} title={`Repeat: ${repeatMode.toUpperCase()}`}>
+            ? "text-primary bg-primary/15 hover:bg-primary/25"
+            : "text-muted-foreground hover:text-foreground hover:bg-muted")} onClick={cycleRepeatMode} aria-label={repeatMode === "one" ? "Repeat current track" : repeatMode === "all" ? "Repeat all tracks" : "Enable repeat"} title={`Repeat: ${repeatMode.toUpperCase()}`}>
               {repeatMode === "one" ? (<Repeat1 className="w-4 h-4"/>) : (<Repeat className="w-4 h-4"/>)}
-              {repeatMode !== "off" && (<span className="absolute bottom-1 w-1 h-1 rounded-full bg-cyan-400"/>)}
+              {repeatMode !== "off" && (<span className="absolute bottom-1 w-1 h-1 rounded-full bg-primary"/>)}
             </Button>
           </div>
 
           {/* Scrubber & Time Display */}
-          <div className="flex items-center gap-2.5 w-full text-xs font-mono text-slate-400 px-1">
+          <div className="flex items-center gap-2.5 w-full text-xs font-mono text-muted-foreground px-1">
             <span className="w-10 text-right select-none text-[11px]">
               {formatTime(effectiveCurrentTime)}
             </span>
@@ -429,8 +438,8 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
             {/* Seek Bar with buffer underlay */}
             <div className="relative flex-1 flex items-center group cursor-pointer py-1">
               {/* Buffered progress track */}
-              <div className="absolute inset-x-0 h-1.5 rounded-full bg-slate-800 overflow-hidden pointer-events-none">
-                <div className="h-full bg-slate-700/70 transition-all duration-200" style={{ width: `${bufferedPercent}%` }}/>
+              <div className="absolute inset-x-0 h-1.5 rounded-full bg-secondary overflow-hidden pointer-events-none">
+                <div className="h-full bg-muted-foreground/30 transition-all duration-200" style={{ width: `${bufferedPercent}%` }}/>
               </div>
 
               {/* Interactive Radix Slider */}
@@ -448,14 +457,14 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
         {/* ============================================================ */}
         <div className="hidden md:flex items-center justify-end gap-2.5 w-[28%] min-w-0">
           {/* Speed Selector */}
-          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs font-mono text-slate-400 hover:text-cyan-400 hover:bg-slate-800/70 rounded-md" onClick={cyclePlaybackRate} title="Playback Speed">
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs font-mono text-muted-foreground hover:text-primary hover:bg-muted rounded-md" onClick={cyclePlaybackRate} aria-label={`Playback speed, current ${playbackRate}x`} title="Playback Speed">
             {playbackRate}x
           </Button>
 
           {/* Volume Control */}
           <div className="flex items-center gap-2 group w-28">
-            <Button size="icon" variant="ghost" className="w-7 h-7 text-slate-400 hover:text-white rounded-full p-0 flex-shrink-0" onClick={() => setIsMuted((prev) => !prev)} title={isMuted ? "Unmute (M)" : "Mute (M)"}>
-              {isMuted || volume === 0 ? (<VolumeX className="w-4 h-4 text-red-400"/>) : volume < 0.5 ? (<Volume1 className="w-4 h-4"/>) : (<Volume2 className="w-4 h-4"/>)}
+            <Button size="icon" variant="ghost" className="w-7 h-7 text-muted-foreground hover:text-foreground rounded-full p-0 flex-shrink-0" onClick={() => setIsMuted((prev) => !prev)} aria-label={isMuted ? "Unmute audio" : "Mute audio"} title={isMuted ? "Unmute (M)" : "Mute (M)"}>
+              {isMuted || volume === 0 ? (<VolumeX className="w-4 h-4 text-destructive"/>) : volume < 0.5 ? (<Volume1 className="w-4 h-4"/>) : (<Volume2 className="w-4 h-4"/>)}
             </Button>
             <Slider value={[isMuted ? 0 : volume]} min={0} max={1} step={0.01} onValueChange={(val) => {
             setIsMuted(false);
@@ -467,8 +476,8 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
           <Popover open={isPlaylistOpen} onOpenChange={setIsPlaylistOpen}>
             <PopoverTrigger asChild>
               <Button size="sm" variant="ghost" className={cn("h-8 px-2.5 gap-1.5 text-xs rounded-lg transition-colors", isPlaylistOpen
-            ? "text-cyan-400 bg-cyan-950/50 border border-cyan-500/30"
-            : "text-slate-300 hover:text-white hover:bg-slate-800")} title="Playlist Queue">
+            ? "text-primary bg-primary/15 border border-primary/30"
+            : "text-muted-foreground hover:text-foreground hover:bg-muted")} aria-label={isPlaylistOpen ? "Close playlist drawer" : "Open playlist drawer"} title="Playlist Queue">
                 <ListMusic className="w-4 h-4"/>
                 <span className="font-mono text-[11px] font-semibold">
                   {playlist.length}
@@ -476,25 +485,25 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
               </Button>
             </PopoverTrigger>
 
-            <PopoverContent side="top" align="end" className="w-80 md:w-96 p-0 bg-slate-900/95 dark:bg-slate-950/95 backdrop-blur-2xl border border-slate-700/80 shadow-2xl rounded-xl text-slate-100 overflow-hidden mb-2">
+            <PopoverContent side="top" align="end" className="w-80 md:w-96 p-0 bg-popover/95 backdrop-blur-2xl border border-border shadow-2xl rounded-xl text-popover-foreground overflow-hidden mb-2">
               {/* Popover Header */}
-              <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-slate-800 bg-slate-950/60">
+              <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-border bg-muted/40">
                 <div className="flex items-center gap-2">
-                  <Music className="w-4 h-4 text-cyan-400"/>
-                  <span className="font-semibold text-xs text-slate-200">
+                  <Music className="w-4 h-4 text-primary"/>
+                  <span className="font-semibold text-xs text-foreground">
                     Playlist Queue
                   </span>
-                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-slate-800">
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-secondary">
                     {playlist.length} tracks
                   </Badge>
                 </div>
-                <div className="text-[11px] text-slate-400 font-mono">
+                <div className="text-[11px] text-muted-foreground font-mono">
                   Playing #{currentIndex + 1}
                 </div>
               </div>
 
               {/* Track list */}
-              <ScrollArea className="max-h-72 overflow-y-auto p-1.5 divide-y divide-slate-800/40">
+              <ScrollArea className="max-h-72 overflow-y-auto p-1.5 divide-y divide-border/40">
                 {playlist.map((track, idx) => {
             const isCur = idx === currentIndex;
             const trackClean = track.name.replace(/\.[^/.]+$/, "");
@@ -502,14 +511,14 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
                     onTrackChange(idx);
                     setIsPlaylistOpen(false);
                 }} className={cn("flex items-center justify-between p-2 rounded-lg cursor-pointer transition-all text-xs group", isCur
-                    ? "bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 font-medium"
-                    : "hover:bg-slate-800/60 text-slate-300")}>
+                    ? "bg-primary/15 border border-primary/30 text-primary font-medium"
+                    : "hover:bg-muted text-muted-foreground hover:text-foreground")}>
                       <div className="flex items-center gap-2.5 min-w-0 pr-2">
                         {isCur ? (<div className="flex items-end gap-[2px] w-4 h-4 justify-center">
-                            <span className="w-1 bg-cyan-400 rounded-sm animate-[bounce_0.8s_infinite] h-3"/>
-                            <span className="w-1 bg-cyan-400 rounded-sm animate-[bounce_1.1s_infinite] h-4"/>
-                            <span className="w-1 bg-cyan-400 rounded-sm animate-[bounce_0.9s_infinite] h-2"/>
-                          </div>) : (<span className="font-mono text-slate-500 w-4 text-center text-[11px] group-hover:text-slate-300">
+                            <span className="w-1 bg-primary rounded-sm animate-[bounce_0.8s_infinite] h-3"/>
+                            <span className="w-1 bg-primary rounded-sm animate-[bounce_1.1s_infinite] h-4"/>
+                            <span className="w-1 bg-primary rounded-sm animate-[bounce_0.9s_infinite] h-2"/>
+                          </div>) : (<span className="font-mono text-muted-foreground w-4 text-center text-[11px] group-hover:text-foreground">
                             {idx + 1}
                           </span>)}
 
@@ -518,7 +527,7 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-2 flex-shrink-0 text-[10px] text-slate-500 font-mono">
+                      <div className="flex items-center gap-2 flex-shrink-0 text-[10px] text-muted-foreground font-mono">
                         {track.size ? formatFileSize(track.size) : ""}
                       </div>
                     </div>);
@@ -528,19 +537,19 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
           </Popover>
 
           {/* Download Track */}
-          <Button size="icon" variant="ghost" className="w-8 h-8 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg" onClick={() => {
+          <Button size="icon" variant="ghost" className="w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg" onClick={() => {
             downloadManager.addDownload(activeTrack.url, activeTrack.name);
-        }} title="Download this Track">
+        }} aria-label="Download current track" title="Download this Track">
             <Download className="w-4 h-4"/>
           </Button>
 
           {/* Minimize into Pill */}
-          <Button size="icon" variant="ghost" className="w-8 h-8 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-lg" onClick={() => setIsMinimized(true)} title="Minimize to Floating Pill">
+          <Button size="icon" variant="ghost" className="w-8 h-8 text-muted-foreground hover:text-primary hover:bg-muted rounded-lg" onClick={() => setIsMinimized(true)} aria-label="Minimize audio player" title="Minimize to Floating Pill">
             <Minimize2 className="w-4 h-4"/>
           </Button>
 
           {/* Close Player */}
-          <Button size="icon" variant="ghost" className="w-8 h-8 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg" onClick={onClose} title="Close Audio Player">
+          <Button size="icon" variant="ghost" className="w-8 h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg" onClick={onClose} aria-label="Close audio player" title="Close Audio Player">
             <X className="w-4 h-4"/>
           </Button>
         </div>

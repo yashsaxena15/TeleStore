@@ -41,7 +41,7 @@ const CloudAccountRow = ({ acc, isSelected, collapsed, onSelect, onDisconnect })
         {!collapsed && (<button onClick={(e) => {
                 e.stopPropagation();
                 onDisconnect();
-            }} className="opacity-0 group-hover:opacity-100 p-1 hover:text-destructive text-muted-foreground transition-opacity cursor-pointer" title="Disconnect cloud account">
+            }} className="opacity-0 group-hover:opacity-100 p-1 hover:text-destructive text-muted-foreground transition-opacity cursor-pointer" title="Disconnect cloud account" aria-label={`Disconnect ${acc.account_name}`}>
             <Unlink className="w-3.5 h-3.5"/>
           </button>)}
       </div>
@@ -207,7 +207,7 @@ export const Sidebar = ({ currentPath, onNavigate, onDrop, files, selectedFilter
             const isDragOver = dragOverFolder === filter.filter;
             return (<button key={filter.filter} onClick={() => handleCategoryClick(filter.filter)} onDragOver={(e) => handleDragOver(e, filter.filter)} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, filter.filter)} className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-all ${collapsed ? "justify-center px-2 py-3" : ""} ${isSelected
                     ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                    : "text-sidebar-foreground hover:bg-sidebar-accent/50"} ${isDragOver ? "ring-2 ring-primary ring-inset" : ""}`} title={collapsed ? filter.name : undefined}>
+                    : "text-sidebar-foreground hover:bg-sidebar-accent/50"} ${isDragOver ? "ring-2 ring-primary ring-inset" : ""}`} title={collapsed ? filter.name : undefined} aria-label={filter.name}>
               <Icon className="w-4 h-4 shrink-0"/>
               {!collapsed && <span>{filter.name}</span>}
             </button>);
@@ -219,7 +219,7 @@ export const Sidebar = ({ currentPath, onNavigate, onDrop, files, selectedFilter
             <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               Cloud Storage
             </span>
-            <button onClick={() => setConnectModalOpen(true)} className="text-[11px] text-primary hover:underline font-medium cursor-pointer" title="Connect new cloud account">
+            <button onClick={() => setConnectModalOpen(true)} className="text-[11px] text-primary hover:underline font-medium cursor-pointer" title="Connect new cloud account" aria-label="Connect new cloud account">
               + Connect
             </button>
           </div>)}
@@ -227,7 +227,7 @@ export const Sidebar = ({ currentPath, onNavigate, onDrop, files, selectedFilter
         {cloudAccounts.map((acc) => (<CloudAccountRow key={acc.id} acc={acc} isSelected={activeView === 'files' && selectedFilter.startsWith(`cloud:${acc.id}`)} collapsed={collapsed} onSelect={() => handleCategoryClick(`cloud:${acc.id}:root`)} onDisconnect={() => handleDisconnectAccount(acc.id, acc.account_name)}/>))}
 
         {cloudAccounts.length === 0 && !collapsed && (<div className="px-4 py-1.5">
-            <button onClick={() => setConnectModalOpen(true)} className="w-full text-xs text-muted-foreground hover:text-foreground border border-dashed border-border/80 rounded-lg py-2 flex items-center justify-center gap-1.5 hover:bg-muted/40 transition-colors cursor-pointer">
+            <button onClick={() => setConnectModalOpen(true)} className="w-full text-xs text-muted-foreground hover:text-foreground border border-dashed border-border/80 rounded-lg py-2 flex items-center justify-center gap-1.5 hover:bg-muted/40 transition-colors cursor-pointer" aria-label="Connect Google Drive">
               <Cloud className="w-3.5 h-3.5 text-primary"/>
               <span>Connect Google Drive</span>
             </button>
@@ -244,7 +244,7 @@ export const Sidebar = ({ currentPath, onNavigate, onDrop, files, selectedFilter
             const isSelected = activeView === item.id || (item.id === 'transfers' && activeView === 'downloads');
             return (<button key={item.id} onClick={() => handleProfileOptionClick(item.id)} className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-all relative ${collapsed ? "justify-center px-2 py-3" : ""} ${isSelected
                     ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                    : "text-sidebar-foreground hover:bg-sidebar-accent/50"}`} title={collapsed ? item.name : undefined}>
+                    : "text-sidebar-foreground hover:bg-sidebar-accent/50"}`} title={collapsed ? item.name : undefined} aria-label={item.name}>
               <Icon className="w-4 h-4 shrink-0"/>
               {!collapsed && (<div className="flex items-center justify-between flex-1 min-w-0">
                   <span className="truncate">{item.name}</span>
@@ -271,7 +271,7 @@ export const Sidebar = ({ currentPath, onNavigate, onDrop, files, selectedFilter
             }
             if (isMobile && onCloseMobile)
                 onCloseMobile();
-        }} className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-all text-sidebar-foreground hover:bg-sidebar-accent/50 group ${collapsed ? "justify-center px-2 py-3" : ""}`} title="Mount to RaiDrive, Windows Explorer, or MiXplorer">
+        }} className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-all text-sidebar-foreground hover:bg-sidebar-accent/50 group ${collapsed ? "justify-center px-2 py-3" : ""}`} title="Mount to RaiDrive, Windows Explorer, or MiXplorer" aria-label="Connect Drive via WebDAV">
           <Laptop className="w-4 h-4 text-primary group-hover:scale-110 transition-transform shrink-0"/>
           {!collapsed && (<div className="flex items-center justify-between flex-1 min-w-0">
               <span className="truncate">Connect Drive</span>
@@ -279,7 +279,7 @@ export const Sidebar = ({ currentPath, onNavigate, onDrop, files, selectedFilter
             </div>)}
         </button>
 
-        <button onClick={handleLogout} className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-all text-sidebar-foreground hover:bg-destructive/10 hover:text-destructive ${collapsed ? "justify-center px-2 py-3" : ""}`} title={collapsed ? "Logout" : undefined}>
+        <button onClick={handleLogout} className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-all text-sidebar-foreground hover:bg-destructive/10 hover:text-destructive ${collapsed ? "justify-center px-2 py-3" : ""}`} title={collapsed ? "Logout" : undefined} aria-label="Logout">
           <LogOut className="w-4 h-4 shrink-0"/>
           {!collapsed && <span>Logout</span>}
         </button>
@@ -287,7 +287,12 @@ export const Sidebar = ({ currentPath, onNavigate, onDrop, files, selectedFilter
 
       {/* User profile card at the bottom */}
       <div className="p-2.5 border-t border-sidebar-border mt-auto bg-sidebar/40">
-        <div onClick={() => handleProfileOptionClick("profile")} className={`flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-sidebar-accent/50 transition-colors cursor-pointer ${collapsed ? "justify-center p-1" : ""}`} title="Open Profile">
+        <div role="button" tabIndex={0} onClick={() => handleProfileOptionClick("profile")} onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                handleProfileOptionClick("profile");
+            }
+        }} className={`flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-sidebar-accent/50 transition-colors cursor-pointer ${collapsed ? "justify-center p-1" : ""}`} title="Open Profile" aria-label={`User profile for ${userProfile?.username || "user"}`}>
           <div className="w-8 h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden">
             {userProfile?.telegram_profile_picture ? (<img src={userProfile.telegram_profile_picture} alt={userProfile.username} className="w-full h-full object-cover"/>) : ((userProfile?.username || "U").charAt(0).toUpperCase())}
           </div>

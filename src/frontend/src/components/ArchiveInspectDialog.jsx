@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter, } from "@/components/ui/dialog";
 import { Folder, File, Archive, Loader2, Sparkles, AlertCircle } from "lucide-react";
 import { getApiBaseUrl, fetchWithTimeout } from "@/lib/api";
 import { toast } from "sonner";
@@ -79,46 +79,46 @@ export const ArchiveInspectDialog = ({ isOpen, onClose, fileId, fileName, curren
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
     };
     return (<Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl bg-zinc-900 border-zinc-800 text-zinc-100 max-h-[85vh] flex flex-col p-6">
-        <DialogHeader className="border-b border-zinc-800 pb-4 shrink-0">
+      <DialogContent className="max-w-2xl bg-card border-border text-card-foreground max-h-[85vh] flex flex-col p-6">
+        <DialogHeader className="border-b border-border pb-4 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg">
+            <div className="p-2 bg-amber-500/10 text-amber-500 dark:text-amber-400 rounded-lg">
               <Archive className="w-5 h-5"/>
             </div>
             <div className="min-w-0 flex-1">
               <DialogTitle className="text-base font-semibold truncate">
                 {fileName}
               </DialogTitle>
-              <p className="text-xs text-zinc-400 mt-0.5">
+              <DialogDescription className="text-xs text-muted-foreground mt-0.5">
                 {isLoading
             ? "Loading archive contents..."
             : `${files.length} items • Uncompressed: ${formatSize(totalSize)}`}
-              </p>
+              </DialogDescription>
             </div>
           </div>
         </DialogHeader>
 
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto py-4 min-h-[250px] max-h-[50vh]">
-          {isLoading ? (<div className="h-48 flex flex-col items-center justify-center gap-3 text-zinc-400">
+          {isLoading ? (<div className="h-48 flex flex-col items-center justify-center gap-3 text-muted-foreground">
               <Loader2 className="w-8 h-8 animate-spin text-primary"/>
               <p className="text-sm">Loading archive contents from Telegram cloud...</p>
             </div>) : error ? (<div className="h-48 flex flex-col items-center justify-center gap-3 text-center p-4">
-              <AlertCircle className="w-10 h-10 text-red-400"/>
-              <p className="text-sm font-medium text-red-300">{error}</p>
-            </div>) : files.length === 0 ? (<div className="h-48 flex items-center justify-center text-zinc-500 text-sm">
+              <AlertCircle className="w-10 h-10 text-destructive"/>
+              <p className="text-sm font-medium text-destructive">{error}</p>
+            </div>) : files.length === 0 ? (<div className="h-48 flex items-center justify-center text-muted-foreground text-sm">
               Archive is empty.
-            </div>) : (<div className="divide-y divide-zinc-800/60 font-mono text-xs">
-              {files.map((item, index) => (<div key={index} className="py-2.5 px-3 flex items-center justify-between hover:bg-zinc-800/40 rounded transition">
+            </div>) : (<div className="divide-y divide-border/60 font-mono text-xs">
+              {files.map((item, index) => (<div key={index} className="py-2.5 px-3 flex items-center justify-between hover:bg-muted/50 rounded transition">
                   <div className="flex items-center gap-2.5 min-w-0 pr-4">
-                    {item.is_dir ? (<Folder className="w-4 h-4 text-amber-400 shrink-0"/>) : (<File className="w-4 h-4 text-zinc-400 shrink-0"/>)}
-                    <span className="truncate text-zinc-200" title={item.name}>
+                    {item.is_dir ? (<Folder className="w-4 h-4 text-amber-500 shrink-0"/>) : (<File className="w-4 h-4 text-muted-foreground shrink-0"/>)}
+                    <span className="truncate text-foreground" title={item.name}>
                       {item.name}
                     </span>
                   </div>
-                  <div className="shrink-0 flex items-center gap-4 text-zinc-400">
+                  <div className="shrink-0 flex items-center gap-4 text-muted-foreground">
                     <span>{formatSize(item.size)}</span>
-                    <span className="hidden sm:inline text-zinc-500">
+                    <span className="hidden sm:inline text-muted-foreground/70">
                       {item.date_time}
                     </span>
                   </div>
@@ -127,11 +127,11 @@ export const ArchiveInspectDialog = ({ isOpen, onClose, fileId, fileName, curren
         </div>
 
         {/* Footer Actions */}
-        <DialogFooter className="border-t border-zinc-800 pt-4 flex flex-row items-center justify-between gap-2 shrink-0">
-          <button onClick={onClose} className="px-4 py-2 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition">
+        <DialogFooter className="border-t border-border pt-4 flex flex-row items-center justify-between gap-2 shrink-0">
+          <button onClick={onClose} className="px-4 py-2 rounded-md bg-secondary hover:bg-secondary/80 text-secondary-foreground text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1">
             Close
           </button>
-          <button disabled={isLoading || Boolean(error) || isExtracting || files.length === 0} onClick={handleExtract} className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition disabled:opacity-50">
+          <button disabled={isLoading || Boolean(error) || isExtracting || files.length === 0} onClick={handleExtract} className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1">
             {isExtracting ? (<>
                 <Loader2 className="w-4 h-4 animate-spin"/>
                 Extracting to Cloud...

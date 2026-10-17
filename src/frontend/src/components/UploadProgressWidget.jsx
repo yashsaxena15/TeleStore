@@ -68,19 +68,19 @@ export const UploadProgressWidget = ({ files, currentPath, isDirectoryUpload = f
                 clearTimeout(closeTimer.current);
         };
     }, [items, hasCompleted, onComplete]);
-    return (<div className={`fixed bottom-3 left-3 right-3 sm:left-auto sm:right-4 sm:bottom-4 z-50 sm:w-96 bg-background border border-border rounded-xl shadow-xl transition-all duration-300 ease-in-out ${isVisible ? 'transform translate-y-0 opacity-100' : 'transform translate-y-full opacity-0'}`}>
+    return (<div role="region" aria-label="Upload progress monitor" aria-live="polite" className={`fixed bottom-20 left-3 right-3 sm:left-auto sm:right-4 sm:bottom-20 z-40 sm:w-96 bg-card text-card-foreground border border-border rounded-xl shadow-2xl transition-all duration-300 ease-in-out ${isVisible ? 'transform translate-y-0 opacity-100' : 'transform translate-y-full opacity-0'}`}>
       <div className="p-4">
         <div className="flex justify-between items-center mb-2">
-          <h3 className="font-semibold text-sm truncate">
+          <h3 className="font-semibold text-sm truncate text-foreground">
             {isDirectoryUpload ? 'Uploading folder to' : 'Uploading to'} {currentPath}
           </h3>
-          <button onClick={onCancel} className="text-muted-foreground hover:text-foreground text-sm px-1.5 py-0.5 rounded hover:bg-muted" title="Close">
+          <button onClick={onCancel} aria-label="Close upload progress widget" className="text-muted-foreground hover:text-foreground text-sm px-1.5 py-0.5 rounded hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" title="Close">
             ✕
           </button>
         </div>
         
         {/* Progress bar */}
-        <div className="w-full bg-secondary rounded-full h-2 mb-2">
+        <div role="progressbar" aria-valuenow={Math.round(overallProgress)} aria-valuemin={0} aria-valuemax={100} aria-label="Total upload progress" className="w-full bg-secondary rounded-full h-2 mb-2 overflow-hidden">
           <div className="bg-primary h-2 rounded-full transition-all duration-300" style={{ width: `${overallProgress}%` }}></div>
         </div>
 
@@ -102,17 +102,17 @@ export const UploadProgressWidget = ({ files, currentPath, isDirectoryUpload = f
               <div className="flex items-center gap-2">
                 <div className="flex-shrink-0 w-4">
                   {item.status === 'uploading' && (<div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>)}
-                  {item.status === 'completed' && (<span className="text-green-500 font-bold">✓</span>)}
-                  {item.status === 'failed' && (<span className="text-red-500 font-bold">✗</span>)}
+                  {item.status === 'completed' && (<span className="text-success font-bold">✓</span>)}
+                  {item.status === 'failed' && (<span className="text-destructive font-bold">✗</span>)}
                 </div>
-                <div className="flex-1 truncate font-medium text-xs" title={item.filePath}>
+                <div className="flex-1 truncate font-medium text-xs text-foreground" title={item.filePath}>
                   {item.filePath}
                 </div>
                 <div className="text-xs text-muted-foreground flex-shrink-0">
                   {item.status === 'uploading' && (item.progress >= 99
-                ? <span className="text-blue-500 animate-pulse">Forwarding to Telegram...</span>
+                ? <span className="text-primary animate-pulse">Forwarding to Telegram...</span>
                 : `${Math.round(item.progress)}%`)}
-                  {item.status === 'completed' && <span className="text-green-600 dark:text-green-400 font-medium">Done</span>}
+                  {item.status === 'completed' && <span className="text-success font-medium">Done</span>}
                   {item.status === 'failed' && <span className="text-destructive font-medium">Failed</span>}
                 </div>
               </div>
