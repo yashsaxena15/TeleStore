@@ -152,14 +152,14 @@ export const TransfersWidget = () => {
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
-                      {isPausedQuota && (<button className="p-1 text-warning hover:text-warning/80 rounded" onClick={() => {
+                      {(isPausedQuota || (isGroup && (item.items?.some(i => i.status === 'paused_quota' || i.status === 'failed') || (isQueued && item.completedCount > 0)))) && (<button className="p-1 text-amber-600 hover:text-amber-700 dark:text-amber-400 rounded" onClick={() => {
                             if (isGroup) {
                                 resumeRemoteGroup(item.group_id);
                             }
                             else {
                                 resumeRemoteGroup(item.id);
                             }
-                        }} aria-label={`Resume transfer ${item.filename || item.name || ''}`.trim()} title="Resume Now">
+                        }} aria-label={`Resume transfer ${item.filename || item.name || ''}`.trim()} title="Resume Remaining">
                           <Play className="w-3.5 h-3.5 fill-current"/>
                         </button>)}
                       {!isRemote && isTransferring && (<button className="p-1 text-muted-foreground hover:text-foreground rounded" onClick={() => isUpload ? pauseUpload(item.id) : pauseDownload(item.id)} aria-label={`Pause transfer ${item.filename || item.name || ''}`.trim()} title="Pause">
