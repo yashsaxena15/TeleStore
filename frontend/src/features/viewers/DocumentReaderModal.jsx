@@ -207,7 +207,7 @@ export const DocumentReaderModal = ({ url, fileName, fileExtension, onClose, }) 
       <header className="h-14 bg-zinc-900/90 border-b border-zinc-800 px-4 flex items-center justify-between select-none shrink-0 z-20">
         <div className="flex items-center gap-3 min-w-0 pr-4">
           <div className="p-2 bg-primary/10 rounded text-primary">
-            {isPdf ? (<FileText className="w-5 h-5 text-red-400"/>) : isEpub || isComic ? (<BookOpen className="w-5 h-5 text-emerald-400"/>) : isDocx ? (<FileText className="w-5 h-5 text-blue-400"/>) : isSpreadsheet ? (<FileSpreadsheet className="w-5 h-5 text-emerald-400"/>) : isPresentation ? (<Presentation className="w-5 h-5 text-orange-400"/>) : (<FileText className="w-5 h-5 text-amber-400"/>)}
+            {isPdf ? (<FileText className="w-5 h-5 text-destructive"/>) : isEpub || isComic ? (<BookOpen className="w-5 h-5 text-success"/>) : isDocx ? (<FileText className="w-5 h-5 text-info"/>) : isSpreadsheet ? (<FileSpreadsheet className="w-5 h-5 text-success"/>) : isPresentation ? (<Presentation className="w-5 h-5 text-warning"/>) : (<FileText className="w-5 h-5 text-warning"/>)}
           </div>
           <div className="min-w-0">
             <h2 id="doc-reader-title" className="text-sm sm:text-base font-medium text-zinc-100 truncate max-w-xs sm:max-w-md md:max-w-lg">
@@ -238,7 +238,7 @@ export const DocumentReaderModal = ({ url, fileName, fileExtension, onClose, }) 
 
           {/* Copy Button for text files */}
           {(isCodeOrText || isMarkdown) && textContent && (<button onClick={handleCopy} aria-label="Copy content" className="p-2 text-zinc-400 hover:text-white rounded hover:bg-zinc-800 transition" title="Copy content">
-              {copied ? <Check className="w-4 h-4 text-emerald-400"/> : <Copy className="w-4 h-4"/>}
+              {copied ? <Check className="w-4 h-4 text-success"/> : <Copy className="w-4 h-4"/>}
             </button>)}
 
           {/* Comic Mode Toggle */}

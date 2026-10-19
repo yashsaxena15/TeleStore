@@ -27,7 +27,7 @@ export const FolderDownloadDialog = ({ open, info, onClose, onDownloadPart, onDo
       <DialogContent className="bg-background/95 backdrop-blur-md border border-border rounded-xl shadow-2xl max-w-lg w-full p-5 sm:p-6 overflow-hidden">
         <DialogHeader className="pb-3 border-b border-border/60">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center text-2xl flex-shrink-0 border border-blue-500/20 shadow-xs">
+            <div className="w-12 h-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center text-2xl flex-shrink-0 border border-primary/20 shadow-xs">
               <Folder className="w-6 h-6"/>
             </div>
             <div className="min-w-0 flex-1">
@@ -39,7 +39,7 @@ export const FolderDownloadDialog = ({ open, info, onClose, onDownloadPart, onDo
                 <span>•</span>
                 <span className="font-medium text-foreground">{formatFileSize(info.total_size)}</span>
                 <span>•</span>
-                <span className="text-blue-600 dark:text-blue-400 font-medium">
+                <span className="text-primary font-medium">
                   {info.total_parts} {info.total_parts === 1 ? "part" : "zip parts"}
                 </span>
               </DialogDescription>
@@ -49,7 +49,7 @@ export const FolderDownloadDialog = ({ open, info, onClose, onDownloadPart, onDo
 
         <div className="space-y-3 py-3 text-xs sm:text-sm">
           <div className="p-3 bg-muted/40 rounded-lg border border-border/50 text-xs text-muted-foreground leading-relaxed flex items-start gap-2.5">
-            <Layers className="w-4 h-4 text-blue-500 shrink-0 mt-0.5"/>
+            <Layers className="w-4 h-4 text-primary shrink-0 mt-0.5"/>
             <div>
               <p className="font-medium text-foreground">Multi-part Zip Archive (Google Drive style)</p>
               <p className="mt-0.5">
@@ -77,7 +77,7 @@ export const FolderDownloadDialog = ({ open, info, onClose, onDownloadPart, onDo
                   </div>
 
                   <button type="button" onClick={() => handleSingleDownload(part)} className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors shadow-xs shrink-0 ${isQueued
-                    ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
+                    ? "bg-success/15 text-success border border-success/30"
                     : "bg-primary text-primary-foreground hover:bg-primary/90"}`}>
                     {isQueued ? (<>
                         <CheckCircle className="w-3.5 h-3.5"/>

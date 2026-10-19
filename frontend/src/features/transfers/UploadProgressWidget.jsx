@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { Zap, X } from "lucide-react";
 import { useDockPresence } from "@/components/layout/dock/useDock";
 const formatBytes = (bytes) => {
     if (!bytes || bytes <= 0)
@@ -77,8 +78,8 @@ export const UploadProgressWidget = ({ files, currentPath, isDirectoryUpload = f
           <h3 className="font-semibold text-sm truncate text-foreground">
             {isDirectoryUpload ? 'Uploading folder to' : 'Uploading to'} {currentPath}
           </h3>
-          <button onClick={onCancel} aria-label="Close upload progress widget" className="text-muted-foreground hover:text-foreground text-sm px-1.5 py-0.5 rounded hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" title="Close">
-            ✕
+          <button onClick={onCancel} aria-label="Close upload progress widget" className="text-muted-foreground hover:text-foreground p-1 rounded hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" title="Close">
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
         
@@ -93,9 +94,9 @@ export const UploadProgressWidget = ({ files, currentPath, isDirectoryUpload = f
             <span>{Math.round(overallProgress)}%</span>
             {totalBytes > 0 && (<span>{formatBytes(totalLoaded)} of {formatBytes(totalBytes)}</span>)}
           </div>
-          {(activeSpeed || activeEta) && (<div className="flex justify-between text-[11px] text-primary font-mono">
-              {activeSpeed && <span>⚡ {activeSpeed}</span>}
-              {activeEta && <span>⏱️ ETA: {activeEta}</span>}
+          {(activeSpeed || activeEta) && (<div className="flex justify-between text-[11px] text-primary font-mono items-center">
+              {activeSpeed && <span className="inline-flex items-center gap-1"><Zap className="w-3 h-3" />{activeSpeed}</span>}
+              {activeEta && <span>ETA: {activeEta}</span>}
             </div>)}
         </div>
         

@@ -98,8 +98,8 @@ export const AuthWrapper = ({ children }) => {
         logger.info("Showing loading state");
         return (<div className="flex min-h-screen items-center justify-center">
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-gray-900 dark:border-gray-100"></div>
-          <p className="mt-2 text-gray-600 dark:text-gray-400">Checking authentication...</p>
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary"></div>
+          <p className="mt-2 text-muted-foreground">Checking authentication...</p>
         </div>
       </div>);
     }

@@ -192,7 +192,7 @@ export const RemoteDownloadDialog = ({ isOpen, onClose, defaultPath = "/Home", }
                         </div>
                       </div>
                     </div>
-                    <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-red-500" onClick={() => {
+                    <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" aria-label="Remove torrent file" title="Remove torrent file" onClick={() => {
                     setTorrentFile(null);
                     if (fileInputRef.current)
                         fileInputRef.current.value = "";
@@ -234,23 +234,23 @@ export const RemoteDownloadDialog = ({ isOpen, onClose, defaultPath = "/Home", }
         }}/>
 
             {/* Error Banner */}
-            {error && (<div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 flex items-start gap-2 text-xs">
+            {error && (<div className="p-2.5 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive flex items-start gap-2 text-xs">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5"/>
                 <span className="leading-relaxed">{error}</span>
               </div>)}
 
             {/* Loading Indicator */}
-            {loading && (<div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-xs text-blue-400 flex items-start gap-2 animate-pulse">
+            {loading && (<div className="p-3 rounded-lg bg-primary/10 border border-primary/20 text-xs text-primary flex items-start gap-2 animate-pulse">
                 <Loader2 className="w-4 h-4 shrink-0 mt-0.5 animate-spin"/>
                 <div>
-                  <div className="font-semibold text-blue-300">
+                  <div className="font-semibold text-primary">
                     {mode === "url" && isMagnetLink
                 ? "Resolving Magnet & Connecting..."
                 : mode === "torrent"
                     ? "Queuing Torrent Leech..."
                     : "Scanning & Queuing Items..."}
                   </div>
-                  <p className="text-[11px] text-blue-300/80 mt-0.5">
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
                     Building the server transfer queue. Nested folder structure will be strictly preserved.
                   </p>
                 </div>
@@ -259,7 +259,7 @@ export const RemoteDownloadDialog = ({ isOpen, onClose, defaultPath = "/Home", }
             {/* Info Callout */}
             <div className="p-3 rounded-lg bg-muted/20 border border-border/60 text-xs text-muted-foreground space-y-1">
               <div className="font-semibold text-foreground flex items-center gap-1.5">
-                <CheckCircle className="w-3.5 h-3.5 text-emerald-500"/>
+                <CheckCircle className="w-3.5 h-3.5 text-success"/>
                 Folder Hierarchy & Pipelined Uploads
               </div>
               <p className="text-[11px] leading-relaxed">

@@ -419,7 +419,7 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                             : [
                                 {
                                     icon: ShieldCheck,
-                                    label: selectedCount > 1 ? `Move to Vault 🔒 (${selectedCount})` : "Move to Vault 🔒",
+                                    label: selectedCount > 1 ? `Move to Vault (${selectedCount})` : "Move to Vault",
                                     action: "move_to_vault",
                                 },
                             ]),

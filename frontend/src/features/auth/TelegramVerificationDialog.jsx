@@ -59,7 +59,7 @@ export const TelegramVerificationDialog = ({ open, onOpenChange, onVerificationC
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Bot className="h-6 w-6 text-blue-500"/>
+            <Bot className="h-6 w-6 text-primary"/>
             Telegram Verification Required
           </DialogTitle>
           <DialogDescription className="pt-2">
@@ -68,12 +68,12 @@ export const TelegramVerificationDialog = ({ open, onOpenChange, onVerificationC
         </DialogHeader>
         
         {!verificationData ? (<div className="space-y-4 py-4">
-            <p className="text-gray-600 dark:text-gray-400">
+            <p className="text-muted-foreground">
               Connect your Telegram account to enable file uploads and additional features.
             </p>
             <Button onClick={handleGenerateLink} disabled={isGeneratingLink} className="w-full flex items-center gap-2">
               {isGeneratingLink ? (<>
-                  <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-solid border-white border-r-transparent align-[-0.125em]"></div>
+                  <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-solid border-primary-foreground border-r-transparent align-[-0.125em]"></div>
                   Generating Link...
                 </>) : (<>
                   <Link className="h-4 w-4"/>
@@ -81,12 +81,12 @@ export const TelegramVerificationDialog = ({ open, onOpenChange, onVerificationC
                 </>)}
             </Button>
           </div>) : (<div className="space-y-4 py-4">
-            <div className="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg">
-              <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">Verification Code</p>
-              <p className="font-mono text-lg font-bold text-blue-600 dark:text-blue-400">{verificationData.code}</p>
+            <div className="bg-primary/10 border border-primary/20 p-4 rounded-lg">
+              <p className="text-sm text-muted-foreground mb-2">Verification Code</p>
+              <p className="font-mono text-lg font-bold text-primary">{verificationData.code}</p>
             </div>
-            <p className="text-gray-600 dark:text-gray-400">
-              Click "Verify" to open Telegram and complete the verification process with bot @{verificationData.botUsername}.
+            <p className="text-muted-foreground">
+              Click &ldquo;Verify&rdquo; to open Telegram and complete the verification process with bot @{verificationData.botUsername}.
             </p>
           </div>)}
         

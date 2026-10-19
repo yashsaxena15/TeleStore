@@ -82,7 +82,7 @@ export const ArchiveInspectDialog = ({ isOpen, onClose, fileId, fileName, curren
       <DialogContent className="max-w-2xl bg-card border-border text-card-foreground max-h-[85vh] flex flex-col p-6">
         <DialogHeader className="border-b border-border pb-4 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-amber-500/10 text-amber-500 dark:text-amber-400 rounded-lg">
+            <div className="p-2 bg-warning/10 text-warning rounded-lg">
               <Archive className="w-5 h-5"/>
             </div>
             <div className="min-w-0 flex-1">
@@ -111,7 +111,7 @@ export const ArchiveInspectDialog = ({ isOpen, onClose, fileId, fileName, curren
             </div>) : (<div className="divide-y divide-border/60 font-mono text-xs">
               {files.map((item, index) => (<div key={index} className="py-2.5 px-3 flex items-center justify-between hover:bg-muted/50 rounded transition">
                   <div className="flex items-center gap-2.5 min-w-0 pr-4">
-                    {item.is_dir ? (<Folder className="w-4 h-4 text-amber-500 shrink-0"/>) : (<File className="w-4 h-4 text-muted-foreground shrink-0"/>)}
+                    {item.is_dir ? (<Folder className="w-4 h-4 text-warning shrink-0"/>) : (<File className="w-4 h-4 text-muted-foreground shrink-0"/>)}
                     <span className="truncate text-foreground" title={item.name}>
                       {item.name}
                     </span>

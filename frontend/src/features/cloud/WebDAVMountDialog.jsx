@@ -26,7 +26,7 @@ export const WebDAVMountDialog = ({ open, onOpenChange, username = "admin" }) =>
             <div>
               <DialogTitle className="text-xl font-bold flex items-center gap-2">
                 Mount Drive (WebDAV Server)
-                <Badge variant="secondary" className="text-xs bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                <Badge variant="secondary" className="text-xs bg-success/10 text-success border border-success/20">
                   Live RFC 4918
                 </Badge>
               </DialogTitle>
@@ -40,7 +40,7 @@ export const WebDAVMountDialog = ({ open, onOpenChange, username = "admin" }) =>
         {/* Highlight features pill */}
         <div className="grid grid-cols-3 gap-2 py-1 text-center">
           <div className="bg-muted/40 rounded-lg p-2 flex flex-col items-center justify-center border border-border/50">
-            <Zap className="w-4 h-4 text-amber-500 mb-1"/>
+            <Zap className="w-4 h-4 text-warning mb-1"/>
             <span className="text-[11px] font-semibold">Multi-Bot Parallel</span>
             <span className="text-[10px] text-muted-foreground">High speed streaming</span>
           </div>
@@ -50,7 +50,7 @@ export const WebDAVMountDialog = ({ open, onOpenChange, username = "admin" }) =>
             <span className="text-[10px] text-muted-foreground">Home, Inbox, Starred, Trash</span>
           </div>
           <div className="bg-muted/40 rounded-lg p-2 flex flex-col items-center justify-center border border-border/50">
-            <ShieldCheck className="w-4 h-4 text-emerald-500 mb-1"/>
+            <ShieldCheck className="w-4 h-4 text-success mb-1"/>
             <span className="text-[11px] font-semibold">Read & Write</span>
             <span className="text-[10px] text-muted-foreground">Upload, Rename & Stream</span>
           </div>
@@ -79,7 +79,7 @@ export const WebDAVMountDialog = ({ open, onOpenChange, username = "admin" }) =>
                   <p className="text-sm font-mono font-medium truncate text-foreground select-all mt-0.5">{webdavUrl}</p>
                 </div>
                 <Button size="sm" variant="outline" onClick={() => copyToClipboard("url", webdavUrl)} className="shrink-0 h-8 gap-1.5">
-                  {copiedKey === "url" ? <Check className="w-3.5 h-3.5 text-emerald-500"/> : <Copy className="w-3.5 h-3.5"/>}
+                  {copiedKey === "url" ? <Check className="w-3.5 h-3.5 text-success"/> : <Copy className="w-3.5 h-3.5"/>}
                   <span className="text-xs">{copiedKey === "url" ? "Copied" : "Copy"}</span>
                 </Button>
               </div>
@@ -91,8 +91,8 @@ export const WebDAVMountDialog = ({ open, onOpenChange, username = "admin" }) =>
                     <p className="text-[11px] font-semibold uppercase text-muted-foreground tracking-wider">Server / Host</p>
                     <p className="text-sm font-mono font-medium truncate text-foreground select-all mt-0.5">{hostname}</p>
                   </div>
-                  <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={() => copyToClipboard("host", hostname)}>
-                    {copiedKey === "host" ? <Check className="w-3.5 h-3.5 text-emerald-500"/> : <Copy className="w-3.5 h-3.5"/>}
+                  <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" aria-label="Copy server hostname" title="Copy server hostname" onClick={() => copyToClipboard("host", hostname)}>
+                    {copiedKey === "host" ? <Check className="w-3.5 h-3.5 text-success"/> : <Copy className="w-3.5 h-3.5"/>}
                   </Button>
                 </div>
 
@@ -101,8 +101,8 @@ export const WebDAVMountDialog = ({ open, onOpenChange, username = "admin" }) =>
                     <p className="text-[11px] font-semibold uppercase text-muted-foreground tracking-wider">Port</p>
                     <p className="text-sm font-mono font-medium truncate text-foreground select-all mt-0.5">{port || "80"}</p>
                   </div>
-                  <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={() => copyToClipboard("port", port || "80")}>
-                    {copiedKey === "port" ? <Check className="w-3.5 h-3.5 text-emerald-500"/> : <Copy className="w-3.5 h-3.5"/>}
+                  <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" aria-label="Copy port" title="Copy port" onClick={() => copyToClipboard("port", port || "80")}>
+                    {copiedKey === "port" ? <Check className="w-3.5 h-3.5 text-success"/> : <Copy className="w-3.5 h-3.5"/>}
                   </Button>
                 </div>
               </div>
@@ -114,8 +114,8 @@ export const WebDAVMountDialog = ({ open, onOpenChange, username = "admin" }) =>
                     <p className="text-[11px] font-semibold uppercase text-muted-foreground tracking-wider">Path</p>
                     <p className="text-sm font-mono font-medium truncate text-foreground select-all mt-0.5">/webdav</p>
                   </div>
-                  <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={() => copyToClipboard("path", "/webdav")}>
-                    {copiedKey === "path" ? <Check className="w-3.5 h-3.5 text-emerald-500"/> : <Copy className="w-3.5 h-3.5"/>}
+                  <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" aria-label="Copy path" title="Copy path" onClick={() => copyToClipboard("path", "/webdav")}>
+                    {copiedKey === "path" ? <Check className="w-3.5 h-3.5 text-success"/> : <Copy className="w-3.5 h-3.5"/>}
                   </Button>
                 </div>
 
@@ -124,16 +124,16 @@ export const WebDAVMountDialog = ({ open, onOpenChange, username = "admin" }) =>
                     <p className="text-[11px] font-semibold uppercase text-muted-foreground tracking-wider">Username</p>
                     <p className="text-sm font-mono font-medium truncate text-foreground select-all mt-0.5">{username}</p>
                   </div>
-                  <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={() => copyToClipboard("user", username)}>
-                    {copiedKey === "user" ? <Check className="w-3.5 h-3.5 text-emerald-500"/> : <Copy className="w-3.5 h-3.5"/>}
+                  <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" aria-label="Copy username" title="Copy username" onClick={() => copyToClipboard("user", username)}>
+                    {copiedKey === "user" ? <Check className="w-3.5 h-3.5 text-success"/> : <Copy className="w-3.5 h-3.5"/>}
                   </Button>
                 </div>
               </div>
 
               {/* Password notice */}
-              <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-3 flex items-start gap-2.5">
-                <Info className="w-4 h-4 text-amber-500 shrink-0 mt-0.5"/>
-                <div className="text-xs text-amber-900 dark:text-amber-200">
+              <div className="rounded-xl bg-warning/10 border border-warning/20 p-3 flex items-start gap-2.5">
+                <Info className="w-4 h-4 text-warning shrink-0 mt-0.5"/>
+                <div className="text-xs text-foreground">
                   <span className="font-semibold">Password: </span> 
                   Use the same password you use to log into this web application.
                 </div>
@@ -178,7 +178,7 @@ export const WebDAVMountDialog = ({ open, onOpenChange, username = "admin" }) =>
                 </ol>
 
                 <div className="bg-muted/50 rounded-lg p-2.5 text-[11px] text-muted-foreground">
-                  💡 <strong className="text-foreground">Tip:</strong> In RaiDrive, you will see four root folders: 
+                  <strong className="text-foreground">Tip:</strong> In RaiDrive, you will see four root folders: 
                   <code className="mx-1 px-1 py-0.5 bg-background rounded text-primary">Home</code>, 
                   <code className="mx-1 px-1 py-0.5 bg-background rounded text-primary">Telegram Inbox</code>, 
                   <code className="mx-1 px-1 py-0.5 bg-background rounded text-primary">Starred</code>, and 
@@ -229,7 +229,7 @@ export const WebDAVMountDialog = ({ open, onOpenChange, username = "admin" }) =>
                 </ol>
 
                 <div className="bg-muted/50 rounded-lg p-2.5 text-[11px] text-muted-foreground">
-                  🎬 <strong className="text-foreground">Media Playback:</strong> In MiXplorer or VLC, video files stream instantly with fast forward / rewind seeking without downloading the whole file first!
+                  <strong className="text-foreground">Media Playback:</strong> In MiXplorer or VLC, video files stream instantly with fast forward / rewind seeking without downloading the whole file first!
                 </div>
               </CardContent>
             </Card>

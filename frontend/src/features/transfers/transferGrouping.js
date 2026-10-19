@@ -72,7 +72,7 @@ export function groupRemoteTransfers(remoteTransfers) {
         const cooldownUntil = cooldownItem?.cooldown_until;
         let phase = '';
         if (status === 'discovering') {
-            phase = '🔍 Analyzing folder structure in background...';
+            phase = 'Analyzing folder structure in background...';
         }
         else if (status === 'paused_quota') {
             let targetTime = '24h';
@@ -83,15 +83,15 @@ export function groupRemoteTransfers(remoteTransfers) {
                 }
                 catch { }
             }
-            phase = `Google Drive quota limit reached. Auto-resumes at ${targetTime} 🕒`;
+            phase = `Google Drive quota limit reached. Auto-resumes at ${targetTime}`;
         }
         else if (status === 'completed') {
-            phase = groupType === 'file' ? `Completed & Assembled (${subItems.length} parts) 🎉` : `Completed all ${subItems.length} file(s) 🎉`;
+            phase = groupType === 'file' ? `Completed and assembled (${subItems.length} parts)` : `Completed all ${subItems.length} file(s)`;
         }
         else if (status === 'downloading' || status === 'uploading_tg') {
             const activeSub = subItems.find(i => i.status === 'downloading' || i.status === 'uploading_tg');
             phase = groupType === 'file'
-                ? `Multi-Node Leeching [${completedCount}/${subItems.length} parts done] ⚡`
+                ? `Multi-node leeching [${completedCount}/${subItems.length} parts done]`
                 : `Leeching [${completedCount + 1}/${subItems.length}]: ${activeSub?.filename || ''}`;
         }
         else if (status === 'failed') {
