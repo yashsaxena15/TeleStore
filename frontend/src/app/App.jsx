@@ -5,8 +5,7 @@ import { Toaster } from "@/components/ui/sonner";
 import Login from "@/features/auth/Login";
 import NotFound from "@/app/pages/NotFound";
 import Index from "@/app/pages/Index";
-import { ErrorBoundary } from "@/components/feedback/ErrorBoundary";
-import { TransfersWidget } from "@/features/transfers/TransfersWidget";
+import { DockProvider } from "@/components/layout/dock/DockContext";
 import logger from "@/lib/logger";
 // Import the new backend connection hook
 import { useBackendConnection } from "@/hooks/useViteConnection";
@@ -65,19 +64,18 @@ const App = () => {
     }, []);
     return (<QueryClientProvider client={queryClient}>
       <ErrorProvider>
+        <DockProvider>
         <MediaPlayerProvider>
           <BrowserRouter>
             <div className="flex h-[100dvh] bg-background select-none overflow-hidden">
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
                 <AppRoutes />
                 <Toaster />
-                <ErrorBoundary name="Transfers widget" fallback="silent">
-                  <TransfersWidget />
-                </ErrorBoundary>
               </div>
             </div>
           </BrowserRouter>
         </MediaPlayerProvider>
+        </DockProvider>
       </ErrorProvider>
     </QueryClientProvider>);
 };

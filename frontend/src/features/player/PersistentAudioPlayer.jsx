@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, Volume2, VolumeX, Volume1, ListMusic, Disc, X, Download, Minimize2, Maximize2, Music, } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, Volume2, VolumeX, Volume1, ListMusic, Disc, X, Download } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { useDockPresence } from "@/components/layout/dock/useDock";
 import { Popover, PopoverContent, PopoverTrigger, } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { downloadManager } from "@/features/transfers/downloadManager";
@@ -25,7 +26,7 @@ function formatFileSize(bytes) {
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
     return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
-export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onTrackChange, onClose, isMinimized: propMinimized, onToggleMinimize, }) => {
+export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onTrackChange, onClose }) => {
     const audioRef = useRef(null);
     // Playback state
     const [isPlaying, setIsPlaying] = useState(true);
@@ -43,17 +44,10 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
     const [isShuffle, setIsShuffle] = useState(false);
     const [repeatMode, setRepeatMode] = useState("off");
     const [playbackRate, setPlaybackRate] = useState(1.0);
-    // UI state - controlled via MediaPlayerContext or fallback to local state
-    const [internalMinimized, setInternalMinimized] = useState(false);
-    const isMinimized = propMinimized !== undefined ? propMinimized : internalMinimized;
-    const setIsMinimized = (val) => {
-        const next = typeof val === "function" ? val(isMinimized) : val;
-        if (onToggleMinimize) {
-            onToggleMinimize(next);
-        } else {
-            setInternalMinimized(next);
-        }
-    };
+    const [isNowPlayingOpen, setIsNowPlayingOpen] = useState(false);
+    // The player's controls live in the app dock; hidden while a video is docked there
+    const dock = useDockPresence("audio", true);
+    const videoInDock = Boolean(dock?.presence?.video);
     const [isPlaylistOpen, setIsPlaylistOpen] = useState(false);
     const [isScrubbing, setIsScrubbing] = useState(false);
     const [scrubValue, setScrubValue] = useState(0);
@@ -252,307 +246,141 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
         }
     }, [cleanTrackTitle, activeTrack, handleNext, handlePrev]);
     // Global Keyboard shortcuts
+    // While a video plays, the audio pauses (one thing plays at a time)
     useEffect(() => {
-        const handleKeyDown = (e) => {
-            // Don't trigger if user is typing in input or textarea
-            const target = e.target;
-            if (target &&
-                (target.tagName === "INPUT" ||
-                    target.tagName === "TEXTAREA" ||
-                    target.isContentEditable)) {
-                return;
-            }
-            if (e.code === "Space") {
-                e.preventDefault();
-                togglePlay();
-            }
-            else if (e.shiftKey && e.code === "ArrowRight") {
-                e.preventDefault();
-                handleNext();
-            }
-            else if (e.shiftKey && e.code === "ArrowLeft") {
-                e.preventDefault();
-                handlePrev();
-            }
-            else if (e.code === "KeyM") {
-                setIsMuted((prev) => !prev);
-            }
+        const pause = () => {
+            audioRef.current?.pause();
+            setIsPlaying(false);
         };
-        window.addEventListener("keydown", handleKeyDown);
-        return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [togglePlay, handleNext, handlePrev]);
+        window.addEventListener("telestore:pause-audio", pause);
+        return () => window.removeEventListener("telestore:pause-audio", pause);
+    }, []);
     const effectiveCurrentTime = isScrubbing ? scrubValue : currentTime;
     const progressPercent = duration > 0 ? (effectiveCurrentTime / duration) * 100 : 0;
     const bufferedPercent = duration > 0 ? (buffered / duration) * 100 : 0;
-    // -------------------------------------------------------------
-    // Compact / Minimized View (Centered Floating Dock Pill)
-    // -------------------------------------------------------------
-    if (isMinimized) {
-        return (<div className="fixed bottom-[calc(1rem+var(--app-bottom-inset))] left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-card/95 backdrop-blur-xl border border-border shadow-2xl rounded-full px-3.5 py-2 transition-all duration-300 animate-in fade-in slide-in-from-bottom-3 text-card-foreground select-none max-w-[calc(100vw-2rem)]">
-        <audio ref={audioRef} onTimeUpdate={handleTimeUpdate} onLoadedMetadata={handleLoadedMetadata} onEnded={handleEnded} onError={() => {
-                setHasError(true);
-                setIsLoading(false);
-            }} onWaiting={() => setIsLoading(true)} onPlaying={() => setIsLoading(false)}/>
+    const volumeIcon = isMuted || volume === 0 ? <VolumeX className="w-4 h-4 text-destructive"/> : volume < 0.5 ? <Volume1 className="w-4 h-4"/> : <Volume2 className="w-4 h-4"/>;
+    const iconBtn = "w-8 h-8 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors";
+    const toggleBtn = (on) => cn(iconBtn, on && "text-primary bg-primary/15 hover:bg-primary/25 hover:text-primary");
 
-        {/* Animated Disc */}
-        <div onClick={() => setIsMinimized(false)} className="relative w-8 h-8 rounded-full bg-gradient-to-tr from-primary/30 to-primary/80 p-[2px] cursor-pointer hover:scale-105 transition-transform" title="Click to expand player">
-          <div className={cn("w-full h-full rounded-full bg-card border border-border flex items-center justify-center text-primary", isPlaying && "animate-[spin_4s_linear_infinite]")}>
-            <Disc className="w-4 h-4"/>
+    const playButton = (size = "w-9 h-9") => (<button onClick={togglePlay} className={cn(size, "rounded-full bg-foreground text-background flex items-center justify-center hover:scale-105 active:scale-95 transition-transform shrink-0")} aria-label={isPlaying ? "Pause audio" : "Play audio"}>
+        {isLoading ? <span className="w-4 h-4 border-2 border-background border-t-transparent rounded-full animate-spin"/> : isPlaying ? <Pause className="w-4 h-4 fill-current"/> : <Play className="w-4 h-4 fill-current ml-0.5"/>}
+      </button>);
+    const shuffleButton = (<button onClick={() => setIsShuffle((prev) => !prev)} className={toggleBtn(isShuffle)} aria-label={isShuffle ? "Disable shuffle" : "Enable shuffle"} aria-pressed={isShuffle} title={isShuffle ? "Shuffle on" : "Shuffle off"}>
+        <Shuffle className="w-4 h-4"/>
+      </button>);
+    const repeatButton = (<button onClick={cycleRepeatMode} className={toggleBtn(repeatMode !== "off")} aria-label={repeatMode === "one" ? "Repeating this track" : repeatMode === "all" ? "Repeating all tracks" : "Enable repeat"} title={`Repeat: ${repeatMode}`}>
+        {repeatMode === "one" ? <Repeat1 className="w-4 h-4"/> : <Repeat className="w-4 h-4"/>}
+      </button>);
+    const seekBar = (<div className="flex items-center gap-2 w-full text-[11px] font-mono text-muted-foreground">
+        <span className="w-10 text-right">{formatTime(effectiveCurrentTime)}</span>
+        <div className="relative flex-1 flex items-center py-1">
+          <div className="absolute inset-x-0 h-1 rounded-full bg-secondary overflow-hidden pointer-events-none">
+            <div className="h-full bg-muted-foreground/30" style={{ width: `${bufferedPercent}%` }}/>
           </div>
+          <Slider value={[effectiveCurrentTime]} min={0} max={duration || 100} step={0.5} onValueChange={handleSeekChange} onValueCommit={handleSeekCommit} className="relative z-10 w-full" aria-label="Seek track"/>
         </div>
-
-        {/* Info */}
-        <div onClick={() => setIsMinimized(false)} className="flex flex-col cursor-pointer max-w-[140px] md:max-w-[200px]" title={cleanTrackTitle}>
-          <span className="text-xs font-semibold text-foreground truncate">
-            {cleanTrackTitle}
-          </span>
-          <span className="text-[10px] text-muted-foreground font-mono">
-            {formatTime(effectiveCurrentTime)} / {formatTime(duration)}
-          </span>
-        </div>
-
-        {/* Controls */}
-        <div className="flex items-center gap-1">
-          <Button size="icon" variant="ghost" className="w-7 h-7 text-muted-foreground hover:text-foreground hover:bg-muted rounded-full" onClick={togglePlay} aria-label={isPlaying ? "Pause audio" : "Play audio"} title={isPlaying ? "Pause" : "Play"}>
-            {isPlaying ? <Pause className="w-3.5 h-3.5 fill-current"/> : <Play className="w-3.5 h-3.5 fill-current ml-0.5"/>}
-          </Button>
-
-          <Button size="icon" variant="ghost" className="w-7 h-7 text-muted-foreground hover:text-foreground hover:bg-muted rounded-full" onClick={handleNext} aria-label="Next track" title="Next Track">
-            <SkipForward className="w-3.5 h-3.5"/>
-          </Button>
-
-          <Button size="icon" variant="ghost" className="w-7 h-7 text-muted-foreground hover:text-primary hover:bg-muted rounded-full" onClick={() => setIsMinimized(false)} aria-label="Expand audio player" title="Expand Full Bar">
-            <Maximize2 className="w-3.5 h-3.5"/>
-          </Button>
-
-          <Button size="icon" variant="ghost" className="w-7 h-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-full" onClick={onClose} aria-label="Close audio player" title="Close Audio Player">
-            <X className="w-3.5 h-3.5"/>
-          </Button>
-        </div>
+        <span className="w-10">{formatTime(duration)}</span>
       </div>);
-    }
-    // -------------------------------------------------------------
-    // Full Media Dock - Centered Floating Bottom Player Bar
-    // -------------------------------------------------------------
-    return (<div className="fixed bottom-[calc(0.75rem+var(--app-bottom-inset))] left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-1.5rem)] sm:w-[calc(100vw-2rem)] md:w-[calc(100vw-4rem)] lg:max-w-4xl xl:max-w-5xl select-none animate-in fade-in slide-in-from-bottom-4 duration-300 pointer-events-none">
+    const queueList = (onPick) => (<div className="p-1.5">
+        {playlist.map((track, idx) => {
+            const isCur = idx === currentIndex;
+            return (<button key={track.id || `${track.name}-${idx}`} onClick={() => { onTrackChange(idx); onPick?.(); }} className={cn("w-full flex items-center gap-2.5 p-2 rounded-md text-left text-xs transition-colors", isCur ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground")} aria-current={isCur ? "true" : undefined}>
+              <span className="w-5 text-center font-mono text-[11px]">{isCur ? "▶" : idx + 1}</span>
+              <span className="truncate flex-1" title={track.name}>{track.name.replace(/\.[^/.]+$/, "")}</span>
+              <span className="font-mono text-[10px]">{track.size ? formatFileSize(track.size) : ""}</span>
+            </button>);
+        })}
+      </div>);
+    const queueHeader = (<div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
+        <ListMusic className="w-4 h-4 text-primary"/>
+        <span className="text-xs font-semibold">Queue</span>
+        <span className="text-[11px] text-muted-foreground font-mono ml-auto">{currentIndex + 1} of {playlist.length}</span>
+      </div>);
+    const download = () => downloadManager.addDownload(activeTrack.url, activeTrack.name);
+
+    const dockRow = (<div className={cn("relative flex items-center gap-2.5 w-full min-w-0", videoInDock && "hidden")}>
+        {/* Cover + title (on phones, opens Now playing) */}
+        <button onClick={() => setIsNowPlayingOpen(true)} className="md:pointer-events-none flex items-center gap-2.5 min-w-0 flex-1 md:flex-none md:w-52 lg:w-64 text-left" aria-label="Open now playing">
+          <span className="relative w-10 h-10 rounded-full bg-gradient-to-tr from-primary/40 to-cloud/60 p-[2px] shrink-0">
+            <span className={cn("w-full h-full rounded-full bg-card border border-border flex items-center justify-center", isPlaying && "animate-[spin_6s_linear_infinite]")}>
+              <Disc className="w-4 h-4 text-primary"/>
+            </span>
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[13px] font-medium truncate" title={cleanTrackTitle}>{cleanTrackTitle}</span>
+            <span className="block text-[11px] text-muted-foreground truncate"><span className="font-mono">{trackExtension}</span> · track {currentIndex + 1} of {playlist.length}{activeTrack.size ? ` · ${formatFileSize(activeTrack.size)}` : ""}</span>
+          </span>
+        </button>
+        {/* Transport */}
+        <div className="flex items-center gap-0.5 shrink-0">
+          <span className="hidden md:inline-flex">{shuffleButton}</span>
+          <button onClick={handlePrev} className={cn(iconBtn, "hidden sm:flex")} aria-label="Previous track" title="Previous track"><SkipBack className="w-4 h-4 fill-current"/></button>
+          {playButton()}
+          <button onClick={handleNext} className={iconBtn} aria-label="Next track" title="Next track"><SkipForward className="w-4 h-4 fill-current"/></button>
+          <span className="hidden md:inline-flex">{repeatButton}</span>
+        </div>
+        <div className="hidden md:flex flex-1 min-w-0">{seekBar}</div>
+        {/* Extras */}
+        <div className="flex items-center gap-0.5 shrink-0">
+          <button onClick={cyclePlaybackRate} className="hidden lg:flex h-8 px-2 items-center rounded-md text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-muted" aria-label={`Playback speed ${playbackRate}x`} title="Playback speed">{playbackRate}x</button>
+          <div className="hidden lg:flex items-center gap-1.5 w-28">
+            <button onClick={() => setIsMuted((prev) => !prev)} className={iconBtn} aria-label={isMuted ? "Unmute" : "Mute"} title={isMuted ? "Unmute" : "Mute"}>{volumeIcon}</button>
+            <Slider value={[isMuted ? 0 : volume]} min={0} max={1} step={0.01} onValueChange={(val) => { setIsMuted(false); setVolume(val[0]); }} className="w-16" aria-label="Volume"/>
+          </div>
+          <Popover open={isPlaylistOpen} onOpenChange={setIsPlaylistOpen}>
+            <PopoverTrigger asChild>
+              <button className={cn(toggleBtn(isPlaylistOpen), "hidden md:flex w-auto px-2 gap-1")} aria-label="Queue" title="Queue">
+                <ListMusic className="w-4 h-4"/><span className="font-mono text-[11px]">{playlist.length}</span>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent side="top" align="end" sideOffset={10} className="w-80 p-0 overflow-hidden">
+              {queueHeader}
+              <ScrollArea className="max-h-72">{queueList(() => setIsPlaylistOpen(false))}</ScrollArea>
+            </PopoverContent>
+          </Popover>
+          <button onClick={download} className={cn(iconBtn, "hidden md:flex")} aria-label="Download this track" title="Download this track"><Download className="w-4 h-4"/></button>
+          <button onClick={onClose} className={cn(iconBtn, "hover:text-destructive hover:bg-destructive/10")} aria-label="Close audio player" title="Close"><X className="w-4 h-4"/></button>
+        </div>
+        {/* Phone: thin progress line along the bottom of the dock */}
+        <span className="md:hidden absolute left-0 right-0 -bottom-[7px] h-0.5 rounded-full bg-secondary overflow-hidden pointer-events-none">
+          <span className="block h-full bg-primary" style={{ width: `${progressPercent}%` }}/>
+        </span>
+      </div>);
+
+    return (<>
       <audio ref={audioRef} onTimeUpdate={handleTimeUpdate} onLoadedMetadata={handleLoadedMetadata} onEnded={handleEnded} onError={() => {
             setHasError(true);
             setIsLoading(false);
         }} onWaiting={() => setIsLoading(true)} onPlaying={() => setIsLoading(false)}/>
-
-      <div className="relative pointer-events-auto bg-card/95 backdrop-blur-2xl border border-border shadow-[0_12px_45px_rgba(0,0,0,0.5)] rounded-2xl p-2.5 md:p-3 text-card-foreground flex flex-col md:flex-row items-center justify-between gap-3 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-[2px] before:bg-gradient-to-r before:from-transparent before:via-primary before:to-transparent">
-        
-        {/* ============================================================ */}
-        {/* LEFT SECTION: Track Info & Vinyl Art */}
-        {/* ============================================================ */}
-        <div className="flex items-center gap-3 w-full md:w-[28%] min-w-0 justify-between md:justify-start">
-          <div className="flex items-center gap-3 min-w-0">
-            {/* Vinyl Record */}
-            <div className="relative flex-shrink-0 w-11 h-11 md:w-12 md:h-12 rounded-full bg-gradient-to-tr from-primary/30 via-primary/50 to-primary/80 p-[2px] shadow-md shadow-black/20">
-              <div className={cn("w-full h-full rounded-full bg-card border border-border flex items-center justify-center text-primary relative overflow-hidden", isPlaying && "animate-[spin_6s_linear_infinite]")} style={{
-            animationPlayState: isPlaying ? "running" : "paused",
-        }}>
-                {/* Vinyl Grooves */}
-                <div className="absolute inset-1 rounded-full border border-border/60"/>
-                <div className="absolute inset-2.5 rounded-full border border-border/80"/>
-                <Disc className="w-5 h-5 text-primary relative z-10"/>
-                <div className="absolute w-2 h-2 rounded-full bg-primary/80 shadow-[0_0_8px_rgba(99,102,241,0.8)]"/>
-              </div>
+      {dock?.mediaSlot && createPortal(dockRow, dock.mediaSlot)}
+      {/* Phone: full controls in a Now playing sheet */}
+      <Sheet open={isNowPlayingOpen} onOpenChange={setIsNowPlayingOpen}>
+        <SheetContent side="bottom" className="rounded-t-2xl px-4 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] max-h-[88vh] overflow-y-auto">
+          <SheetHeader className="text-left">
+            <SheetTitle className="truncate pr-6">{cleanTrackTitle}</SheetTitle>
+            <SheetDescription className="text-xs"><span className="font-mono">{trackExtension}</span> · track {currentIndex + 1} of {playlist.length}{activeTrack.size ? ` · ${formatFileSize(activeTrack.size)}` : ""}</SheetDescription>
+          </SheetHeader>
+          <div className="mt-4">{seekBar}</div>
+          <div className="mt-3 flex items-center justify-center gap-3">
+            {shuffleButton}
+            <button onClick={handlePrev} className={iconBtn} aria-label="Previous track"><SkipBack className="w-5 h-5 fill-current"/></button>
+            {playButton("w-12 h-12")}
+            <button onClick={handleNext} className={iconBtn} aria-label="Next track"><SkipForward className="w-5 h-5 fill-current"/></button>
+            {repeatButton}
+          </div>
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <button onClick={cyclePlaybackRate} className="h-9 px-3 rounded-md border border-border text-xs font-mono" aria-label={`Playback speed ${playbackRate}x`}>{playbackRate}x</button>
+            <div className="flex items-center gap-2 flex-1">
+              <button onClick={() => setIsMuted((prev) => !prev)} className={iconBtn} aria-label={isMuted ? "Unmute" : "Mute"}>{volumeIcon}</button>
+              <Slider value={[isMuted ? 0 : volume]} min={0} max={1} step={0.01} onValueChange={(val) => { setIsMuted(false); setVolume(val[0]); }} className="flex-1" aria-label="Volume"/>
             </div>
-
-            {/* Title & Metadata */}
-            <div className="min-w-0 flex flex-col">
-              <div className="flex items-center gap-1.5">
-                <span className="font-semibold text-sm md:text-base text-foreground truncate hover:text-primary transition-colors" title={cleanTrackTitle}>
-                  {cleanTrackTitle}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-mono tracking-wider border-primary/40 text-primary bg-primary/10">
-                  {trackExtension}
-                </Badge>
-                <span className="text-[11px] text-muted-foreground truncate">
-                  Track {currentIndex + 1} of {playlist.length}
-                </span>
-                {activeTrack.size && (<span className="text-[10px] text-muted-foreground/75 hidden sm:inline">
-                    • {formatFileSize(activeTrack.size)}
-                  </span>)}
-              </div>
-            </div>
+            <button onClick={download} className="h-9 px-3 rounded-md border border-border text-xs flex items-center gap-1.5" aria-label="Download this track"><Download className="w-4 h-4"/>Download</button>
           </div>
-
-          {/* Mobile Right Controls: Close & Minimize */}
-          <div className="flex md:hidden items-center gap-1">
-            <Button size="icon" variant="ghost" className="w-7 h-7 text-muted-foreground hover:text-foreground" onClick={() => setIsMinimized(true)} aria-label="Minimize audio player" title="Minimize">
-              <Minimize2 className="w-3.5 h-3.5"/>
-            </Button>
-            <Button size="icon" variant="ghost" className="w-7 h-7 text-muted-foreground hover:text-destructive" onClick={onClose} aria-label="Close audio player" title="Close">
-              <X className="w-3.5 h-3.5"/>
-            </Button>
+          <div className="mt-4 rounded-lg border border-border overflow-hidden">
+            {queueHeader}
+            <div className="max-h-64 overflow-y-auto">{queueList()}</div>
           </div>
-        </div>
-
-        {/* ============================================================ */}
-        {/* CENTER SECTION: Controls & Progress Scrubber */}
-        {/* ============================================================ */}
-        <div className="flex flex-col items-center w-full md:w-[44%] max-w-xl gap-1">
-          {/* Main Playback Buttons */}
-          <div className="flex items-center gap-3 md:gap-5">
-            {/* Shuffle */}
-            <Button size="icon" variant="ghost" className={cn("w-8 h-8 rounded-full transition-colors", isShuffle
-            ? "text-primary bg-primary/15 hover:bg-primary/25"
-            : "text-muted-foreground hover:text-foreground hover:bg-muted")} onClick={() => setIsShuffle((prev) => !prev)} aria-label={isShuffle ? "Disable shuffle" : "Enable shuffle"} title={isShuffle ? "Shuffle On" : "Shuffle Off"}>
-              <Shuffle className="w-4 h-4"/>
-            </Button>
-
-            {/* Prev */}
-            <Button size="icon" variant="ghost" className="w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-muted rounded-full" onClick={handlePrev} aria-label="Previous track" title="Previous Track">
-              <SkipBack className="w-4 h-4 fill-current"/>
-            </Button>
-
-            {/* Play/Pause Main Button */}
-            <Button size="icon" className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/25 hover:scale-105 active:scale-95 transition-all flex items-center justify-center relative" onClick={togglePlay} aria-label={isPlaying ? "Pause audio" : "Play audio"} title={isPlaying ? "Pause (Space)" : "Play (Space)"}>
-              {isLoading ? (<div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin"/>) : isPlaying ? (<Pause className="w-5 h-5 fill-current"/>) : (<Play className="w-5 h-5 fill-current ml-0.5"/>)}
-            </Button>
-
-            {/* Next */}
-            <Button size="icon" variant="ghost" className="w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-muted rounded-full" onClick={handleNext} aria-label="Next track" title="Next Track">
-              <SkipForward className="w-4 h-4 fill-current"/>
-            </Button>
-
-            {/* Repeat */}
-            <Button size="icon" variant="ghost" className={cn("w-8 h-8 rounded-full relative transition-colors", repeatMode !== "off"
-            ? "text-primary bg-primary/15 hover:bg-primary/25"
-            : "text-muted-foreground hover:text-foreground hover:bg-muted")} onClick={cycleRepeatMode} aria-label={repeatMode === "one" ? "Repeat current track" : repeatMode === "all" ? "Repeat all tracks" : "Enable repeat"} title={`Repeat: ${repeatMode.toUpperCase()}`}>
-              {repeatMode === "one" ? (<Repeat1 className="w-4 h-4"/>) : (<Repeat className="w-4 h-4"/>)}
-              {repeatMode !== "off" && (<span className="absolute bottom-1 w-1 h-1 rounded-full bg-primary"/>)}
-            </Button>
-          </div>
-
-          {/* Scrubber & Time Display */}
-          <div className="flex items-center gap-2.5 w-full text-xs font-mono text-muted-foreground px-1">
-            <span className="w-10 text-right select-none text-[11px]">
-              {formatTime(effectiveCurrentTime)}
-            </span>
-
-            {/* Seek Bar with buffer underlay */}
-            <div className="relative flex-1 flex items-center group cursor-pointer py-1">
-              {/* Buffered progress track */}
-              <div className="absolute inset-x-0 h-1.5 rounded-full bg-secondary overflow-hidden pointer-events-none">
-                <div className="h-full bg-muted-foreground/30 transition-all duration-200" style={{ width: `${bufferedPercent}%` }}/>
-              </div>
-
-              {/* Interactive Radix Slider */}
-              <Slider value={[effectiveCurrentTime]} min={0} max={duration || 100} step={0.5} onValueChange={handleSeekChange} onValueCommit={handleSeekCommit} className="relative z-10 w-full"/>
-            </div>
-
-            <span className="w-10 select-none text-[11px]">
-              {formatTime(duration)}
-            </span>
-          </div>
-        </div>
-
-        {/* ============================================================ */}
-        {/* RIGHT SECTION: Volume, Speed, Playlist Popover, Actions */}
-        {/* ============================================================ */}
-        <div className="hidden md:flex items-center justify-end gap-2.5 w-[28%] min-w-0">
-          {/* Speed Selector */}
-          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs font-mono text-muted-foreground hover:text-primary hover:bg-muted rounded-md" onClick={cyclePlaybackRate} aria-label={`Playback speed, current ${playbackRate}x`} title="Playback Speed">
-            {playbackRate}x
-          </Button>
-
-          {/* Volume Control */}
-          <div className="flex items-center gap-2 group w-28">
-            <Button size="icon" variant="ghost" className="w-7 h-7 text-muted-foreground hover:text-foreground rounded-full p-0 flex-shrink-0" onClick={() => setIsMuted((prev) => !prev)} aria-label={isMuted ? "Unmute audio" : "Mute audio"} title={isMuted ? "Unmute (M)" : "Mute (M)"}>
-              {isMuted || volume === 0 ? (<VolumeX className="w-4 h-4 text-destructive"/>) : volume < 0.5 ? (<Volume1 className="w-4 h-4"/>) : (<Volume2 className="w-4 h-4"/>)}
-            </Button>
-            <Slider value={[isMuted ? 0 : volume]} min={0} max={1} step={0.01} onValueChange={(val) => {
-            setIsMuted(false);
-            setVolume(val[0]);
-        }} className="w-16"/>
-          </div>
-
-          {/* Playlist Drawer Popover */}
-          <Popover open={isPlaylistOpen} onOpenChange={setIsPlaylistOpen}>
-            <PopoverTrigger asChild>
-              <Button size="sm" variant="ghost" className={cn("h-8 px-2.5 gap-1.5 text-xs rounded-lg transition-colors", isPlaylistOpen
-            ? "text-primary bg-primary/15 border border-primary/30"
-            : "text-muted-foreground hover:text-foreground hover:bg-muted")} aria-label={isPlaylistOpen ? "Close playlist drawer" : "Open playlist drawer"} title="Playlist Queue">
-                <ListMusic className="w-4 h-4"/>
-                <span className="font-mono text-[11px] font-semibold">
-                  {playlist.length}
-                </span>
-              </Button>
-            </PopoverTrigger>
-
-            <PopoverContent side="top" align="end" className="w-80 md:w-96 p-0 bg-popover/95 backdrop-blur-2xl border border-border shadow-2xl rounded-xl text-popover-foreground overflow-hidden mb-2">
-              {/* Popover Header */}
-              <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-border bg-muted/40">
-                <div className="flex items-center gap-2">
-                  <Music className="w-4 h-4 text-primary"/>
-                  <span className="font-semibold text-xs text-foreground">
-                    Playlist Queue
-                  </span>
-                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-secondary">
-                    {playlist.length} tracks
-                  </Badge>
-                </div>
-                <div className="text-[11px] text-muted-foreground font-mono">
-                  Playing #{currentIndex + 1}
-                </div>
-              </div>
-
-              {/* Track list */}
-              <ScrollArea className="max-h-72 overflow-y-auto p-1.5 divide-y divide-border/40">
-                {playlist.map((track, idx) => {
-            const isCur = idx === currentIndex;
-            const trackClean = track.name.replace(/\.[^/.]+$/, "");
-            return (<div key={track.id || `${track.name}-${idx}`} onClick={() => {
-                    onTrackChange(idx);
-                    setIsPlaylistOpen(false);
-                }} className={cn("flex items-center justify-between p-2 rounded-lg cursor-pointer transition-all text-xs group", isCur
-                    ? "bg-primary/15 border border-primary/30 text-primary font-medium"
-                    : "hover:bg-muted text-muted-foreground hover:text-foreground")}>
-                      <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                        {isCur ? (<div className="flex items-end gap-[2px] w-4 h-4 justify-center">
-                            <span className="w-1 bg-primary rounded-sm animate-[bounce_0.8s_infinite] h-3"/>
-                            <span className="w-1 bg-primary rounded-sm animate-[bounce_1.1s_infinite] h-4"/>
-                            <span className="w-1 bg-primary rounded-sm animate-[bounce_0.9s_infinite] h-2"/>
-                          </div>) : (<span className="font-mono text-muted-foreground w-4 text-center text-[11px] group-hover:text-foreground">
-                            {idx + 1}
-                          </span>)}
-
-                        <span className="truncate" title={track.name}>
-                          {trackClean}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-2 flex-shrink-0 text-[10px] text-muted-foreground font-mono">
-                        {track.size ? formatFileSize(track.size) : ""}
-                      </div>
-                    </div>);
-        })}
-              </ScrollArea>
-            </PopoverContent>
-          </Popover>
-
-          {/* Download Track */}
-          <Button size="icon" variant="ghost" className="w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg" onClick={() => {
-            downloadManager.addDownload(activeTrack.url, activeTrack.name);
-        }} aria-label="Download current track" title="Download this Track">
-            <Download className="w-4 h-4"/>
-          </Button>
-
-          {/* Minimize into Pill */}
-          <Button size="icon" variant="ghost" className="w-8 h-8 text-muted-foreground hover:text-primary hover:bg-muted rounded-lg" onClick={() => setIsMinimized(true)} aria-label="Minimize audio player" title="Minimize to Floating Pill">
-            <Minimize2 className="w-4 h-4"/>
-          </Button>
-
-          {/* Close Player */}
-          <Button size="icon" variant="ghost" className="w-8 h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg" onClick={onClose} aria-label="Close audio player" title="Close Audio Player">
-            <X className="w-4 h-4"/>
-          </Button>
-        </div>
-      </div>
-    </div>);
+        </SheetContent>
+      </Sheet>
+    </>);
 };

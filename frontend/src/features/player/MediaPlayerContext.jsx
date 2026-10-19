@@ -13,7 +13,6 @@ export const MediaPlayerProvider = ({ children }) => {
     const [activeAudioTrack, setActiveAudioTrack] = useState(null);
     const [audioPlaylist, setAudioPlaylist] = useState([]);
     const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
-    const [isAudioMinimized, setIsAudioMinimized] = useState(false);
     const closeMedia = () => {
         if (currentMedia?.url.startsWith("blob:")) {
             try {
@@ -27,10 +26,10 @@ export const MediaPlayerProvider = ({ children }) => {
         setActiveAudioTrack(null);
         setAudioPlaylist([]);
         setCurrentTrackIndex(0);
-        setIsAudioMinimized(false);
     };
     const playAudio = (track, playlist) => {
-        // Audio and video playback states remain independent
+        // One thing plays at a time: starting audio pauses a docked or open video
+        window.dispatchEvent(new Event("telestore:pause-video"));
         if (playlist && playlist.length > 0) {
             setAudioPlaylist(playlist);
             const foundIdx = playlist.findIndex((t) => (t.fileItem?.id && t.fileItem.id === track.fileItem?.id) || t.url === track.url || t.name === track.name);
@@ -57,7 +56,8 @@ export const MediaPlayerProvider = ({ children }) => {
             playAudio(track, playlist);
             return;
         }
-        // Video media: open modal player
+        // Video media: open the theater player and pause any audio
+        window.dispatchEvent(new Event("telestore:pause-audio"));
         if (currentMedia?.url && currentMedia.url !== media.url && currentMedia.url.startsWith("blob:")) {
             try {
                 URL.revokeObjectURL(currentMedia.url);
@@ -73,8 +73,6 @@ export const MediaPlayerProvider = ({ children }) => {
             activeAudioTrack,
             audioPlaylist,
             currentTrackIndex,
-            isAudioMinimized,
-            setIsAudioMinimized,
             playAudio,
             closeAudioPlayer,
         }}>
@@ -91,7 +89,7 @@ export const MediaPlayerProvider = ({ children }) => {
 
       {/* Persistent Floating Bottom Audio Player */}
       <ErrorBoundary name="Audio player" fallback="silent">
-      {activeAudioTrack && (<PersistentAudioPlayer key={activeAudioTrack.id || activeAudioTrack.url} activeTrack={activeAudioTrack} playlist={audioPlaylist} currentIndex={currentTrackIndex} isMinimized={isAudioMinimized} onToggleMinimize={setIsAudioMinimized} onTrackChange={(newIdx) => {
+      {activeAudioTrack && (<PersistentAudioPlayer key={activeAudioTrack.id || activeAudioTrack.url} activeTrack={activeAudioTrack} playlist={audioPlaylist} currentIndex={currentTrackIndex} onTrackChange={(newIdx) => {
                 if (newIdx >= 0 && newIdx < audioPlaylist.length) {
                     setCurrentTrackIndex(newIdx);
                     setActiveAudioTrack(audioPlaylist[newIdx]);

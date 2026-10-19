@@ -9,6 +9,6 @@ const Toaster = ({ ...props }) => {
                 actionButton: "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground",
                 cancelButton: "group-[.toast]:bg-muted group-[.toast]:text-muted-foreground",
             },
-        }} position="top-right" {...props}/>);
+        }} position="top-right" offset={{ top: 64, right: 16 }} {...props}/>);
 };
 export { Toaster, toast };
