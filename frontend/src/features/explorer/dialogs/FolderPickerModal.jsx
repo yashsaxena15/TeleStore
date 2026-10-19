@@ -202,7 +202,7 @@ export const FolderPickerModal = ({ isOpen, onClose, currentSelectedPath, onSele
                 You can save directly into this directory, or click "+ New Folder" above to create one.
               </p>
             </div>) : (<div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {folders.map((folder) => (<div key={folder.name} onClick={() => handleEnterSubfolder(folder)} className="flex items-center justify-between p-2.5 rounded-xl border border-border/60 hover:border-primary/40 bg-background hover:bg-accent/60 cursor-pointer transition-all group">
+              {folders.map((folder) => (<button type="button" key={folder.name} onClick={() => handleEnterSubfolder(folder)} aria-label={`Open ${folder.name}`} className="w-full text-left flex items-center justify-between p-2.5 rounded-xl border border-border/60 hover:border-primary/40 bg-background hover:bg-accent/60 cursor-pointer transition-all group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
                   <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0 group-hover:scale-105 transition-transform">
                       <Folder className="w-4 h-4"/>
@@ -212,7 +212,7 @@ export const FolderPickerModal = ({ isOpen, onClose, currentSelectedPath, onSele
                     </span>
                   </div>
                   <ChevronRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-primary transition-colors shrink-0 ml-1"/>
-                </div>))}
+                </button>))}
             </div>)}
         </div>
 

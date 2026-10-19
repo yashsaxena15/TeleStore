@@ -19,6 +19,10 @@ export const FilePagination = ({ pagination, currentPage, pageSize, onPageChange
     const end_index = isAll ? total_items : pagination.end_index;
     const has_prev = !isAll && pagination.has_prev;
     const has_next = !isAll && pagination.has_next;
+    // Nothing to page through and no smaller page size to pick: stay out of the way
+    if (total_pages <= 1 && total_items <= 25) {
+        return null;
+    }
     const handleJumpSubmit = (e) => {
         e.preventDefault();
         const p = parseInt(jumpPage, 10);
@@ -30,26 +34,24 @@ export const FilePagination = ({ pagination, currentPage, pageSize, onPageChange
         }
         setIsEditingPage(false);
     };
-    return (<div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-background/95 backdrop-blur-md border-t border-border/60 text-xs sm:text-sm select-none z-10 shrink-0">
-      {/* Left: Item count summary */}
-      <div className="flex items-center gap-2 text-muted-foreground min-w-[160px]">
-        <span className="font-medium text-foreground">
-          Showing <span className="font-semibold text-primary">{start_index}–{end_index}</span> of <span className="font-semibold text-foreground">{total_items}</span> items
-        </span>
+    return (<div className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-1.5 border-t border-border text-xs select-none shrink-0">
+      {/* Left: which slice is showing (the total is already in the filter row) */}
+      <div className="font-mono text-[11px] text-muted-foreground tabular-nums">
+        {total_pages > 1 ? `${start_index}–${end_index} of ${total_items}` : ""}
       </div>
 
       {/* Center: Pagination controls */}
       {!isAll && total_pages > 1 && (<div className="flex items-center gap-1 sm:gap-1.5">
-          <Button variant="outline" size="icon" className="h-8 w-8 rounded-md" onClick={() => onPageChange(1)} disabled={!has_prev || currentPage <= 1 || isLoading} aria-label="First page" title="First page">
+          <Button variant="outline" size="icon" className="h-7 w-7 rounded-md" onClick={() => onPageChange(1)} disabled={!has_prev || currentPage <= 1 || isLoading} aria-label="First page" title="First page">
             <ChevronsLeft className="h-4 w-4"/>
           </Button>
 
-          <Button variant="outline" size="icon" className="h-8 w-8 rounded-md" onClick={() => onPageChange(currentPage - 1)} disabled={!has_prev || currentPage <= 1 || isLoading} aria-label="Previous page" title="Previous page">
+          <Button variant="outline" size="icon" className="h-7 w-7 rounded-md" onClick={() => onPageChange(currentPage - 1)} disabled={!has_prev || currentPage <= 1 || isLoading} aria-label="Previous page" title="Previous page">
             <ChevronLeft className="h-4 w-4"/>
           </Button>
 
           {/* Page indicator & quick jump */}
-          <div className="flex items-center mx-1 text-xs sm:text-sm font-medium">
+          <div className="flex items-center mx-1 text-xs font-medium">
             {isEditingPage ? (<form onSubmit={handleJumpSubmit} className="flex items-center">
                 <input type="number" min={1} max={total_pages} value={jumpPage} onChange={(e) => setJumpPage(e.target.value)} onBlur={handleJumpSubmit} autoFocus aria-label="Jump to page number" className="w-12 h-7 px-1 text-center font-bold bg-muted border border-primary rounded text-xs focus:outline-none"/>
                 <span className="ml-1 text-muted-foreground">/ {total_pages}</span>
@@ -58,20 +60,20 @@ export const FilePagination = ({ pagination, currentPage, pageSize, onPageChange
               </button>)}
           </div>
 
-          <Button variant="outline" size="icon" className="h-8 w-8 rounded-md" onClick={() => onPageChange(currentPage + 1)} disabled={!has_next || currentPage >= total_pages || isLoading} aria-label="Next page" title="Next page">
+          <Button variant="outline" size="icon" className="h-7 w-7 rounded-md" onClick={() => onPageChange(currentPage + 1)} disabled={!has_next || currentPage >= total_pages || isLoading} aria-label="Next page" title="Next page">
             <ChevronRight className="h-4 w-4"/>
           </Button>
 
-          <Button variant="outline" size="icon" className="h-8 w-8 rounded-md" onClick={() => onPageChange(total_pages)} disabled={!has_next || currentPage >= total_pages || isLoading} aria-label="Last page" title="Last page">
+          <Button variant="outline" size="icon" className="h-7 w-7 rounded-md" onClick={() => onPageChange(total_pages)} disabled={!has_next || currentPage >= total_pages || isLoading} aria-label="Last page" title="Last page">
             <ChevronsRight className="h-4 w-4"/>
           </Button>
         </div>)}
 
       {/* Right: Page size selector */}
-      <div className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground ml-auto sm:ml-0">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground ml-auto sm:ml-0">
         <span className="hidden sm:inline">Per page:</span>
         <Select value={pageSize.toString()} onValueChange={(val) => onPageSizeChange(parseInt(val, 10))} disabled={isLoading}>
-          <SelectTrigger className="h-8 w-[84px] text-xs" aria-label="Items per page">
+          <SelectTrigger className="h-7 w-[76px] text-xs" aria-label="Items per page">
             <SelectValue placeholder={isAll ? "All" : `${pageSize}`}/>
           </SelectTrigger>
           <SelectContent side="top">

@@ -21,10 +21,13 @@ import { DeleteDialog } from "@/features/explorer/dialogs/DeleteDialog";
 import { NewFolderDialog } from "@/features/explorer/dialogs/NewFolderDialog";
 import Transfers from "@/features/transfers/Transfers";
 import { getApiBaseUrl, fetchWithTimeout, api } from "@/lib/api";
-import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, } from "@/components/ui/alert-dialog";
 import logger from "@/lib/logger";
-import { Trash2, AlertCircle, ShieldCheck, Lock, Cloud } from "lucide-react";
+import { SectionStatus } from "./SectionStatus";
+import { getSection, planMove } from "./lib/explorerItems";
+import { isItemStarred } from "./lib/fileCardHelpers";
+import { isSystemProtectedFolder } from "./lib/fileKeyboardNavigation";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { downloadManager } from "@/features/transfers/downloadManager";
 import { motion } from "framer-motion";
 import { useError } from "@/contexts/ErrorHandlerContext"; // Import the error context
@@ -80,6 +83,31 @@ export const FileExplorer = () => {
     const [showUserManagement, setShowUserManagement] = useState(() => window.location.pathname === '/users');
     const [showStorageAnalytics, setShowStorageAnalytics] = useState(() => window.location.pathname === '/storage');
     const [showTransfers, setShowTransfers] = useState(() => window.location.pathname === '/transfers' || window.location.pathname === '/downloads');
+    const isMobile = useIsMobile();
+    // Details pane: remembered on desktop; on phones it is a sheet opened per item
+    const [detailsPinned, setDetailsPinned] = useState(() => {
+        try {
+            return localStorage.getItem("telestore.detailsPane") === "1";
+        }
+        catch {
+            return false;
+        }
+    });
+    const [detailsSheetOpen, setDetailsSheetOpen] = useState(false);
+    const detailsOpen = isMobile ? detailsSheetOpen : detailsPinned;
+    const setDetailsOpen = (open) => {
+        if (isMobile) {
+            setDetailsSheetOpen(open);
+            return;
+        }
+        setDetailsPinned(open);
+        try {
+            localStorage.setItem("telestore.detailsPane", open ? "1" : "0");
+        }
+        catch {
+            // storage unavailable; the pane still toggles for this session
+        }
+    };
     const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
         try {
             return localStorage.getItem("telestore.sidebarCollapsed") === "1";
@@ -1334,6 +1362,49 @@ export const FileExplorer = () => {
             toast.error(error.message || "Failed to restore item");
         }
     };
+    // Selection bar batch actions: one request per item, one summary toast, one refresh
+    const plural = (n) => `${n} item${n === 1 ? "" : "s"}`;
+    const runForEach = async (list, fn, done) => {
+        if (list.length === 0)
+            return;
+        const results = await Promise.allSettled(list.map(fn));
+        const ok = results.filter((r) => r.status === "fulfilled").length;
+        const failed = results.filter((r) => r.status === "rejected");
+        if (ok > 0) {
+            toast.success(done(ok));
+            refetch();
+        }
+        if (failed.length > 0)
+            toast.error(`${plural(failed.length)} failed: ${failed[0].reason?.message || "unknown error"}`);
+    };
+    const withoutSystemFolders = (list) => {
+        const kept = list.filter((it) => !isSystemProtectedFolder(it, currentPath));
+        if (kept.length < list.length)
+            toast.error("Default system folders can't be moved");
+        return kept;
+    };
+    const batchActions = {
+        setStarred: (list, on) => runForEach(list.filter((it) => isItemStarred(it) !== on), (it) => (isCloudMode
+            ? api.starCloudFile(cloudAccountId || it.cloud_account_id, it.cloud_file_id || it.id, on)
+            : api.toggleStar(it.id, on)), (n) => (on ? `Starred ${plural(n)}` : `Removed ${plural(n)} from Starred`)),
+        toVault: (list) => runForEach(withoutSystemFolders(list), (it) => api.moveIntoVault(it.id), (n) => `Moved ${plural(n)} to the vault`),
+        toHome: (list) => runForEach(list, (it) => api.moveOutOfVault(it.id), (n) => `Moved ${plural(n)} to Home`),
+        restore: (list) => runForEach(list, (it) => (isCloudMode
+            ? api.restoreCloudFile(cloudAccountId || it.cloud_account_id, it.cloud_file_id || it.id)
+            : api.restoreFile(it.id)), (n) => `Restored ${plural(n)}`),
+        moveTo: async (list, targetPath) => {
+            const target = (targetPath || "/Home").replace(/\/+/g, "/").replace(/(.)\/$/, "$1");
+            const { moves, skipped } = planMove(withoutSystemFolders(list), target, { fallbackPath: currentApiPath || "/Home" });
+            if (moves.length === 0) {
+                if (skipped.length > 0)
+                    toast.info(skipped.some((x) => x.reason === "into-itself") ? "A folder can't be moved into itself" : "Already in that folder");
+                return;
+            }
+            await runForEach(moves, ({ item, via }) => (via === "vault-in" ? api.moveIntoVault(item.id, target)
+                : via === "vault-out" ? api.moveOutOfVault(item.id, target)
+                    : moveItem(item, target, item.file_path || currentApiPath || "/Home")), (n) => `Moved ${plural(n)} to ${target}`);
+        },
+    };
     const handleEmptyTrash = async () => {
         try {
             setIsEmptyingTrash(true);
@@ -1557,50 +1628,11 @@ export const FileExplorer = () => {
                 setDateFilter("all");
                 setSearchQuery("");
                 setPage(1);
-            }} typeCounts={typeCounts} totalCount={effectivePagination?.total_items ?? baseItems.length} filteredCount={filteredItems.length} isInboxMode={isInboxMode}/>
+            }} typeCounts={typeCounts} totalCount={effectivePagination?.total_items ?? baseItems.length} filteredCount={filteredItems.length} isInboxMode={isInboxMode} detailsOpen={detailsOpen} onDetailsToggle={() => setDetailsOpen(!detailsOpen)}/>
 
-            {/* Trash Banner */}
-            {isEffectiveTrashMode && (<div className="flex items-center justify-between px-4 py-2.5 bg-amber-500/10 border-b border-amber-500/20 text-sm">
-                <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300">
-                  <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400"/>
-                  <span>Items in Trash are kept until emptied or permanently deleted.</span>
-                </div>
-                {filteredItems.length > 0 && (<Button variant="destructive" size="sm" onClick={() => setEmptyTrashDialogOpen(true)} className="h-7 text-xs font-medium px-3 gap-1.5 shrink-0">
-                    <Trash2 className="w-3.5 h-3.5"/>
-                    Empty Trash
-                  </Button>)}
-              </div>)}
+            <SectionStatus section={getSection({ isTrash: isEffectiveTrashMode, isVault: isVaultMode, isInbox: isInboxMode, isCloud: isCloudMode })} itemCount={filteredItems.length} driveName={cloudQuery.data?.account_name} driveEmail={cloudQuery.data?.account_email} onEmptyTrash={() => setEmptyTrashDialogOpen(true)} onLockVault={handleLockVault}/>
 
-            {/* Vault Security Banner */}
-            {isVaultMode && (<div className="flex items-center justify-between px-4 py-2 bg-cyan-950/40 border-b border-cyan-800/40 text-sm">
-                <div className="flex items-center gap-2 text-cyan-300">
-                  <ShieldCheck className="w-4 h-4 shrink-0 text-cyan-400"/>
-                  <span className="font-semibold text-xs sm:text-sm">Private Encrypted Vault</span>
-                  <span className="text-[11px] text-slate-400 hidden md:inline">&bull; Zero-Knowledge AES-256 Cloud &bull; Auto-locks after 15m inactivity</span>
-                </div>
-                <Button variant="outline" size="sm" onClick={handleLockVault} className="h-7 text-xs font-medium px-3 gap-1.5 shrink-0 border-cyan-700/60 bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-200">
-                  <Lock className="w-3.5 h-3.5 text-cyan-400"/>
-                  Lock Vault
-                </Button>
-              </div>)}
-
-            {/* Cloud Storage Banner */}
-            {isCloudMode && (<div className="flex items-center justify-between px-4 py-2 bg-sky-500/10 border-b border-sky-500/20 text-sm">
-                <div className="flex items-center gap-2 text-sky-800 dark:text-sky-300">
-                  <Cloud className="w-4 h-4 shrink-0 text-sky-500"/>
-                  <span className="font-semibold text-xs sm:text-sm">
-                    {cloudQuery.data?.account_name || "Google Drive"}
-                  </span>
-                  {cloudQuery.data?.account_email && (<span className="text-[11px] px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-700 dark:text-sky-300 font-mono">
-                      {cloudQuery.data.account_email}
-                    </span>)}
-                  <span className="text-[11px] text-muted-foreground hidden md:inline">
-                    &bull; Copy/cut files here &amp; paste into Home to transfer to Telegram (0 disk usage)
-                  </span>
-                </div>
-              </div>)}
-
-            <FileGrid items={filteredItems} viewMode={viewMode} onNavigate={handleNavigate} itemCount={filteredItems.length} onCopy={handleCopy} onCut={handleCut} onPaste={hasClipboard && !isClipboardPasted() ? handlePaste : undefined} onDelete={handleDelete} onRename={handleRename} isVaultMode={isVaultMode} onMoveToVault={handleMoveToVault} onMoveToHome={handleMoveToHome} onMove={handleMove} onDownload={handleDownload} renamingItem={renamingItem} onRenameConfirm={confirmRename} onRenameCancel={() => setRenamingItem(null)} currentFolder={currentFolder} currentPath={currentPath} currentApiPath={currentApiPath} onNewFolder={() => setNewFolderDialogOpen(true)} isLoading={isLoading} cutItem={clipboard?.operation === "cut" && !isClipboardPasted() ? clipboard.item : null} cutItems={clipboard?.operation === "cut" && !isClipboardPasted() ? cutItems : []} hasClipboard={hasClipboard} isClipboardPasted={isClipboardPasted()} onRefresh={refetch} isTrashMode={isEffectiveTrashMode} onRestoreItem={handleRestoreItem} onToggleStar={handleToggleStar} isCloudMode={isCloudMode} cloudAccountId={cloudAccountId} cloudFolderId={cloudFolderId} isInboxMode={isInboxMode} uploadRequest={uploadRequest} onUploadRequestHandled={() => setUploadRequest(null)}/>
+            <FileGrid items={filteredItems} viewMode={viewMode} onNavigate={handleNavigate} itemCount={filteredItems.length} onCopy={handleCopy} onCut={handleCut} onPaste={hasClipboard && !isClipboardPasted() ? handlePaste : undefined} onDelete={handleDelete} onRename={handleRename} isVaultMode={isVaultMode} onMoveToVault={handleMoveToVault} onMoveToHome={handleMoveToHome} onMove={handleMove} onDownload={handleDownload} renamingItem={renamingItem} onRenameConfirm={confirmRename} onRenameCancel={() => setRenamingItem(null)} currentFolder={currentFolder} currentPath={currentPath} currentApiPath={currentApiPath} onNewFolder={() => setNewFolderDialogOpen(true)} isLoading={isLoading} cutItem={clipboard?.operation === "cut" && !isClipboardPasted() ? clipboard.item : null} cutItems={clipboard?.operation === "cut" && !isClipboardPasted() ? cutItems : []} hasClipboard={hasClipboard} isClipboardPasted={isClipboardPasted()} onRefresh={refetch} isTrashMode={isEffectiveTrashMode} onRestoreItem={handleRestoreItem} onToggleStar={handleToggleStar} isCloudMode={isCloudMode} cloudAccountId={cloudAccountId} cloudFolderId={cloudFolderId} isInboxMode={isInboxMode} uploadRequest={uploadRequest} onUploadRequestHandled={() => setUploadRequest(null)} detailsOpen={detailsOpen} onDetailsOpenChange={setDetailsOpen} onBatch={batchActions}/>
 
             {/* Pagination Controls */}
             <FilePagination pagination={effectivePagination} currentPage={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={(newSize) => {

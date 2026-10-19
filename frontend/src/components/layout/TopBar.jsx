@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronLeft, ChevronRight, Search, LayoutGrid, List, X, ArrowUpDown, SlidersHorizontal, Check, RotateCcw, MoreHorizontal, Home, Inbox } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search, LayoutGrid, List, X, ArrowUpDown, SlidersHorizontal, Check, RotateCcw, MoreHorizontal, Home, Inbox, PanelRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuCheckboxItem } from "@/components/ui/dropdown-menu";
@@ -19,7 +19,7 @@ const DATE_CHIP = { today: "Today", week: "Last 7 days", month: "This month" };
 const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
 
 // Files top bar: breadcrumbs, folder search, sort, filter, view; then the type chips row.
-export const TopBar = ({ currentPath, searchQuery, viewMode, onSearchChange, onViewModeChange, onBreadcrumbClick, sortField = "name", sortOrder = "asc", foldersFirst = true, onSortChange, onFoldersFirstChange, typeFilter = "all", onTypeFilterChange, sizeFilter = "all", onSizeFilterChange, dateFilter = "all", onDateFilterChange, onResetFilters, typeCounts, totalCount = 0, filteredCount = 0, isInboxMode = false }) => {
+export const TopBar = ({ currentPath, searchQuery, viewMode, onSearchChange, onViewModeChange, onBreadcrumbClick, sortField = "name", sortOrder = "asc", foldersFirst = true, onSortChange, onFoldersFirstChange, typeFilter = "all", onTypeFilterChange, sizeFilter = "all", onSizeFilterChange, dateFilter = "all", onDateFilterChange, onResetFilters, typeCounts, totalCount = 0, filteredCount = 0, isInboxMode = false, detailsOpen = false, onDetailsToggle }) => {
     const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
     const activeFilterCount = (sizeFilter !== "all" ? 1 : 0) + (dateFilter !== "all" ? 1 : 0);
     const typeChips = getTypeChips(isInboxMode);
@@ -122,7 +122,12 @@ export const TopBar = ({ currentPath, searchQuery, viewMode, onSearchChange, onV
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>)}
-          <div className="hidden md:flex items-center gap-1.5">{filterPopover}{viewToggle}</div>
+          <div className="hidden md:flex items-center gap-1.5">
+            {filterPopover}{viewToggle}
+            {onDetailsToggle && (<Button variant={detailsOpen ? "secondary" : "ghost"} size="icon" onClick={onDetailsToggle} className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground" title="Details pane (i)" aria-label="Details pane" aria-pressed={detailsOpen}>
+                <PanelRight className="h-3.5 w-3.5"/>
+              </Button>)}
+          </div>
 
           {/* Phone: search, filter, more */}
           <div className="md:hidden flex items-center gap-0.5 shrink-0">

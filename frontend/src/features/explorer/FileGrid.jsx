@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { isVideoItem } from "./fileTypes";
-import { copyStreamUrl } from "@/lib/utils";
-import { Folder, MoreVertical, Check, X, Trash2, Download, Info, Star, RotateCcw, Scissors, Copy } from "lucide-react";
+import { copyStreamUrl, cn, formatBytes } from "@/lib/utils";
+import { Folder, MoreVertical, Check, Info, Star, RotateCcw } from "lucide-react";
 import { ContextMenu } from "./ContextMenu";
 import { RenameInput } from "./RenameInput";
 import { useMediaPlayer } from "@/features/player/MediaPlayerContext";
@@ -11,7 +11,10 @@ import { UploadProgressWidget } from "@/features/transfers/UploadProgressWidget"
 import { uploadManager } from "@/features/transfers/uploadManager";
 import { TelegramVerificationDialog } from "@/features/auth/TelegramVerificationDialog";
 import { IndexChatDialog } from "@/features/explorer/dialogs/IndexChatDialog"; // Add this import
-import { PropertiesDialog } from "@/features/explorer/dialogs/PropertiesDialog";
+import { FolderPickerModal } from "@/features/explorer/dialogs/FolderPickerModal";
+import { SelectionBar } from "./SelectionBar";
+import { DetailsPane } from "./DetailsPane";
+import { getSection, getSelectionActions, getTypeInfo, formatShortDate, TYPE_TONE } from "./lib/explorerItems";
 import { getApiBaseUrl, fetchWithTimeout, api } from "@/lib/api";
 import { useBatchThumbnailLoader } from "@/features/explorer/hooks/useBatchThumbnailLoader"; // Add this import
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -38,7 +41,7 @@ const ArchiveInspectDialog = lazy(() => import("@/features/archives/ArchiveInspe
 export const getItemKey = (item) => item.id || item.file_unique_id || item.name;
 export const FileGrid = ({ items, viewMode, onNavigate, itemCount, onCopy, onCut, onPaste, onDelete, onRename, onMove, onDownload, renamingItem, onRenameConfirm, onRenameCancel, currentFolder, onNewFolder, onUploadFiles, // Add this
 onUploadFolder, // Add this
-isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUploaded, onItemsChange, onRefresh, currentPath, currentApiPath, isTrashMode, onRestoreItem, onToggleStar, isVaultMode = false, onMoveToVault, onMoveToHome, isCloudMode = false, cloudAccountId, cloudFolderId, isInboxMode = false, uploadRequest = null, onUploadRequestHandled, }) => {
+isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUploaded, onItemsChange, onRefresh, currentPath, currentApiPath, isTrashMode, onRestoreItem, onToggleStar, isVaultMode = false, onMoveToVault, onMoveToHome, isCloudMode = false, cloudAccountId, cloudFolderId, isInboxMode = false, uploadRequest = null, onUploadRequestHandled, detailsOpen = false, onDetailsOpenChange, onBatch = {}, }) => {
     const isEffectiveInboxMode = Boolean(isInboxMode ||
         currentFolder === "Telegram Inbox" ||
         currentApiPath === "/inbox" ||
@@ -50,6 +53,8 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
         currentFolder === "Starred" ||
         currentApiPath === "/starred" ||
         isCloudVirtualSection);
+    const isStarredView = currentFolder === "Starred" || currentApiPath === "/starred";
+    const section = getSection({ isTrash: Boolean(isTrashMode || cloudFolderId === "trash"), isVault: isVaultMode, isInbox: isEffectiveInboxMode, isStarred: isStarredView, isCloud: isCloudMode });
     const [contextMenu, setContextMenu] = useState(null);
     const [draggedItem, setDraggedItem] = useState(null);
     const [imageViewer, setImageViewer] = useState(null);
@@ -70,7 +75,8 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [isBatchDeleting, setIsBatchDeleting] = useState(false);
     const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false);
-    const [propertiesItem, setPropertiesItem] = useState(null);
+    const [movePickerOpen, setMovePickerOpen] = useState(false);
+    const [batchBusy, setBatchBusy] = useState(false);
     const [focusedIndex, setFocusedIndex] = useState(null);
     const gridContainerRef = useRef(null);
     const listContainerRef = useRef(null);
@@ -205,7 +211,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             window.removeEventListener("indexChatNotFound", handleIndexChatNotFound);
         };
     }, [onRefresh, onFileUploaded]);
-    // Keyboard shortcuts: Escape to clear selection, Ctrl+A / Cmd+A to select all, Alt+Enter for Properties, Arrow keys, Space, Enter, F2, Delete
+    // Keyboard shortcuts: Escape to clear selection, Ctrl+A / Cmd+A to select all, Alt+Enter for Details, I to toggle the details pane, Arrow keys, Space, Enter, F2, Delete
     useEffect(() => {
         const handleKeyDown = (e) => {
             const s = stateRef.current;
@@ -214,7 +220,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             // 1. Guard against firing while typing in inputs, textareas, selects, editable elements,
             // open dialogs (Radix modals), or when user is navigating the sidebar/header.
             const isModalActive = Boolean(
-                s.propertiesItem ||
+                s.movePickerOpen ||
                 s.batchDeleteDialogOpen ||
                 s.imageViewer ||
                 s.documentReader ||
@@ -402,7 +408,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                 return;
             }
 
-            // 8. Alt+Enter: Properties dialog
+            // 8. Alt+Enter: show the item in the details pane
             if (e.altKey && e.key === "Enter") {
                 e.preventDefault();
                 e.stopPropagation();
@@ -414,8 +420,15 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                     targetItem = s.items[s.focusedIndex];
                 }
                 if (targetItem) {
-                    setPropertiesItem(targetItem);
+                    s.openDetails(targetItem);
                 }
+                return;
+            }
+
+            // 8b. "i": show or hide the details pane
+            if (e.key.toLowerCase() === "i" && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+                e.preventDefault();
+                s.onDetailsOpenChange?.(!s.detailsOpen);
                 return;
             }
 
@@ -799,6 +812,61 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             onDownload(item);
         }
     };
+    // Details pane: shows the single selected item, else the focused one (so it follows the arrow keys)
+    const openDetails = (item) => {
+        const idx = items.findIndex((it) => getItemKey(it) === getItemKey(item));
+        if (idx !== -1)
+            setFocusedIndex(idx);
+        if (selectedItems.size > 0 && !selectedItems.has(getItemKey(item))) {
+            setSelectedItems(new Set());
+            setLastSelectedIndex(null);
+        }
+        onDetailsOpenChange?.(true);
+    };
+    const selectedList = items.filter((it) => selectedItems.has(getItemKey(it)));
+    const detailsItem = selectedList.length === 1 ? selectedList[0]
+        : selectedList.length > 1 ? null
+            : (focusedIndex !== null ? items[focusedIndex] || null : null);
+    const clearSelection = () => {
+        setSelectedItems(new Set());
+        setLastSelectedIndex(null);
+        setIsSelectionMode(false);
+    };
+    const runBatch = async (fn, list) => {
+        if (!fn || list.length === 0)
+            return;
+        setBatchBusy(true);
+        try {
+            await fn(list);
+            clearSelection();
+        }
+        finally {
+            setBatchBusy(false);
+        }
+    };
+    const handleSelectionAction = (id) => {
+        const list = selectedList;
+        switch (id) {
+            case "download": return handleBatchDownload();
+            case "move-to":
+            case "file-to": return setMovePickerOpen(true);
+            case "copy": return onCopy(list);
+            case "cut": return onCut(list);
+            case "star": return runBatch((l) => onBatch.setStarred?.(l, true), list);
+            case "unstar": return runBatch((l) => onBatch.setStarred?.(l, false), list);
+            case "compress": return setCompressDialog(true);
+            case "to-vault": return runBatch(onBatch.toVault, list);
+            case "to-home": return runBatch(onBatch.toHome, list);
+            case "restore": return runBatch(onBatch.restore, list);
+            case "details": return list[0] && openDetails(list[0]);
+            case "delete":
+            case "delete-forever": return setBatchDeleteDialogOpen(true);
+            default: return undefined;
+        }
+    };
+    const selectionActions = getSelectionActions(section, { count: selectedList.length, allStarred: selectedList.length > 0 && selectedList.every(isItemStarred) });
+    const locationPath = currentApiPath || (currentPath && currentPath.length > 0 ? `/${currentPath.join("/")}` : "/Home");
+    const pickerStartPath = /^\/(Home|Vault)(\/|$)/.test(locationPath) ? locationPath : "/Home";
     // Keep stateRef fresh for capture-phase keyboard navigation
     stateRef.current = {
         items,
@@ -819,7 +887,10 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
         onCut,
         onPaste,
         hasClipboard,
-        propertiesItem,
+        movePickerOpen,
+        detailsOpen,
+        onDetailsOpenChange,
+        openDetails,
         batchDeleteDialogOpen,
         imageViewer,
         documentReader,
@@ -1001,7 +1072,6 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             toast.error(`Failed to process ${failCount} item${failCount > 1 ? 's' : ''}`);
         }
     };
-    const selectedFilesCount = items.filter(item => selectedItems.has(getItemKey(item))).length;
     const handleDragStart = (e, item) => {
         setDraggedItem(item);
         e.dataTransfer.effectAllowed = "move";
@@ -1761,6 +1831,83 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
     const triggerDirectoryUpload = () => {
         directoryInputRef.current?.click();
     };
+    // Per-item state shared by grid tiles and list rows
+    const getItemState = (item, index) => {
+        const itemKey = getItemKey(item);
+        const sameItem = (a) => (a.id && item.id ? a.id === item.id : a.name === item.name);
+        return {
+            itemKey,
+            isRenaming: renamingItem?.index === index,
+            isDragging: Boolean(draggedItem && sameItem(draggedItem)),
+            isCut: Boolean((cutItems && cutItems.some(sameItem)) || (cutItem && sameItem(cutItem))),
+            isSelected: selectedItems.has(itemKey),
+            isFocused: index === focusedIndex,
+            isDropTarget: Boolean(item.type === "folder" && draggedItem && draggedItem.name !== item.name),
+            starred: isItemStarred(item),
+        };
+    };
+    // Focus, keyboard, drag and drop, touch and click wiring for one item
+    const itemRowProps = (item, index, s) => ({
+        ref: (el) => { itemElementsRef.current[index] = el; },
+        role: "row",
+        tabIndex: index === (focusedIndex ?? 0) ? 0 : -1,
+        "aria-selected": s.isSelected,
+        "aria-label": `${item.name}, ${item.type === "folder" ? "Folder" : (item.fileType || "File")}${s.isSelected ? ", selected" : ""}`,
+        "data-grid-item": "true",
+        "data-item-index": index,
+        onFocus: () => setFocusedIndex(index),
+        draggable: !s.isRenaming,
+        onDragStart: (e) => handleDragStart(e, item),
+        onDragEnd: handleDragEnd,
+        onDragOver: item.type === "folder" ? (e) => handleItemDragOver(e, item) : undefined,
+        onDrop: item.type === "folder" ? (e) => handleItemDrop(e, item) : undefined,
+        onContextMenu: (e) => {
+            if (s.isRenaming)
+                return;
+            e.preventDefault();
+            e.stopPropagation();
+            setFocusedIndex(index);
+            handleContextMenu(e, item, index);
+        },
+        onTouchStart: (e) => handleTouchStart(e, item, index),
+        onTouchMove: handleTouchMove,
+        onTouchEnd: handleTouchEnd,
+        onClick: (e) => {
+            if (!s.isRenaming)
+                handleItemClick(e, item, index);
+        },
+        onDoubleClick: (e) => {
+            if (s.isRenaming)
+                return;
+            e.preventDefault();
+            e.stopPropagation();
+            setFocusedIndex(index);
+            handleItemOpen(item);
+        },
+    });
+    // Always visible on touch screens and while selecting; otherwise on hover
+    const checkbox = (item, index, s, extra = "") => (<button type="button" onClick={(e) => handleCheckboxClick(e, item, index)} className={cn("w-4 h-4 rounded flex items-center justify-center border-[1.5px] transition-all shrink-0", s.isSelected
+            ? "bg-primary border-primary text-primary-foreground"
+            : selectedItems.size > 0
+                ? "border-muted-foreground/70 bg-background/80 hover:border-primary"
+                : "border-muted-foreground/60 bg-background/70 hover:border-primary opacity-0 group-hover:opacity-100 focus:opacity-100 touch:opacity-100", extra)} title={s.isSelected ? "Deselect" : "Select"} aria-label={s.isSelected ? `Deselect ${item.name}` : `Select ${item.name}`} aria-pressed={s.isSelected}>
+        <Check className={cn("w-3 h-3 stroke-[3]", s.isSelected ? "opacity-100" : "opacity-0")}/>
+      </button>);
+    const starOrRestore = (item, s, cls, alwaysVisible = false) => (isTrashMode ? (<button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRestoreItem?.(item); }} className={cn("grid place-items-center text-primary", cls)} title="Restore" aria-label={`Restore ${item.name}`}>
+        <RotateCcw className="w-3.5 h-3.5"/>
+      </button>) : (<button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleStar?.(item); }} className={cn("grid place-items-center transition-opacity", cls, s.starred || alwaysVisible ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus:opacity-100 touch:opacity-100")} title={s.starred ? "Remove from starred" : "Add to starred"} aria-label={s.starred ? `Unstar ${item.name}` : `Star ${item.name}`} aria-pressed={s.starred}>
+        <Star className={cn("w-3.5 h-3.5", s.starred && "fill-warning text-warning")}/>
+      </button>));
+    // Desktop list row actions: star (or restore), details, more
+    const rowActions = (item, index, s, visibility) => (<>
+        {starOrRestore(item, s, cn("w-7 h-7 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground", visibility), true)}
+        <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); openDetails(item); }} className={cn("w-7 h-7 rounded-md grid place-items-center text-muted-foreground hover:bg-muted hover:text-foreground", visibility)} title="Details (Alt+Enter)" aria-label={`Details for ${item.name}`}>
+          <Info className="w-3.5 h-3.5"/>
+        </button>
+        <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); openItemContextMenu(item, index, e.clientX, e.clientY); }} className={cn("w-7 h-7 rounded-md grid place-items-center text-muted-foreground hover:bg-muted hover:text-foreground", visibility)} title="More actions" aria-label={`More actions for ${item.name}`}>
+          <MoreVertical className="w-3.5 h-3.5"/>
+        </button>
+      </>);
     return (<div className="flex-1 flex flex-col bg-background select-none min-h-0 overflow-hidden" data-drag-container onDragOver={handleFileDragOver} onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} onDrop={handleFileDrop}>
       {/* Hidden file input for regular file uploads */}
       <input type="file" ref={fileInputRef} className="hidden" multiple onChange={(e) => {
@@ -1800,7 +1947,9 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                 setIsDirectoryUpload(false);
             }}/>)}
       
-      <div className={`flex-1 overflow-y-auto overflow-x-hidden p-4 pb-28 sm:pb-20 min-h-0 custom-scrollbar ${isDragActive ? 'bg-primary/5 border-2 border-dashed border-primary rounded-lg' : ''}`} onClick={(e) => {
+      <div className="flex-1 flex min-h-0">
+      <div className="relative flex-1 min-w-0 flex flex-col min-h-0">
+      <div className={`flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-4 pt-3 pb-20 min-h-0 custom-scrollbar ${isDragActive ? 'bg-primary/5 border-2 border-dashed border-primary rounded-lg' : ''}`} onClick={(e) => {
             const target = e.target;
             if (target === e.currentTarget || target.getAttribute('data-grid-background') === "true") {
                 setSelectedItems(new Set());
@@ -1834,70 +1983,6 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             </div>
           </div>)}
 
-        {/* Modernized Floating Selection Action Bar */}
-        {selectedItems.size > 0 && (<div className="sticky top-1 z-30 mb-3 flex items-center justify-between gap-2 px-3 py-2 bg-card/95 dark:bg-card/90 backdrop-blur-md border border-border/70 rounded-xl shadow-lg ring-1 ring-border/20 animate-in fade-in slide-in-from-top-2 duration-200">
-            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-              <button type="button" onClick={() => {
-                setSelectedItems(new Set());
-                setLastSelectedIndex(null);
-            }} className="p-1.5 rounded-lg hover:bg-accent active:bg-accent/80 text-muted-foreground hover:text-foreground transition-colors" title="Clear selection (Esc)" aria-label="Clear selection">
-                <X className="w-4 h-4"/>
-              </button>
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-primary/15 text-primary border border-primary/20 shrink-0">
-                {selectedItems.size} selected
-              </span>
-              <div className="h-4 w-px bg-border/60 hidden sm:block"/>
-              <button type="button" onClick={handleSelectAllToggle} className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline transition-colors hidden sm:inline-block">
-                {selectedItems.size === items.length ? "Deselect all" : "Select all"}
-              </button>
-            </div>
-
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <button type="button" onClick={handleBatchDownload} disabled={selectedFilesCount === 0} className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 hover:border-border transition-all shadow-xs active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed" title="Download selected files">
-                <Download className="w-3.5 h-3.5"/>
-                <span className="hidden sm:inline">Download</span>
-                {selectedFilesCount > 0 && <span className="text-[11px] text-muted-foreground">({selectedFilesCount})</span>}
-              </button>
-
-              <button type="button" onClick={() => {
-                const selectedList = items.filter(it => selectedItems.has(getItemKey(it)));
-                if (selectedList.length > 0)
-                    onCut(selectedList);
-            }} className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 hover:border-border transition-all shadow-xs active:scale-[0.98]" title="Cut selected items (Ctrl+X)">
-                <Scissors className="w-3.5 h-3.5"/>
-                <span className="hidden sm:inline">Cut</span>
-                <span className="text-[11px] text-muted-foreground">({selectedItems.size})</span>
-              </button>
-
-              <button type="button" onClick={() => {
-                const selectedList = items.filter(it => selectedItems.has(getItemKey(it)));
-                if (selectedList.length > 0)
-                    onCopy(selectedList);
-            }} className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 hover:border-border transition-all shadow-xs active:scale-[0.98]" title="Copy selected items (Ctrl+C)">
-                <Copy className="w-3.5 h-3.5"/>
-                <span className="hidden sm:inline">Copy</span>
-                <span className="text-[11px] text-muted-foreground">({selectedItems.size})</span>
-              </button>
-
-              {selectedItems.size === 1 && (<button type="button" onClick={() => {
-                    const selectedKey = Array.from(selectedItems)[0];
-                    const found = items.find(i => getItemKey(i) === selectedKey);
-                    if (found) {
-                        setPropertiesItem(found);
-                    }
-                }} className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 hover:border-border transition-all shadow-xs active:scale-[0.98]" title="View Properties (Alt+Enter)">
-                  <Info className="w-3.5 h-3.5"/>
-                  <span className="hidden sm:inline">Properties</span>
-                </button>)}
-
-              <button type="button" onClick={() => setBatchDeleteDialogOpen(true)} className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive border border-destructive/20 transition-all shadow-xs active:scale-[0.98]" title="Delete selected items">
-                <Trash2 className="w-3.5 h-3.5"/>
-                <span className="hidden sm:inline">Delete</span>
-                <span className="text-[11px]">({selectedItems.size})</span>
-              </button>
-            </div>
-          </div>)}
-        
         {isLoading ? (<div className="flex-1 flex items-center justify-center min-h-[350px]">
             <div className="flex flex-col items-center gap-2">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -1911,248 +1996,91 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             <p className="text-xs text-muted-foreground max-w-xs">
               No files or folders match your search or filter criteria in this view.
             </p>
-          </div>) : viewMode === "grid" ? (<div ref={gridContainerRef} role="grid" aria-label="Files and folders grid" tabIndex={-1} data-grid-background="true" className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-9 2xl:grid-cols-12 gap-2 sm:gap-1.5 focus:outline-none">
+          </div>) : viewMode === "grid" ? (<div ref={gridContainerRef} role="grid" aria-label="Files and folders grid" tabIndex={-1} data-grid-background="true" className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2 sm:gap-2.5 focus:outline-none">
             {items.map((item, index) => {
-                const itemKey = getItemKey(item);
-                const isRenaming = renamingItem?.index === index;
-                const isDragging = (draggedItem?.id && item.id) ? draggedItem.id === item.id : draggedItem?.name === item.name;
-                const isCut = Boolean((cutItems && cutItems.some(ci => (ci.id && item.id ? ci.id === item.id : ci.name === item.name))) ||
-                    (cutItem && (cutItem.id && item.id ? cutItem.id === item.id : cutItem.name === item.name)));
-                const isSelected = selectedItems.has(itemKey);
-                const isFocused = index === focusedIndex;
-                const starred = isItemStarred(item);
+                const s = getItemState(item, index);
+                const typeInfo = getTypeInfo(item);
                 const duration = isVideoItem(item) ? getItemDuration(item) : null;
-                return (<div key={itemKey || index} ref={(el) => { itemElementsRef.current[index] = el; }} role="row" tabIndex={index === (focusedIndex ?? 0) ? 0 : -1} aria-selected={isSelected} aria-label={`${item.name}, ${item.type === 'folder' ? 'Folder' : (item.fileType || 'File')}${isSelected ? ', selected' : ''}`} data-grid-item="true" data-item-index={index} onFocus={() => setFocusedIndex(index)} draggable={!isRenaming} onDragStart={(e) => handleDragStart(e, item)} onDragEnd={handleDragEnd} onDragOver={item.type === "folder" ? (e) => handleItemDragOver(e, item) : undefined} onDrop={item.type === "folder" ? (e) => handleItemDrop(e, item) : undefined} onContextMenu={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        // Additional prevention of default context menu
-                        e.nativeEvent.preventDefault();
-                        if (!isRenaming) {
-                            if (!selectedItems.has(itemKey)) {
-                                setSelectedItems(new Set([itemKey]));
-                                setLastSelectedIndex(index);
-                            }
-                            setFocusedIndex(index);
-                            handleContextMenu(e, item, index);
-                        }
-                    }} onTouchStart={(e) => handleTouchStart(e, item, index)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onClick={(e) => {
-                        if (!isRenaming) {
-                            handleItemClick(e, item, index);
-                        }
-                    }} onDoubleClick={(e) => {
-                        if (!isRenaming) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setFocusedIndex(index);
-                            handleItemOpen(item);
-                        }
-                    }} className={`group relative flex flex-col items-center p-2 sm:p-1.5 rounded-xl sm:rounded-lg border transition-all duration-200 cursor-pointer select-none outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background
-                    ${isSelected
-                        ? "bg-primary/15 dark:bg-primary/25 border-primary ring-2 ring-primary/30 shadow-sm"
-                        : isFocused
-                            ? "border-primary/60 bg-accent/30 ring-2 ring-primary/50 shadow-sm"
-                            : "border-transparent hover:border-border/40 hover:bg-accent/20 hover:scale-[1.02] hover:shadow-md"}
-                    active:scale-[0.98] 
-                    ${isDragging ? "opacity-50 scale-95" : ""}
-                    ${isCut ? "opacity-50" : ""}
-                    ${item.type === "folder" && draggedItem && draggedItem.name !== item.name
-                        ? "scale-105 transition-all duration-200 ring-2 ring-primary/50"
-                        : ""}`}>
+                const meta = item.type === "folder"
+                    ? (formatShortDate(item.modified) || "Folder")
+                    : [item.size ? formatBytes(item.size) : null, formatShortDate(item.modified)].filter(Boolean).join(" · ");
+                return (<div key={s.itemKey || index} {...itemRowProps(item, index, s)} className={cn("group relative rounded-[10px] p-1.5 cursor-pointer select-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary", s.isSelected ? "bg-primary/10" : s.isFocused ? "bg-muted/60" : "hover:bg-card", (s.isDragging || s.isCut) && "opacity-50", s.isDropTarget && "ring-2 ring-primary/50")}>
                   <div role="gridcell" className="contents">
-                  {/* Google Drive circular checkbox */}
-                  {!isRenaming && (<button type="button" onClick={(e) => handleCheckboxClick(e, item, index)} className={`absolute top-1.5 left-1.5 w-5 h-5 rounded-full flex items-center justify-center transition-all z-20 ${isSelected
-                            ? "bg-primary text-primary-foreground shadow-sm ring-1 ring-background scale-100 opacity-100"
-                            : selectedItems.size > 0
-                                ? "border-2 border-muted-foreground/70 bg-background/90 hover:border-primary hover:bg-background opacity-80 sm:opacity-75 hover:opacity-100 focus:opacity-100"
-                                : "border-2 border-muted-foreground/40 bg-background/80 hover:border-primary opacity-0 group-hover:opacity-90 focus:opacity-100"}`} title={isSelected ? "Deselect" : "Select"} aria-label={isSelected ? `Deselect ${item.name}` : `Select ${item.name}`}>
-                      <Check className={`w-3 h-3 stroke-[3] transition-opacity ${isSelected ? "opacity-100" : "opacity-0"}`}/>
-                    </button>)}
-
-                  {/* Star or Restore button */}
-                  {!isRenaming && (isTrashMode ? (<button type="button" onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            onRestoreItem?.(item);
-                        }} className="absolute top-1.5 right-7.5 p-1 rounded-full bg-background/80 dark:bg-card/85 backdrop-blur-xs border border-border/40 shadow-xs text-primary hover:text-primary/80 hover:bg-background active:bg-accent transition-colors z-10" title="Restore" aria-label="Restore">
-                        <RotateCcw className="w-3.5 h-3.5"/>
-                      </button>) : (<button type="button" onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            onToggleStar?.(item);
-                        }} className={`absolute top-1.5 right-7.5 p-1 rounded-full bg-background/80 dark:bg-card/85 backdrop-blur-xs border border-border/40 shadow-xs transition-all z-10 ${starred
-                            ? "text-amber-500 dark:text-amber-400 opacity-100"
-                            : "text-muted-foreground hover:text-amber-500 dark:hover:text-amber-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"}`} title={starred ? "Remove from starred" : "Add to starred"} aria-label={starred ? "Remove from starred" : "Add to starred"}>
-                        <Star className={`w-3.5 h-3.5 ${starred ? "fill-amber-500 dark:fill-amber-400 text-amber-500 dark:text-amber-400" : ""}`}/>
-                      </button>))}
-
-                  {/* 3-dots action button for touch access */}
-                  {!isRenaming && (<button type="button" onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            openItemContextMenu(item, index, e.clientX, e.clientY);
-                        }} className="absolute top-1.5 right-1.5 p-1 rounded-full bg-background/80 dark:bg-card/85 backdrop-blur-xs border border-border/40 shadow-xs text-muted-foreground hover:text-foreground hover:bg-background active:bg-accent transition-colors z-10 opacity-100 sm:opacity-0 sm:group-hover:opacity-100" title="Options" aria-label="Options">
-                      <MoreVertical className="w-3.5 h-3.5"/>
-                    </button>)}
-
-                  <div className="flex flex-col items-center w-full rounded-md p-1 transition-all duration-200 pointer-events-none">
-                    <div className="relative w-full aspect-[4/3] max-h-24 sm:max-h-28 rounded-lg bg-muted/20 flex items-center justify-center overflow-hidden mb-1.5">
-                      {getFileIcon(item)}
-                      {duration && (
-                        <span data-testid="duration-badge" className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/75 text-[10px] text-white font-mono font-medium leading-none pointer-events-none shadow-sm backdrop-blur-xs">
-                          {duration}
-                        </span>
-                      )}
-                    </div>
-                    {isRenaming ? (<div className="pointer-events-auto w-full" onClick={(e) => e.stopPropagation()}>
-                        <RenameInput initialName={item.name} onSave={onRenameConfirm} onCancel={onRenameCancel}/>
-                      </div>) : (<span className={`text-xs text-center break-words w-full line-clamp-2 transition-colors ${isSelected ? "font-semibold text-primary" : "text-foreground group-hover:text-accent-foreground"}`}>
-                        {item.name}
-                      </span>)}
+                  <div className={cn("relative aspect-[16/10] rounded-lg border border-border bg-muted/30 overflow-hidden grid place-items-center transition-shadow", s.isSelected ? "outline outline-2 outline-primary outline-offset-2" : "group-hover:shadow-[0_0_0_1px_hsl(var(--primary)/0.5),0_0_26px_-8px_hsl(var(--primary)/0.5)]")}>
+                    {item.type === "folder" ? <Folder className="w-10 h-10 text-primary pointer-events-none" strokeWidth={1.4}/> : <div className="w-full h-full grid place-items-center pointer-events-none"><Thumbnail item={item} size="fill" thumbnailSrc={item.thumbnail ? loadedThumbnails[item.thumbnail] : undefined} loadingState={item.thumbnail ? loadingStates[item.thumbnail] : undefined}/></div>}
+                    {!s.isRenaming && checkbox(item, index, s, "absolute top-2 left-2 z-20")}
+                    {!s.isRenaming && (<div className="absolute top-1.5 right-1.5 z-10 flex gap-1">
+                        {starOrRestore(item, s, "w-6 h-6 rounded-md bg-black/55 text-white hover:bg-black/75")}
+                        <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); openItemContextMenu(item, index, e.clientX, e.clientY); }} className="w-6 h-6 rounded-md grid place-items-center bg-black/55 text-white hover:bg-black/75 opacity-0 group-hover:opacity-100 focus:opacity-100 touch:opacity-100 transition-opacity" title="More actions" aria-label={`More actions for ${item.name}`}>
+                          <MoreVertical className="w-3.5 h-3.5"/>
+                        </button>
+                      </div>)}
+                    {item.type !== "folder" && typeInfo.label && <span className={cn("absolute left-1.5 bottom-1.5 px-1.5 py-0.5 rounded text-[9.5px] font-mono font-semibold tracking-wide bg-background/85 pointer-events-none", TYPE_TONE[typeInfo.kind])}>{typeInfo.label}</span>}
+                    {duration && <span data-testid="duration-badge" className="absolute right-1.5 bottom-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[9.5px] text-white font-mono pointer-events-none">{duration}</span>}
                   </div>
+                  {s.isRenaming ? (<div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
+                      <RenameInput initialName={item.name} onSave={onRenameConfirm} onCancel={onRenameCancel}/>
+                    </div>) : (<div className="px-0.5 pointer-events-none">
+                      <p className={cn("mt-1.5 text-[12.5px] font-medium truncate", s.isSelected && "text-primary")} title={item.name}>{item.name}</p>
+                      <p className="text-[10.5px] font-mono text-muted-foreground truncate mt-0.5">{meta}</p>
+                    </div>)}
                   </div>
                 </div>);
             })}
           </div>) : (<div ref={listContainerRef} role="grid" aria-label="Files and folders list" tabIndex={-1} data-grid-background="true" className="flex flex-col focus:outline-none">
-            {/* Table header - hidden on small mobile screens */}
-            <div role="row" className="hidden md:grid grid-cols-12 gap-3 px-3 py-1 text-xs font-medium text-muted-foreground border-b border-border bg-muted/40 items-center">
-              <div role="columnheader" className="col-span-5 flex items-center gap-2.5">
-                <button type="button" onClick={handleSelectAllToggle} className={`w-3.5 h-3.5 rounded flex items-center justify-center border transition-all ${selectedItems.size === items.length && items.length > 0
-                ? "bg-primary border-primary text-primary-foreground"
-                : selectedItems.size > 0
-                    ? "bg-primary/20 border-primary text-primary"
-                    : "border-muted-foreground/40 hover:border-foreground"}`} title={selectedItems.size === items.length ? "Deselect all" : "Select all"}>
-                  <Check className={`w-2.5 h-2.5 stroke-[3] ${selectedItems.size > 0 ? "opacity-100" : "opacity-0"}`}/>
+            <div role="row" className="hidden md:grid grid-cols-[18px_minmax(0,1fr)_64px_84px_92px_84px] gap-3 items-center h-8 px-2 border-b border-border text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <div role="columnheader">
+                <button type="button" onClick={handleSelectAllToggle} className={cn("w-4 h-4 rounded flex items-center justify-center border transition-colors", selectedItems.size > 0 && selectedItems.size === items.length ? "bg-primary border-primary text-primary-foreground" : selectedItems.size > 0 ? "bg-primary/20 border-primary text-primary" : "border-muted-foreground/50 hover:border-foreground")} title={selectedItems.size === items.length ? "Deselect all" : "Select all"} aria-label={selectedItems.size === items.length ? "Deselect all" : "Select all"}>
+                  <Check className={cn("w-3 h-3 stroke-[3]", selectedItems.size > 0 ? "opacity-100" : "opacity-0")}/>
                 </button>
-                <span>Name</span>
               </div>
-              <div role="columnheader" className="col-span-3">Modified Date</div>
-              <div role="columnheader" className="col-span-2">Type</div>
-              <div role="columnheader" className="col-span-2 text-right">Size</div>
+              <div role="columnheader">Name</div>
+              <div role="columnheader">Type</div>
+              <div role="columnheader" className="text-right">Size</div>
+              <div role="columnheader">Modified</div>
+              <div role="columnheader"/>
             </div>
-            <div className="space-y-1 sm:space-y-0.5">
+            <div className="flex flex-col gap-0.5 md:gap-0 pt-1">
               {items.map((item, index) => {
-                const itemKey = getItemKey(item);
-                const isRenaming = renamingItem?.index === index;
-                const isDragging = (draggedItem?.id && item.id) ? draggedItem.id === item.id : draggedItem?.name === item.name;
-                const isCut = Boolean((cutItems && cutItems.some(ci => (ci.id && item.id ? ci.id === item.id : ci.name === item.name))) ||
-                    (cutItem && (cutItem.id && item.id ? cutItem.id === item.id : cutItem.name === item.name)));
-                const isSelected = selectedItems.has(itemKey);
-                const isFocused = index === focusedIndex;
-                const starred = isItemStarred(item);
-                return (<div key={itemKey || index} ref={(el) => { itemElementsRef.current[index] = el; }} role="row" tabIndex={index === (focusedIndex ?? 0) ? 0 : -1} aria-selected={isSelected} aria-label={`${item.name}, ${item.type === 'folder' ? 'Folder' : (item.fileType || 'File')}${isSelected ? ', selected' : ''}`} data-grid-item="true" data-item-index={index} onFocus={() => setFocusedIndex(index)} draggable={!isRenaming} onDragStart={(e) => handleDragStart(e, item)} onDragEnd={handleDragEnd} onDragOver={item.type === "folder" ? (e) => handleItemDragOver(e, item) : undefined} onDrop={item.type === "folder" ? (e) => handleItemDrop(e, item) : undefined} onContextMenu={(e) => {
-                        if (!isRenaming) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (!selectedItems.has(itemKey)) {
-                                setSelectedItems(new Set([itemKey]));
-                                setLastSelectedIndex(index);
-                            }
-                            setFocusedIndex(index);
-                            handleContextMenu(e, item, index);
-                        }
-                    }} onTouchStart={(e) => handleTouchStart(e, item, index)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onClick={(e) => {
-                        if (!isRenaming) {
-                            handleItemClick(e, item, index);
-                        }
-                    }} onDoubleClick={(e) => {
-                        if (!isRenaming) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setFocusedIndex(index);
-                            handleItemOpen(item);
-                        }
-                    }} className={`group transition-all duration-200 cursor-pointer select-none outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-background ${isSelected
-                        ? "bg-primary/15 dark:bg-primary/25 border-primary ring-1 ring-primary/30 rounded-lg sm:rounded"
-                        : isFocused
-                            ? "bg-accent/35 border-primary/50 ring-1 ring-primary/50 rounded-lg sm:rounded"
-                            : "hover:bg-accent/40 rounded-lg sm:rounded border border-transparent"} ${isDragging ? "opacity-50" : ""}
-                      ${isCut ? "opacity-50" : ""}
-                      ${item.type === "folder" && draggedItem && draggedItem.name !== item.name
-                        ? "scale-[1.01] ring-2 ring-primary/50"
-                        : ""}`}>
-                    {/* Desktop table row (md and above): dense 32px height */}
-                    <div className="hidden md:grid col-span-12 w-full grid-cols-12 gap-3 px-3 h-8 items-center text-xs">
-                      <div role="gridcell" className="col-span-5 flex items-center gap-2.5 min-w-0">
-                        {!isRenaming && (<button type="button" onClick={(e) => handleCheckboxClick(e, item, index)} className={`w-3.5 h-3.5 rounded flex items-center justify-center transition-all flex-shrink-0 ${isSelected
-                            ? "bg-primary text-primary-foreground border border-primary"
-                            : selectedItems.size > 0
-                                ? "border border-muted-foreground/60 bg-background/80 hover:border-primary opacity-80"
-                                : "border border-muted-foreground/40 bg-background/60 hover:border-primary opacity-0 group-hover:opacity-100 focus:opacity-100"}`} title={isSelected ? "Deselect" : "Select"} aria-label={isSelected ? `Deselect ${item.name}` : `Select ${item.name}`}>
-                            <Check className={`w-2.5 h-2.5 stroke-[3] ${isSelected ? "opacity-100" : "opacity-0"}`}/>
-                          </button>)}
-                        <div className="flex-shrink-0 w-4 h-4 flex items-center justify-center pointer-events-none">{getFileIcon(item)}</div>
-                        {isRenaming ? (<div className="flex-1 pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+                const s = getItemState(item, index);
+                const typeInfo = getTypeInfo(item);
+                const date = formatShortDate(item.modified);
+                const size = item.type === "folder" ? "" : (item.size ? formatBytes(item.size) : "");
+                return (<div key={s.itemKey || index} {...itemRowProps(item, index, s)} className={cn("group relative rounded-md cursor-pointer select-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary", s.isSelected ? "bg-primary/10" : s.isFocused ? "bg-muted/60" : "hover:bg-muted/50", (s.isDragging || s.isCut) && "opacity-50", s.isDropTarget && "ring-2 ring-primary/50")}>
+                    {/* Desktop row */}
+                    <div className="hidden md:grid grid-cols-[18px_minmax(0,1fr)_64px_84px_92px_84px] gap-3 items-center h-9 px-2 text-xs">
+                      <div role="gridcell">{!s.isRenaming && checkbox(item, index, s)}</div>
+                      <div role="gridcell" className="flex items-center gap-2.5 min-w-0">
+                        <span className="w-6 h-6 rounded-md grid place-items-center shrink-0 pointer-events-none">{getFileIcon(item)}</span>
+                        {s.isRenaming ? (<div className="flex-1" onClick={(e) => e.stopPropagation()}>
                             <RenameInput initialName={item.name} onSave={onRenameConfirm} onCancel={onRenameCancel}/>
-                          </div>) : (<span className={`truncate pointer-events-none ${isSelected ? "font-medium text-primary" : "text-foreground group-hover:text-accent-foreground"}`}>
-                            {item.name}
-                          </span>)}
-                        {starred && (
-                          <Star className="w-3 h-3 fill-amber-500 dark:fill-amber-400 text-amber-500 dark:text-amber-400 shrink-0 pointer-events-none"/>
-                        )}
+                          </div>) : (<span className={cn("truncate pointer-events-none", s.isSelected && "text-primary font-medium")} title={item.name}>{item.name}</span>)}
+                        {s.starred && !s.isRenaming && <Star className="w-3 h-3 shrink-0 fill-warning text-warning pointer-events-none" aria-label="Starred"/>}
                       </div>
-                      <div role="gridcell" className="col-span-3 flex items-center text-muted-foreground pointer-events-none truncate">
-                        {item.modified ? new Date(item.modified).toLocaleDateString() : ''}
+                      <div role="gridcell" className="pointer-events-none">
+                        {item.type === "folder" ? <span className="text-muted-foreground">Folder</span> : typeInfo.label && <span className={cn("px-1.5 py-0.5 rounded text-[9.5px] font-mono font-semibold tracking-wide", TYPE_TONE[typeInfo.kind])}>{typeInfo.label}</span>}
                       </div>
-                      <div role="gridcell" className="col-span-2 flex items-center text-muted-foreground capitalize pointer-events-none truncate">
-                        {item.type === 'folder' ? 'Folder' : (item.fileType || 'File')}
-                      </div>
-                      <div role="gridcell" className="col-span-2 flex items-center justify-end text-muted-foreground pointer-events-none truncate">
-                        {item.type === 'folder' ? '' : (item.size ? formatFileSize(item.size) : '')}
+                      <div role="gridcell" className="text-right font-mono text-[11px] text-muted-foreground pointer-events-none">{size}</div>
+                      <div role="gridcell" className="font-mono text-[11px] text-muted-foreground truncate pointer-events-none" title={item.modified ? new Date(item.modified).toLocaleString() : undefined}>{date}</div>
+                      <div role="gridcell" className="flex justify-end gap-0.5">
+                        {!s.isRenaming && rowActions(item, index, s, "opacity-0 group-hover:opacity-100 focus-within:opacity-100 touch:opacity-100")}
                       </div>
                     </div>
-
-                    {/* Mobile optimized list row (< md): comfortable touch target */}
-                    <div role="gridcell" className="md:hidden flex items-center justify-between min-h-[44px] p-2.5 rounded-xl gap-3 border border-border/30">
-                      {/* Selection checkbox */}
-                      {!isRenaming && (<button type="button" onClick={(e) => handleCheckboxClick(e, item, index)} className={`w-5 h-5 rounded-full flex items-center justify-center transition-all shrink-0 ${isSelected
-                            ? "bg-primary text-primary-foreground ring-1 ring-background scale-100 opacity-100"
-                            : selectedItems.size > 0
-                                ? "border-2 border-muted-foreground/70 bg-background/90 hover:border-primary opacity-90"
-                                : "border-2 border-muted-foreground/40 bg-background/70 opacity-0 group-hover:opacity-70 w-0 p-0 border-0 overflow-hidden"}`} title={isSelected ? "Deselect" : "Select"} aria-label={isSelected ? `Deselect ${item.name}` : `Select ${item.name}`}>
-                          <Check className={`w-3 h-3 stroke-[3] ${isSelected ? "opacity-100" : "opacity-0"}`}/>
-                        </button>)}
-
-                      <div className="flex items-center gap-3 min-w-0 flex-1 pointer-events-none">
-                        <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center">
-                          {getFileIcon(item)}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          {isRenaming ? (<div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
-                              <RenameInput initialName={item.name} onSave={onRenameConfirm} onCancel={onRenameCancel}/>
-                            </div>) : (<>
-                              <p className={`text-sm font-medium truncate ${isSelected ? "text-primary" : "text-foreground"}`}>
-                                {item.name}
-                              </p>
-                              <p className="text-xs text-muted-foreground truncate">
-                                {item.type === 'folder'
-                            ? 'Folder'
-                            : `${item.size ? formatFileSize(item.size) : ''}${item.size && item.modified ? ' • ' : ''}${item.modified ? new Date(item.modified).toLocaleDateString() : ''}`}
-                              </p>
-                            </>)}
-                        </div>
+                    {/* Phone row */}
+                    <div role="gridcell" className="md:hidden flex items-center gap-3 min-h-[48px] px-2 py-1.5">
+                      {!s.isRenaming && checkbox(item, index, s)}
+                      <span className="w-8 h-8 rounded-md grid place-items-center shrink-0 pointer-events-none">{getFileIcon(item)}</span>
+                      <div className="min-w-0 flex-1 pointer-events-none">
+                        {s.isRenaming ? (<div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+                            <RenameInput initialName={item.name} onSave={onRenameConfirm} onCancel={onRenameCancel}/>
+                          </div>) : (<>
+                            <p className={cn("text-sm font-medium truncate", s.isSelected && "text-primary")}>{item.name}</p>
+                            <p className="text-[11px] font-mono text-muted-foreground truncate">{item.type === "folder" ? (date || "Folder") : [typeInfo.label, size, date].filter(Boolean).join(" · ")}</p>
+                          </>)}
                       </div>
-
-                      {!isRenaming && (<div className="flex items-center gap-1 shrink-0 z-10">
-                          {isTrashMode ? (<button type="button" onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                onRestoreItem?.(item);
-                            }} className="p-1.5 sm:p-2 rounded-full text-primary hover:text-primary/80 hover:bg-accent active:bg-accent/80 transition-colors" title="Restore" aria-label="Restore">
-                              <RotateCcw className="w-4 h-4"/>
-                            </button>) : (<button type="button" onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                onToggleStar?.(item);
-                            }} className={`p-1.5 sm:p-2 rounded-full transition-colors ${starred
-                                ? "text-amber-500 dark:text-amber-400 opacity-100"
-                                : "text-muted-foreground hover:text-amber-500 dark:hover:text-amber-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"}`} title={starred ? "Remove from starred" : "Add to starred"} aria-label={starred ? "Remove from starred" : "Add to starred"}>
-                              <Star className={`w-4 h-4 ${starred ? "fill-amber-500 dark:fill-amber-400 text-amber-500 dark:text-amber-400" : ""}`}/>
-                            </button>)}
-                          <button type="button" onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            openItemContextMenu(item, index, e.clientX, e.clientY);
-                        }} className="p-1.5 sm:p-2 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent active:bg-accent/80" title="Options" aria-label="Options">
+                      {!s.isRenaming && (<div className="flex items-center shrink-0">
+                          {starOrRestore(item, s, "w-8 h-8 rounded-md text-muted-foreground hover:bg-muted", true)}
+                          <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); openItemContextMenu(item, index, e.clientX, e.clientY); }} className="w-8 h-8 rounded-md grid place-items-center text-muted-foreground hover:text-foreground hover:bg-muted" title="More actions" aria-label={`More actions for ${item.name}`}>
                             <MoreVertical className="w-4 h-4"/>
                           </button>
                         </div>)}
@@ -2161,6 +2089,10 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             })}
             </div>
           </div>)}
+      </div>
+      {selectedItems.size > 0 && (<SelectionBar count={selectedItems.size} allSelected={selectedItems.size === items.length} actions={selectionActions} onAction={handleSelectionAction} onClear={clearSelection} onToggleAll={handleSelectAllToggle} busy={batchBusy}/>)}
+      </div>
+      <DetailsPane open={detailsOpen} isMobile={isMobile} onClose={() => onDetailsOpenChange?.(false)} item={detailsItem} selectionCount={selectedList.length} selectionSize={selectedList.reduce((sum, it) => sum + (it.type === "folder" ? 0 : it.size || 0), 0)} thumbnailSrc={detailsItem?.thumbnail ? loadedThumbnails[detailsItem.thumbnail] : undefined} locationPath={locationPath} isTrash={section === "trash" || section === "drive-trash"} isCloud={isCloudMode} cloudAccountId={cloudAccountId} onOpen={handleItemOpen} onDownload={onDownload} onToggleStar={(it) => onToggleStar?.(it)} onRestore={(it) => onRestoreItem?.(it)}/>
       </div>
 
       {/* Context Menu */}
@@ -2208,7 +2140,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                 // Disable delete for specific virtual folders in Home
                 Boolean(currentPath && currentPath.length === 1 &&
                     currentPath[0] === "Home" &&
-                    ["Images", "Documents", "Audio", "Voice Messages", "Videos"].includes(contextMenu.itemName))} onProperties={() => contextMenu.item && setPropertiesItem(contextMenu.item)} isArchive={isArchiveItem} selectedCount={selectedCount} isVaultMode={isVaultMode} onMoveToVault={() => contextMenu.item && onMoveToVault?.(contextMenu.item)} onMoveToHome={() => contextMenu.item && onMoveToHome?.(contextMenu.item)} onInspectArchive={() => {
+                    ["Images", "Documents", "Audio", "Voice Messages", "Videos"].includes(contextMenu.itemName))} onProperties={() => contextMenu.item && openDetails(contextMenu.item)} isArchive={isArchiveItem} selectedCount={selectedCount} isVaultMode={isVaultMode} onMoveToVault={() => contextMenu.item && onMoveToVault?.(contextMenu.item)} onMoveToHome={() => contextMenu.item && onMoveToHome?.(contextMenu.item)} onInspectArchive={() => {
                     if (contextMenu.item) {
                         setArchiveInspect({
                             fileId: getItemKey(contextMenu.item),
@@ -2318,7 +2250,10 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Properties Dialog */}
-      <PropertiesDialog open={propertiesItem !== null} item={propertiesItem} currentPath={currentPath} currentApiPath={currentApiPath} onClose={() => setPropertiesItem(null)} onDownload={onDownload}/>
+      {/* Move to… / File to… destination picker */}
+      <FolderPickerModal isOpen={movePickerOpen} onClose={() => setMovePickerOpen(false)} currentSelectedPath={pickerStartPath} onSelectPath={(path) => {
+            setMovePickerOpen(false);
+            runBatch((l) => onBatch.moveTo?.(l, path), selectedList);
+        }}/>
     </div>);
 };
