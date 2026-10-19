@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -460,7 +460,6 @@ async def move_into_vault(request: Request, body: MoveVaultItemModel, user: User
     if not is_vault_unlocked(request):
         raise HTTPException(status_code=403, detail="Vault is locked. Please unlock Vault first.")
 
-    user_id = str(user.telegram_user_id or user.username or "admin")
     target_path = body.target_path or "/Vault"
     if not target_path.startswith("/Vault"):
         target_path = "/Vault"

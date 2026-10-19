@@ -168,7 +168,8 @@ async def terminal_stream(request):
         try:
             proc.kill()
             await proc.wait()
-        except:pass
+        except Exception as e:
+            logger.debug(f"Failed to kill proc: {e}")
 
     return resp
 

@@ -8,14 +8,14 @@ def get_public_ip():
         ip_data = response.json()
         ip = ip_data['ip']
         return ip
-    except requests.RequestException as e:
+    except requests.RequestException:
         return None
 
     
 async def check_public_ip_reachable(ip: str, port: int = 8080):
     await asyncio.sleep(1)
     try:
-        sock = socket.create_connection((ip, port), timeout=5)
-        return True
+        with socket.create_connection((ip, port), timeout=5):
+            return True
     except (socket.timeout, socket.error):
         return False

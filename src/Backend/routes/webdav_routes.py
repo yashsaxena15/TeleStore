@@ -13,8 +13,6 @@ from typing import Optional, Tuple, Dict, Any, List
 
 from fastapi import APIRouter, Request, Response, HTTPException
 from fastapi.responses import StreamingResponse, HTMLResponse
-from pyrogram import Client
-from bson import ObjectId
 
 from src.Database import database
 from src.Config import OWNER, LOGS, MOVIE, GROUP, FILTER_CHAT
@@ -22,7 +20,7 @@ import re
 import asyncio
 import glob
 from ..security.credentials import verify_credentials
-from ..modules.byte_streamer import ByteStreamer, get_byte_streamer
+from ..modules.byte_streamer import get_byte_streamer
 from ..modules.streaming_utils import parse_range_header, resolve_mime_type
 from ..modules.pipeline_uploader import upload_part_task
 from d4rk.Logs import setup_logger

@@ -6,9 +6,7 @@ import asyncio
 import logging
 import secrets
 import urllib.parse
-from datetime import datetime, timezone
 import aiohttp
-import requests
 from pyrogram import Client
 
 logging.basicConfig(
@@ -18,7 +16,11 @@ logging.basicConfig(
 logger = logging.getLogger("tele_worker")
 
 MASTER_URL = os.getenv("MASTER_URL", "http://localhost:8000").rstrip("/")
-WORKER_KEY = os.getenv("WORKER_KEY", "")
+WORKER_KEY = os.getenv("WORKER_KEY", "").strip()
+if not WORKER_KEY:
+    logger.critical("WORKER_KEY environment variable is not set. Worker cannot authenticate with master.")
+    sys.exit(1)
+
 WORKER_ID = os.getenv("WORKER_ID", f"worker-{secrets.token_hex(3)}")
 WORK_DIR = os.getenv("WORK_DIR", "/tmp/tele_worker/cache")
 PART_MAX_SIZE = 1950 * 1024 * 1024  # 1.95 GB Part standard
@@ -82,7 +84,7 @@ class DistributedWorker:
                     headers=HEADERS,
                     json={"worker_id": WORKER_ID, "specs": specs},
                     timeout=aiohttp.ClientTimeout(total=10)
-                ) as resp:
+                ):
                     pass
             except Exception as e:
                 logger.warning(f"Heartbeat failed: {e}")
@@ -145,7 +147,7 @@ class DistributedWorker:
                 headers=HEADERS,
                 json=payload,
                 timeout=aiohttp.ClientTimeout(total=15)
-            ) as resp:
+            ):
                 pass
         except Exception as e:
             logger.error(f"Failed to report failure: {e}")

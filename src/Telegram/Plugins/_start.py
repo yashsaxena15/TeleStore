@@ -2,14 +2,14 @@
 
 import random
 
-from pyrogram import Client, filters 
-from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ChatMemberUpdated
+from pyrogram import Client 
+from pyrogram.types import Message, CallbackQuery
 
 from d4rk.Logs import setup_logger
 from d4rk.Utils import command , get_commands , button , ButtonMaker
 
 from src.Database import database
-from src.Config import START_MSG, START_IMGS , INFO_MSG
+from src.Config import START_MSG, START_IMGS
 
 logger = setup_logger(__name__)
 

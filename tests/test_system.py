@@ -4,7 +4,6 @@ import hashlib
 import hmac
 import json
 from unittest.mock import MagicMock, patch
-import pytest
 from src.Backend.security.credentials import User, require_auth
 
 

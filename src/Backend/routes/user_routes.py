@@ -4,7 +4,6 @@ from fastapi import APIRouter, Request, Depends, HTTPException
 from pydantic import BaseModel
 import datetime
 from typing import Optional, List
-from bson import ObjectId
 
 from ..security.credentials import require_auth, User
 from src.Database import database

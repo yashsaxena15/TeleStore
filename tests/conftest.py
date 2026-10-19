@@ -7,7 +7,7 @@ tests run completely isolated without .env, database, or network access.
 import os
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 import pytest
 
 # 1. Set required secrets in environment BEFORE importing src.Config

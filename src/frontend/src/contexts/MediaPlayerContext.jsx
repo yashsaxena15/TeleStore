@@ -1,7 +1,9 @@
-import React, { createContext, useContext, useState } from "react";
-import { MediaPlayer } from "@/components/MediaPlayer";
+import React, { createContext, useContext, useState, lazy, Suspense } from "react";
 import { PersistentAudioPlayer } from "@/components/PersistentAudioPlayer";
 import { downloadManager } from "@/lib/downloadManager";
+
+// The video player is split into its own chunk and loads on first play
+const MediaPlayer = lazy(() => import("@/components/MediaPlayer").then((m) => ({ default: m.MediaPlayer })));
 const MediaPlayerContext = createContext(undefined);
 export const MediaPlayerProvider = ({ children }) => {
     // Video modal media
@@ -78,9 +80,11 @@ export const MediaPlayerProvider = ({ children }) => {
       {children}
 
       {/* Video Modal Player */}
+      <Suspense fallback={null}>
       {currentMedia && currentMedia.fileType === "video" && (<MediaPlayer key={currentMedia.url} mediaUrl={currentMedia.url} fileName={currentMedia.fileName} fileType={currentMedia.fileType} onDownload={() => {
                 downloadManager.addDownload(currentMedia.url, currentMedia.fileName);
             }} onClose={closeMedia}/>)}
+      </Suspense>
 
       {/* Persistent Floating Bottom Audio Player */}
       {activeAudioTrack && (<PersistentAudioPlayer key={activeAudioTrack.id || activeAudioTrack.url} activeTrack={activeAudioTrack} playlist={audioPlaylist} currentIndex={currentTrackIndex} isMinimized={isAudioMinimized} onToggleMinimize={setIsAudioMinimized} onTrackChange={(newIdx) => {

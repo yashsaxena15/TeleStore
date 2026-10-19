@@ -26,7 +26,9 @@ class Users(Collection):
 
     def get_user_count(self) -> int:
         try:return self.count_documents()
-        except:return 0
+        except Exception as e:
+            logger.error(f"Error getting user count: {e}")
+            return 0
 
     def getUser(self, username: str) -> Any | None:
         """Get user by username, with backward compatibility for old user_id field"""
@@ -34,20 +36,24 @@ class Users(Collection):
             # First try to find by username (new structure)
             user_data = self.find_one({"username": username})
             return user_data
-        except:
+        except Exception as e:
+            logger.error(f"Error getting user {username}: {e}")
             return None
 
     def getTgUser(self, telegram_user_id: str) -> Any | None:
         """Get user by Telegram user ID"""
         try:return self.find_one({"telegram_user_id": telegram_user_id})
-        except:return None
+        except Exception as e:
+            logger.error(f"Error getting user by Telegram ID {telegram_user_id}: {e}")
+            return None
 
     def getUserById(self, user_id: str) -> Any | None:
         """Get user by database user_id"""
         try:
             from bson import ObjectId
             return self.find_one({"_id": ObjectId(user_id)})
-        except:
+        except Exception as e:
+            logger.error(f"Error getting user by ID {user_id}: {e}")
             return None
 
     def SaveUser(self, username: str, user_id: str = None, password_hash: Optional[str] = None, email: Optional[str] = None) -> InsertOneResult | None:
@@ -75,7 +81,9 @@ class Users(Collection):
                     user_data['email'] = email
                 return self.insert_one(user_data)
             
-        except:return None
+        except Exception as e:
+            logger.error(f"Error saving user {username}: {e}")
+            return None
         
     def saveUserSetting(self, username: str, setting: str, value: str) -> None:
         try:
@@ -83,7 +91,9 @@ class Users(Collection):
                 self.update_one({'username': username}, {"$set": {setting: value}})
             else:
                 self.insert_one({'username': username, setting: value})
-        except:return None
+        except Exception as e:
+            logger.error(f"Error saving user setting {setting} for {username}: {e}")
+            return None
         
     def save_password_hash(self, username: str, password_hash: str) -> None:
         """Save user's password hash"""
@@ -99,7 +109,9 @@ class Users(Collection):
                 return saved[setting]
             else:
                 self.insert_one({'username': username, setting: default})
-        except:return None
+        except Exception as e:
+            logger.error(f"Error getting user setting {setting} for {username}: {e}")
+            return None
         
     def get_password_hash(self, username: str) -> Optional[str]:
         """Get user's password hash"""

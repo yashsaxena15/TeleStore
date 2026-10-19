@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { X, Download, ExternalLink, ZoomIn, ZoomOut, Maximize2, Minimize2, FileText, FileSpreadsheet, Presentation, BookOpen, Copy, Check } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -18,9 +18,11 @@ import "prismjs/components/prism-css";
 import "prismjs/components/prism-markup"; // html/xml
 import "prismjs/components/prism-sql";
 import "prismjs/components/prism-yaml";
-import { SpreadsheetViewer } from "./SpreadsheetViewer";
-import { PresentationViewer } from "./PresentationViewer";
 import { toast } from "sonner";
+
+// Spreadsheet and slide viewers (xlsx, react-pptx) load only for those file types
+const SpreadsheetViewer = lazy(() => import("./SpreadsheetViewer").then((m) => ({ default: m.SpreadsheetViewer })));
+const PresentationViewer = lazy(() => import("./PresentationViewer").then((m) => ({ default: m.PresentationViewer })));
 export const DocumentReaderModal = ({ url, fileName, fileExtension, onClose, }) => {
     const ext = (fileExtension || fileName.split(".").pop() || "").toLowerCase();
     const SPREADSHEET_EXTS = ["xlsx", "xls", "xlsm", "xlsb", "xltx", "csv", "tsv", "ods"];
@@ -352,10 +354,10 @@ export const DocumentReaderModal = ({ url, fileName, fileExtension, onClose, }) 
           </div>)}
 
         {/* 7. Spreadsheet Viewer (Excel, CSV, TSV, ODS) */}
-        {isSpreadsheet && !error && (<SpreadsheetViewer url={url} fileName={fileName}/>)}
+        {isSpreadsheet && !error && (<Suspense fallback={null}><SpreadsheetViewer url={url} fileName={fileName}/></Suspense>)}
 
         {/* 8. Presentation Viewer (PowerPoint, PPTX, PPT, etc.) */}
-        {isPresentation && !error && (<PresentationViewer url={url} fileName={fileName}/>)}
+        {isPresentation && !error && (<Suspense fallback={null}><PresentationViewer url={url} fileName={fileName}/></Suspense>)}
       </div>
     </div>);
 };

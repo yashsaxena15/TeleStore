@@ -1,7 +1,5 @@
 """Tests for /files endpoints."""
 
-from unittest.mock import MagicMock
-import pytest
 from src.Backend.security.credentials import User, require_auth
 from src.Database import database
 

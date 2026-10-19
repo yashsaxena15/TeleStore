@@ -1070,7 +1070,6 @@ async def _process_upload_completion(upload_id: str, session: dict, bot_manager,
             results.sort(key=lambda x: x["part_index"])
 
             first_res = results[0]
-            first_msg_id = first_res["message_id"]
             first_thumbnail = next((r["thumbnail"] for r in results if r.get("thumbnail")), None)
             first_unique_id = first_res["file_unique_id"]
 
@@ -1252,7 +1251,7 @@ async def get_file_thumbnail(file_id: str, request: Request, auth_token: str = N
     # Check authentication - first try the normal auth, then check for token in query params
     try:
         # This will raise an exception if not authenticated via normal means
-        user = require_auth(request)
+        require_auth(request)
     except HTTPException:
         # If normal auth fails, check for auth_token in query params
         if auth_token:

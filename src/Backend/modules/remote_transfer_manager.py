@@ -10,8 +10,6 @@ import secrets
 import threading
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
-import aiohttp
-import aiofiles
 import urllib.parse
 from pymongo import MongoClient
 
@@ -145,8 +143,10 @@ def probe_resource_for_range(
                 if r_probe.status_code == 206:
                     cr = r_probe.headers.get("Content-Range", "")
                     if "/" in cr:
-                        try: tot = int(cr.split("/")[-1])
-                        except: pass
+                        try:
+                            tot = int(cr.split("/")[-1])
+                        except Exception as e:
+                            logger.debug(f"Failed to parse content-range total: {e}")
                     return True, final_url, tot, fname
                 elif r_probe.status_code == 200:
                     tot = int(r_probe.headers.get("Content-Length", 0))
@@ -171,8 +171,10 @@ def probe_resource_for_range(
                 cr = resp.headers.get("Content-Range", "")
                 tot = 0
                 if "/" in cr:
-                    try: tot = int(cr.split("/")[-1])
-                    except: pass
+                    try:
+                        tot = int(cr.split("/")[-1])
+                    except Exception as e:
+                        logger.debug(f"Failed to parse content-range total: {e}")
                 return True, resp.url, tot, fname
             elif resp.status_code == 200:
                 tot = int(resp.headers.get("Content-Length", 0))
@@ -1239,10 +1241,7 @@ class RemoteTransferManager:
     async def _run_range_part_transfer(self, task_doc: dict, cancel_event: threading.Event):
         task_id = task_doc["task_id"]
         source_url = task_doc["source_url"]
-        destination_path = task_doc.get("destination_path", "/Home")
-        user_id = task_doc["user_id"]
         chat_id = task_doc["chat_id"]
-        is_vault = bool(task_doc.get("is_vault", False))
         filename = task_doc.get("filename") or "download.bin"
         range_start = task_doc["range_start"]
         range_end = task_doc["range_end"]
@@ -1341,7 +1340,6 @@ class RemoteTransferManager:
             "progress": 99.0
         })
 
-        target_name = f"{filename}.part{part_index}"
         caption = f"{filename} (Part {part_index})"
         ftype = get_file_type(filename)
 

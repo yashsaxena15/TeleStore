@@ -7,10 +7,8 @@ import urllib.parse
 import mimetypes
 from typing import Dict, Any, Optional, List, Tuple
 import aiohttp
-from datetime import datetime, timezone
 
 from src.Config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
-from src.Database import database
 
 logger = logging.getLogger("google_drive_manager")
 

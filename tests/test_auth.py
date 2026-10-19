@@ -2,7 +2,6 @@
 
 import hashlib
 from unittest.mock import MagicMock
-import pytest
 from src.Database import database
 from src.Database.Mongodb._users import Users
 from src.Utils.passwords import hash_password, needs_rehash, verify_password

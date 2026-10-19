@@ -1,14 +1,10 @@
-import os, math, logging, datetime, pytz
 
-from pyrogram.errors import BadRequest, Unauthorized
-from pyrogram import Client, filters, types
-from pyrogram.types import Message
-from asyncio.exceptions import TimeoutError
+from pyrogram import Client
 
 from d4rk.Logs import setup_logger
 logger = setup_logger(__name__)
 
-from src.Config import API_ID, API_HASH, LOGS, DATABASE_URL, APP_NAME
+from src.Config import API_ID, API_HASH, LOGS
 from src.Database import database
 
 

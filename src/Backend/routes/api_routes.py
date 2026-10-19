@@ -1,6 +1,5 @@
 from fastapi import Request, Query, HTTPException
 from src.Database import database as db
-from typing import Optional
 
 
 async def list_media_api(

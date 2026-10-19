@@ -1,24 +1,14 @@
 # src/Backend/modules/streaming_utils.py
 
-import os
-import sys
-import math
 import zlib
 import json
 import asyncio
-import secrets
 import mimetypes
-import traceback
-from pathlib import Path
-from typing import Tuple, Dict, Union
+from typing import Tuple
 from concurrent.futures import ThreadPoolExecutor
 
 from pyrogram import Client
-from pyrogram import raw
-from pyrogram import utils
-from pyrogram.errors import AuthBytesInvalid
-from pyrogram.session import Session , Auth
-from pyrogram.file_id import FileId, FileType, ThumbnailSource
+from pyrogram.file_id import FileId
 
 executor = ThreadPoolExecutor()
 

@@ -13,7 +13,6 @@ services:
       - "127.0.0.1:9000:8000"
     volumes:
       - ./cache:/app/cache
-      - ./src/frontend/dist:/app/src/frontend/dist
     depends_on:
       - mongo
 

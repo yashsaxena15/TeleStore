@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { useLocation, useParams, useNavigate } from "react-router-dom";
 import { isVideoItem, isPhotoItem, isAudioItem, isArchiveItem, isDocumentItem, } from "@/components/types";
@@ -13,10 +13,6 @@ import { FileGrid } from "./FileGrid";
 import { FilePagination } from "./FilePagination";
 import { DeleteDialog } from "./DeleteDialog";
 import { NewFolderDialog } from "./NewFolderDialog";
-import { StorageAnalyticsContent } from "./StorageAnalyticsContent";
-import { ProfileContent } from "./ProfileContent";
-import { SettingsContent } from "./SettingsContent";
-import { UserManagementContent } from "./UserManagementContent";
 import Transfers from "@/pages/Transfers";
 import { getApiBaseUrl, fetchWithTimeout, api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -30,6 +26,13 @@ import { FolderDownloadDialog } from "./FolderDownloadDialog";
 import { WebDAVMountDialog } from "./WebDAVMountDialog";
 import { VaultModal } from "./VaultModal";
 import { RemoteDownloadDialog } from "./RemoteDownloadDialog";
+
+// Page panels are split into their own chunks and load when first shown
+const ProfileContent = lazy(() => import("./ProfileContent").then((m) => ({ default: m.ProfileContent })));
+const SettingsContent = lazy(() => import("./SettingsContent").then((m) => ({ default: m.SettingsContent })));
+const UserManagementContent = lazy(() => import("./UserManagementContent").then((m) => ({ default: m.UserManagementContent })));
+const StorageAnalyticsContent = lazy(() => import("./StorageAnalyticsContent").then((m) => ({ default: m.StorageAnalyticsContent })));
+const PanelLoading = () => (<div className="flex flex-1 items-center justify-center p-10 text-sm text-muted-foreground">Loading…</div>);
 export const FileExplorer = () => {
     const location = useLocation();
     const navigate = useNavigate(); // Add navigate hook
@@ -1439,22 +1442,29 @@ export const FileExplorer = () => {
 
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {showProfile ? (<motion.div key="profile" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
-            <ProfileContent onBack={() => {
+            <Suspense fallback={<PanelLoading />}>
+              <ProfileContent onBack={() => {
                 setShowProfile(false);
                 navigate('/');
             }}/>
+            </Suspense>
           </motion.div>) : showSettings ? (<motion.div key="settings" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
-            <SettingsContent onBack={() => {
+            <Suspense fallback={<PanelLoading />}>
+              <SettingsContent onBack={() => {
                 setShowSettings(false);
                 navigate('/');
             }}/>
+            </Suspense>
           </motion.div>) : showUserManagement ? (<motion.div key="user-management" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
-            <UserManagementContent onBack={() => {
+            <Suspense fallback={<PanelLoading />}>
+              <UserManagementContent onBack={() => {
                 setShowUserManagement(false);
                 navigate('/');
             }}/>
+            </Suspense>
           </motion.div>) : showStorageAnalytics ? (<motion.div key="storage-analytics" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
-            <StorageAnalyticsContent onBack={() => {
+            <Suspense fallback={<PanelLoading />}>
+              <StorageAnalyticsContent onBack={() => {
                 setShowStorageAnalytics(false);
                 navigate('/');
             }} onOpenTrash={() => {
@@ -1462,6 +1472,7 @@ export const FileExplorer = () => {
                 navigate('/');
                 handleFilterChange("trash");
             }}/>
+            </Suspense>
           </motion.div>) : showTransfers ? (<motion.div key="transfers" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
             <Transfers />
           </motion.div>) : (<div className="flex-1 flex flex-col min-h-0 overflow-hidden">

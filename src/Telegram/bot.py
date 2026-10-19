@@ -1,19 +1,14 @@
 #src/Telegram/bot.py
 
-import asyncio
-import threading
 
-from datetime import datetime
 
-from pyrogram import Client
 
-from d4rk.Handlers import BotManager , FontMessageMixin
-from d4rk.Logs import setup_logger , get_timezone_offset
+from d4rk.Logs import setup_logger
 
 from src.Backend import WebServerManager
 from d4rk import D4RK_BotManager
 from src.Database import database
-from src.Config import API_ID , API_HASH , TOKENS , APP_NAME , TIME_ZONE ,LOGS , DATABASE_URL , OWNER , LOGGER_BOT , WEB_APP , PORT
+from src.Config import API_ID , API_HASH , TOKENS , APP_NAME , LOGS , DATABASE_URL , OWNER , LOGGER_BOT , WEB_APP , PORT
 from src.Telegram.Plugins._channel_listener import on_startup_inbox_sync
 
 

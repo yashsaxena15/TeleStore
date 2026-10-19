@@ -1,16 +1,12 @@
 # src/Backend/routes/auth_routes.py
 
-from fastapi import APIRouter, Request, Depends, HTTPException, status
+from fastapi import APIRouter, Request, HTTPException, status
 from pydantic import BaseModel
-import hashlib
 import secrets
-import datetime
-from typing import Optional
 
-from ..security.credentials import require_auth, is_authenticated, require_admin, verify_credentials, verify_google_token, User
+from ..security.credentials import verify_credentials, verify_google_token
 
 from src.Database import database
-from src.Config import APP_NAME
 from d4rk.Logs import setup_logger
 
 logger = setup_logger("auth_routes")
@@ -51,14 +47,6 @@ async def login_post_route(request: Request, login_data: LoginRequest):
         
         # Generate a token for Tauri/desktop app usage
         auth_token = secrets.token_urlsafe(32)
-        token_data = {
-            "authenticated": True,
-            "username": login_data.username,
-            "auth_method": "local",
-            "created_at": datetime.datetime.now().isoformat()
-        }
-        # Note: _auth_tokens dictionary should be passed from main app or imported
-        # For now, we'll handle this in the main web.py file
         
         # Save token to database for persistence
         database.Users.save_auth_token(login_data.username, auth_token, "local")
@@ -97,14 +85,6 @@ async def google_login_route(request: Request, login_data: GoogleLoginRequest):
         
         # Generate a token for Tauri/desktop app usage
         auth_token = secrets.token_urlsafe(32)
-        token_data = {
-            "authenticated": True,
-            "username": user_info["name"],
-            "auth_method": "google",
-            "created_at": datetime.datetime.now().isoformat()
-        }
-        # Note: _auth_tokens dictionary should be passed from main app or imported
-        # For now, we'll handle this in the main web.py file
         
         # Save token to database for persistence
         database.Users.save_auth_token(user_info["name"], auth_token, "google")

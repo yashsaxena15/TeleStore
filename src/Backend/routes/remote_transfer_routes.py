@@ -1,8 +1,8 @@
 # src/Backend/routes/remote_transfer_routes.py
 
-from fastapi import APIRouter, Request, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Request, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 
 from ..security.credentials import require_auth, User
 from ..modules.remote_transfer_manager import remote_transfer_manager

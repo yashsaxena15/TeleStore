@@ -3,7 +3,6 @@
 import os
 import shutil
 import asyncio
-import logging
 import uuid
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timezone
@@ -12,7 +11,6 @@ from pymongo import MongoClient
 from src.Config import DATABASE_URL, APP_NAME
 from src.Database import database
 from d4rk.Logs import setup_logger
-from .priority_manager import priority_manager
 
 logger = setup_logger("archive_task_manager")
 

@@ -7,10 +7,9 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InputMediaPhoto , ChatPrivileges
 
 from d4rk.Logs import setup_logger
-from d4rk.Utils import new_task ,  ButtonMaker
+from d4rk.Utils import new_task
 
-from src.Database import database
-from src.Config import START_MSG, START_IMGS , INFO_MSG , OWNER , TOKENS
+from src.Config import START_IMGS
 
 logger = setup_logger(__name__)
 
@@ -46,5 +45,6 @@ class ChannelCreater:
                         can_pin_messages=True
                     )
                 )
-            except:pass
+            except Exception as e:
+                logger.debug(f"Failed to promote member {id}: {e}")
             await asyncio.sleep(2)

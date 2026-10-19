@@ -6,7 +6,7 @@ This guide covers deployment workflows for TeleStore in production and developme
 
 ## 1. Production Deployment
 
-In production, the application runs from built Docker images (`docker-compose.yml` is image-only, mounting only persistent volumes for `./cache` and `./src/frontend/dist`).
+In production, the application runs from built Docker images (`docker-compose.yml` is image-only, mounting only the persistent `./cache` volume; the frontend is built into the image).
 
 ### Deploying Updates
 

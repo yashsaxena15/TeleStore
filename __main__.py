@@ -2,8 +2,6 @@
 import asyncio
 import signal
 import sys
-import subprocess
-import os
 from d4rk.Logs import setup_logger
 from src.Telegram import start_bot, stop_bot
 from src.Config import APP_NAME
@@ -42,8 +40,8 @@ def signal_handler(signum, frame):
         try:
             # Run the loop once more to process any pending tasks
             loop.run_until_complete(asyncio.sleep(0.1))
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Pending tasks sleep during shutdown: {e}")
     
     logger.info("Shutdown complete")
     sys.exit(0)

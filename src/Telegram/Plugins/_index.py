@@ -1,14 +1,14 @@
 # src/Telegram/Plugins/_index.py
 
 import asyncio
-from typing import List, Optional, Union
+from typing import List, Union
 from cachetools import TTLCache
 
 from pyrogram import Client, filters 
-from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton , WebAppInfo
+from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from d4rk.Logs import setup_logger
-from d4rk.Utils import CustomFilters , ButtonMaker ,  round_robin ,command , button , progress_bar
+from d4rk.Utils import CustomFilters , ButtonMaker ,  round_robin ,button , progress_bar
 
 from src.Database import database
 
@@ -195,7 +195,8 @@ class IndexMessages:
                 try:
                     await self.message.edit(text, reply_markup=cancel_button)
                     logger.debug(f"Progress update: {self.index}/{self.total} indexed, {self.database}/{self.processed_file_messages} saved")
-                except:pass
+                except Exception as e:
+                    logger.debug(f"Progress message edit failed: {e}")
 
                 await asyncio.sleep(10)
         except Exception as e:
@@ -364,7 +365,8 @@ class IndexMessages:
 
 🎉 All done!"""
             try:await self.message.edit(final_text)
-            except:
+            except Exception as e:
+                logger.debug(f"Failed to edit completion message on first try: {e}")
                 await asyncio.sleep(15)
                 await self.message.edit(final_text)
             logger.info(f"Indexing completed: {self.total_file_messages} files queued, {self.processed_file_messages} processed, {self.database} saved, {self.failed_count} failed, {self.skipped_count} skipped")
@@ -426,7 +428,8 @@ async def index_movie_callback(client: Client, callback: CallbackQuery) -> None:
             await callback.message.edit(
                 f"❌ <b>Indexing Failed</b>\n\nError: {str(e)}\n\nPlease try again later."
             )
-        except:pass
+        except Exception as edit_err:
+            logger.debug(f"Failed to edit message with indexing failure error: {edit_err}")
 
 @button(pattern="cancel_indexing",CustomFilters=CustomFilters.authorize(sudo=True))
 async def cancel_indexing_callback(client: Client, callback: CallbackQuery) -> None:
@@ -456,6 +459,6 @@ async def cancel_indexing_callback(client: Client, callback: CallbackQuery) -> N
         logger.error(f"Error cancelling indexing: {e}")
         try:
             await callback.message.edit("❌ <b>Cancellation Failed</b>\n\nError occurred while cancelling the indexing process.")
-        except:
-            pass
+        except Exception as edit_err:
+            logger.debug(f"Failed to edit message with cancellation failure error: {edit_err}")
 

@@ -100,7 +100,10 @@ export default defineConfig(({ mode }) => ({
     
     rollupOptions: {
       output: {
-        manualChunks: undefined,
+        // React rarely changes, so keep it in its own long-cached chunk
+        manualChunks: {
+          "react-vendor": ["react", "react-dom", "react-router-dom"],
+        },
       },
     },
   },

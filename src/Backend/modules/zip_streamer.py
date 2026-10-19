@@ -1,7 +1,6 @@
 # src/Backend/modules/zip_streamer.py
 
 import asyncio
-import os
 import struct
 import time
 import zlib

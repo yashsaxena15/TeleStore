@@ -6,7 +6,6 @@ from d4rk.Logs import setup_logger
 import subprocess
 import os
 import sys
-import re
 
 logger = setup_logger("system_routes")
 
@@ -117,7 +116,8 @@ async def github_webhook(request: Request):
                         # return {"status": "warning", "message": f"Repository updated but pip install failed: {pip_result.stderr}"}
                     logger.info(f"Pip install output: {pip_result.stdout}")
                 logger.info("Successfully updated from GitHub webhook")
-            except:pass
+            except Exception as e:
+                logger.warning(f"Error during repository update steps: {e}")
             result = subprocess.run([prime, "restart"], cwd=repo_path, 
                                  capture_output=True, text=True, env=env)
             if result.returncode != 0:

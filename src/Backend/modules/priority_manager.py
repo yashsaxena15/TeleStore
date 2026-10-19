@@ -4,7 +4,7 @@ import time
 import asyncio
 import threading
 import logging
-from typing import Set, Optional, Callable, Dict
+from typing import Optional, Callable, Dict
 
 logger = logging.getLogger("priority_manager")
 

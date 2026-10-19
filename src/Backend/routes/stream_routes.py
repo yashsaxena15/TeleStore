@@ -1,44 +1,31 @@
 import os
 import sys
-import math
 import re
 import urllib.parse
-from venv import logger
-import zlib
-import json
-import asyncio
 import secrets
 import mimetypes
-import traceback
 
 from pathlib import Path
-from typing import Tuple, Dict, Union
-from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 from concurrent.futures import ThreadPoolExecutor
 
 from pyrogram import Client
 from pyrogram import raw
-from pyrogram import utils
-from pyrogram.errors import AuthBytesInvalid
-from pyrogram.session import Session , Auth
-from pyrogram.file_id import FileId, FileType, ThumbnailSource
 from src.Database import database
 from src.Config import APP_NAME
-from ..security.credentials import require_auth, is_authenticated
+from ..security.credentials import require_auth
 
 
 from d4rk.Logs import setup_logger
 
 # Import utility functions from streaming_utils module
 from ..modules.streaming_utils import (
-    compress_data, decompress_data, base62_encode, base62_decode,
-    async_compress_data, async_decompress_data, async_base62_encode, async_base62_decode,
-    encode_string, decode_string, get_file_ids, parse_range_header, resolve_mime_type
+    parse_range_header, resolve_mime_type
 )
 
 # Import ByteStreamer class from byte_streamer module
-from ..modules.byte_streamer import ByteStreamer, InvalidHash, FIleNotFound, get_byte_streamer
+from ..modules.byte_streamer import get_byte_streamer
 
 current_dir = Path(__file__).parent
 parent_dir = current_dir.parent
@@ -337,9 +324,8 @@ async def watch_handler(request: Request, file_name: str):
 @router.get("/watch/{id}/{quality}")
 async def watch_quality_handler(request: Request, id: str, quality: str):
     # First try to get user from session auth or token auth (handled by middleware)
-    user = None
     try:
-        user = require_auth(request)
+        require_auth(request)
     except HTTPException:
         # If authentication fails, raise 401
         raise HTTPException(status_code=401, detail="Authentication required")

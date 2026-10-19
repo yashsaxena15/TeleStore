@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { FileText, Image as ImageIcon, FileVideo, FileAudio, FileArchive, FileSpreadsheet, Presentation } from "lucide-react";
-import { getApiBaseUrl } from "@/lib/api";
+import { getApiBaseUrl, fetchWithTimeout } from "@/lib/api";
 // Simple cache to store loaded thumbnails
 const thumbnailCache = new Map();
 // Queue to manage thumbnail loading
@@ -30,7 +30,7 @@ function queueThumbnailLoad(thumbnailId, url, onLoad, onError) {
             return;
         }
         // Fetch the thumbnail using our authenticated API client
-        import('@/lib/api').then(({ fetchWithTimeout }) => {
+        Promise.resolve().then(() => {
             fetchWithTimeout(url, { method: 'GET' }, 5000)
                 .then(response => {
                 if (!response.ok)

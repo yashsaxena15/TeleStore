@@ -1,14 +1,11 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { isVideoItem } from "@/components/types";
 import { copyStreamUrl } from "@/lib/utils";
 import { Folder, MoreVertical, Check, X, Trash2, Download, Info, Star, RotateCcw, Scissors, Copy } from "lucide-react";
 import { ContextMenu } from "./ContextMenu";
 import { RenameInput } from "./RenameInput";
-import { ImageViewer } from "./ImageViewer";
 import { useMediaPlayer } from "@/contexts/MediaPlayerContext";
 import { Thumbnail } from "./Thumbnail";
-import { DocumentReaderModal } from "./DocumentReaderModal";
-import { ArchiveInspectDialog } from "./ArchiveInspectDialog";
 import { CompressDialog } from "./CompressDialog";
 import { UploadProgressWidget } from "./UploadProgressWidget";
 import { uploadManager } from "@/lib/uploadManager";
@@ -33,6 +30,11 @@ import {
     ARROW_KEYS
 } from "@/lib/fileKeyboardNavigation";
 import { getItemDuration, isItemStarred } from "@/lib/fileCardHelpers";
+
+// Heavy viewers are split into their own chunks and load on first open
+const ImageViewer = lazy(() => import("./ImageViewer").then((m) => ({ default: m.ImageViewer })));
+const DocumentReaderModal = lazy(() => import("./DocumentReaderModal").then((m) => ({ default: m.DocumentReaderModal })));
+const ArchiveInspectDialog = lazy(() => import("./ArchiveInspectDialog").then((m) => ({ default: m.ArchiveInspectDialog })));
 export const getItemKey = (item) => item.id || item.file_unique_id || item.name;
 export const FileGrid = ({ items, viewMode, onNavigate, itemCount, onCopy, onCut, onPaste, onDelete, onRename, onMove, onDownload, renamingItem, onRenameConfirm, onRenameCancel, currentFolder, onNewFolder, onUploadFiles, // Add this
 onUploadFolder, // Add this
@@ -1232,8 +1234,6 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                 return;
             }
             setUploadingFiles(filesToUpload);
-            // Import the API client
-            const { api } = await import('@/lib/api');
             // Direct upload to Google Drive if in Cloud Mode
             if (isCloudMode && cloudAccountId) {
                 if (isCloudVirtualSection) {
@@ -2245,6 +2245,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
         })()}
 
       {/* Image Viewer */}
+      <Suspense fallback={null}>
       {imageViewer && (<ImageViewer imageUrl={imageViewer.imageUrl} fileName={imageViewer.fileName} images={imageViewer.images} initialIndex={imageViewer.initialIndex} onClose={() => setImageViewer(null)}/>)}
 
       {/* Universal Document & E-Book Reader Modal */}
@@ -2255,6 +2256,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                 if (onRefresh)
                     onRefresh();
             }}/>)}
+      </Suspense>
 
       {/* Cloud Archive Compress Dialog */}
       {compressDialog && (<CompressDialog isOpen={compressDialog} onClose={() => setCompressDialog(false)} selectedItemIds={selectedItems.size > 0

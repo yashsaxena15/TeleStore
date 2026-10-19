@@ -59,7 +59,7 @@ class BotManager(Client):
                 logger.error(f"Access token expired (attempt {attempt + 1})")
                 break
                 
-            except Exception as e:
+            except Exception:
                 logger.error(f"Error starting Client.Stoped !")
                 logger.error(traceback.format_exc())
                 break
@@ -106,12 +106,15 @@ class BotManager(Client):
                     chat_id = int(data[0])
                     Message_id = int(data[1])
             except Exception as e:logger.error(f"Failed to send restart notification: {e}")
-            try:await self.edit_message_text(chat_id=chat_id,message_id=Message_id, text="Bot restarted successfully!")          
-            except:
+            try:
+                await self.edit_message_text(chat_id=chat_id,message_id=Message_id, text="Bot restarted successfully!")          
+            except Exception as e:
+                logger.debug(f"Could not edit restart message, sending new message: {e}")
                 try:
                     await self.send_message(chat_id=chat_id, text="Bot restarted successfully!",reply_to_message_id=Message_id-1,)
                     await self.delete_messages(chat_id=chat_id,message_ids=Message_id)
-                except:pass
+                except Exception as inner_e:
+                    logger.debug(f"Could not send restart message: {inner_e}")
 
             if os.path.exists('restart.txt'):os.remove('restart.txt')
 

@@ -1,8 +1,8 @@
 # src/Backend/routes/archive_routes.py
 
-from typing import List, Optional
+from typing import List
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from ..security.credentials import require_auth, User

@@ -3,7 +3,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 import logging
-import secrets
 
 from src.Backend.security.credentials import require_auth , User
 from src.Database import database
@@ -65,8 +64,9 @@ async def generate_telegram_verification(
                 if workload < least_workload:
                     least_workload = workload
                     least_busy_bot = client
-            except:
+            except Exception as e:
                 # If we can't get workload for a bot, skip it
+                logger.debug(f"Failed to get workload for client: {e}")
                 continue
         
         if not least_busy_bot:
@@ -76,8 +76,8 @@ async def generate_telegram_verification(
         bot_me = None
         try:
             bot_me = least_busy_bot.me
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to read bot.me: {e}")
             
         if not bot_me or not hasattr(bot_me, 'username') or not bot_me.username:
             raise HTTPException(status_code=503, detail="Bot information unavailable")

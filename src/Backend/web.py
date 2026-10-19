@@ -1,30 +1,16 @@
 # src/Web/web.py
 
-from fastapi import FastAPI, Request, Form, Depends, Query, HTTPException, Response, status, File, UploadFile
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
-from pydantic import BaseModel
-from bson import ObjectId
-import sys
-import io
-import tempfile
-import logging
-import re
 import os
 import datetime
-import hashlib
-import secrets
-from typing import Any, Dict, List, Optional
-import aiofiles
 
 # Set up logger to match your application's logging format
 from d4rk.Logs import setup_logger
 logger = setup_logger("web_server")
 
-from .security.credentials import require_auth, is_authenticated, require_admin, verify_credentials, verify_google_token, User
-from .routes.api_routes import list_media_api, delete_media_api, update_media_api, delete_movie_quality_api, delete_tv_quality_api, delete_tv_episode_api, delete_tv_season_api
 from .routes.stream_routes import router as stream_router
 # Import the new Telegram verification router
 from .routes.telegram_verification import router as telegram_router
@@ -48,10 +34,9 @@ from .routes.error_handlers import exception_handlers
 
 from src.Config import APP_NAME, OWNER, SESSION_SECRET_KEY
 from src.Database import database
-from dataclasses import asdict
 
 # Import utility functions and global variables
-from .modules.utilities import work_loads, _auth_tokens, load_persistent_tokens, cleanup_stale_upload_files
+from .modules.utilities import _auth_tokens, load_persistent_tokens, cleanup_stale_upload_files
 
 app = FastAPI(
     title=f"{APP_NAME} Media Server",
@@ -168,7 +153,13 @@ app.include_router(remote_transfer_router, prefix="/api")
 app.include_router(cloud_router)
 app.include_router(cloud_router, prefix="/api")
 app.include_router(worker_router)
-app.mount("/assets", StaticFiles(directory=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "dist", "assets")), name="assets")
+# Built frontend assets. The folder is absent until `npm run build` (e.g. in CI or a
+# fresh checkout), so check_dir=False lets the API start without it.
+app.mount(
+    "/assets",
+    StaticFiles(directory=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "dist", "assets"), check_dir=False),
+    name="assets",
+)
 # Register exception handlers
 for exc_class, handler in exception_handlers.items():
     app.add_exception_handler(exc_class, handler)

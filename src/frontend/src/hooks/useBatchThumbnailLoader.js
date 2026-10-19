@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { fetchWithTimeout, getApiBaseUrl } from "@/lib/api";
 /**
  * Hook for loading thumbnails in batches to improve performance
  */
@@ -36,8 +37,6 @@ export function useBatchThumbnailLoader(items, batchSize = 5) {
                 }
                 const thumbnailId = item.thumbnail;
                 try {
-                    // Import the API client dynamically
-                    const { fetchWithTimeout, getApiBaseUrl } = await import('@/lib/api');
                     // Check if we're in Tauri environment
                     const isTauri = typeof window !== 'undefined' && !!window.__TAURI__;
                     // Construct the thumbnail URL

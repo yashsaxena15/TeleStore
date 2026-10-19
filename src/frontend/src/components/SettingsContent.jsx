@@ -8,7 +8,6 @@ import { getApiBaseUrl, resetApiBaseUrl, api } from "@/lib/api";
 import { X, Sun, Moon, Monitor } from "lucide-react";
 import { toast } from "sonner";
 // Add the Tauri dialog import
-import { open } from '@tauri-apps/plugin-dialog';
 // Add Tauri path import for getting user profile directory
 import { homeDir } from '@tauri-apps/api/path';
 import authService from "@/lib/authService";
@@ -105,6 +104,7 @@ export const SettingsContent = ({ onBack }) => {
         try {
             // Check if we're in a Tauri environment
             if (typeof window !== 'undefined' && authService.isTauri()) {
+                const { open } = await import('@tauri-apps/plugin-dialog');
                 const selected = await open({
                     directory: true,
                     multiple: false,

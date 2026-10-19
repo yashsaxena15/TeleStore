@@ -1,11 +1,10 @@
 # src/Backend/routes/media_routes.py
 
 import os
-import sys
 import json
 import asyncio
 import urllib.parse
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from fastapi import APIRouter, Request, HTTPException, Response, Query
 from fastapi.responses import StreamingResponse, JSONResponse
 
@@ -82,7 +81,7 @@ async def get_media_info(request: Request, file_name: str, token: Optional[str] 
     Results are cached in memory and database for instant responses.
     """
     try:
-        user = require_auth(request)
+        require_auth(request)
     except HTTPException:
         raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -282,7 +281,7 @@ async def get_subtitles(
     Extract embedded subtitle track from video container into WebVTT text format on-the-fly.
     """
     try:
-        user = require_auth(request)
+        require_auth(request)
     except HTTPException:
         raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -360,7 +359,7 @@ async def media_transcode_stream(
     - If quality is lower (e.g. 480p, 360p): encodes video downscale using single-core ultrafast preset.
     """
     try:
-        user = require_auth(request)
+        require_auth(request)
     except HTTPException:
         raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -481,7 +480,7 @@ async def media_transcode_stream(
 async def get_media_cache_stats(request: Request):
     """Get real-time statistics of the 25GB Tier-2 SSD Media Cache."""
     try:
-        user = require_auth(request)
+        require_auth(request)
     except HTTPException:
         raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -494,7 +493,7 @@ async def get_media_cache_stats(request: Request):
 async def clear_media_cache(request: Request):
     """Manually clear the 25GB Media Cache to immediately reclaim disk space."""
     try:
-        user = require_auth(request)
+        require_auth(request)
     except HTTPException:
         raise HTTPException(status_code=401, detail="Authentication required")
 

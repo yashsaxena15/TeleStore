@@ -1,5 +1,4 @@
 
-import pyrogram.errors
 from typing import List, Union
 
 from pyrogram import Client
@@ -8,9 +7,11 @@ from pyrogram.errors import FloodWait
 from pyrogram.types import Message, CallbackQuery
 
 from d4rk.Utils._fonts import get_font
-from d4rk.Utils._decorators import new_task, retry
+from d4rk.Utils._decorators import retry
 
 import asyncio
+from d4rk.Logs import setup_logger
+logger = setup_logger(__name__)
 
 reaction_queue = asyncio.Queue()
 semaphore = asyncio.Semaphore(1)
@@ -41,8 +42,10 @@ class FontMessageMixin(Client):
                         await self._send_reaction(chat_id=chat_id, message_id=message_id, story_id=story_id, emoji=emoji, big=big, add_to_recent=add_to_recent)
                     except FloodWait as e:
                         await asyncio.sleep(e.value)
-                        try:await self._send_reaction(chat_id=chat_id, message_id=message_id, story_id=story_id, emoji=emoji, big=big, add_to_recent=add_to_recent)
-                        except:pass
+                        try:
+                            await self._send_reaction(chat_id=chat_id, message_id=message_id, story_id=story_id, emoji=emoji, big=big, add_to_recent=add_to_recent)
+                        except Exception as retry_err:
+                            logger.debug(f"Reaction retry failed after FloodWait: {retry_err}")
                     finally:reaction_queue.task_done()
             await asyncio.sleep(5)
             asyncio.create_task(job())

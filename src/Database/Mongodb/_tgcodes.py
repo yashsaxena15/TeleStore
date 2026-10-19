@@ -1,13 +1,12 @@
 # src/Database/Mongodb/_telegram_verification.py
 
-from typing import Any, Optional
+from typing import Optional
 from datetime import datetime, timedelta
 import secrets
 
 from d4rk.Logs import setup_logger
 
 from pymongo.collection import Collection
-from pymongo.results import InsertOneResult
 
 logger = setup_logger(__name__)
 

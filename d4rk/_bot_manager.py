@@ -11,7 +11,7 @@ import threading
 from typing import List
 from datetime import datetime
 from pyrogram.errors import FloodWait
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from d4rk._base import TGBase
 from d4rk.Web import WebServerManager
@@ -530,7 +530,7 @@ class D4RK_BotManager:
                                 bot_info += f"   └─ ⚡ <a href='tg://user?id={bot_id}'>{bot_name}</a>\n"
                             else:
                                 bot_info += f"   ├─ ⚡ <a href='tg://user?id={bot_id}'>{bot_name}</a>\n"
-                        except Exception as e:
+                        except Exception:
                             # Fallback to token-based identification if we can't get bot info
                             token_suffix = bot_instance.token[-8:] if bot_instance.token else "Unknown"
                             bot_instance._bot_name = f"Bot ...{token_suffix}"

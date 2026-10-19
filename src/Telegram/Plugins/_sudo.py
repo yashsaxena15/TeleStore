@@ -32,7 +32,8 @@ async def auth_command(client: Client, message: Message):
                     try:
                         user = await client.get_users(username)
                         break
-                    except:
+                    except Exception as e:
+                        logger.debug(f"Failed to lookup username {username}: {e}")
                         continue
     
     if not user:
@@ -77,7 +78,8 @@ async def unauth_command(client: Client, message: Message):
                     try:
                         user = await client.get_users(username)
                         break
-                    except:
+                    except Exception as e:
+                        logger.debug(f"Failed to lookup username {username}: {e}")
                         continue
     
     if not user:

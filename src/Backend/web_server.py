@@ -1,10 +1,8 @@
 # src/Backend/web_server.py
 
-from typing import Literal, Optional
-from pyrogram import Client
+from typing import Literal
 import asyncio
 import uvicorn
-import logging
 import subprocess
 import os
 import sys

@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from starlette.requests import Request
 from starlette.responses import StreamingResponse
-from src.Backend.routes.stream_routes import media_streamer, router
-from src.Backend.security.credentials import User, require_auth
+from src.Backend.routes.stream_routes import media_streamer
+from src.Backend.security.credentials import User
 
 
 async def dummy_byte_generator(*args, **kwargs):
