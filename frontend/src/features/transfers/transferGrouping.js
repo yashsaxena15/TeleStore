@@ -49,6 +49,11 @@ export function groupRemoteTransfers(remoteTransfers) {
             status = 'failed';
         else if (isQueued)
             status = 'queued';
+        // Nothing left running: some files failed (the rest finished or were cancelled)
+        else if (failedCount > 0)
+            status = 'failed';
+        else if (cancelledCount > 0)
+            status = 'cancelled';
         const totalBytes = subItems.reduce((acc, i) => acc + (i.filesize || 0), 0);
         const transferredBytes = subItems.reduce((acc, i) => acc + (i.transferred_bytes || 0), 0);
         const totalSpeed = subItems.reduce((acc, i) => acc + (i.speed_bps || 0), 0);
@@ -88,6 +93,9 @@ export function groupRemoteTransfers(remoteTransfers) {
             phase = groupType === 'file'
                 ? `Multi-Node Leeching [${completedCount}/${subItems.length} parts done] ⚡`
                 : `Leeching [${completedCount + 1}/${subItems.length}]: ${activeSub?.filename || ''}`;
+        }
+        else if (status === 'failed') {
+            phase = `${failedCount} of ${subItems.length} ${groupType === 'file' ? 'parts' : 'files'} failed`;
         }
         else if (status === 'cancelled') {
             phase = groupType === 'file' ? 'File transfer cancelled' : 'Folder transfer cancelled';
