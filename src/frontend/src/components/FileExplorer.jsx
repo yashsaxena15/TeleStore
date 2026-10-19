@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { useLocation, useParams, useNavigate } from "react-router-dom";
 import { isVideoItem, isPhotoItem, isAudioItem, isArchiveItem, isDocumentItem, } from "@/components/types";
@@ -166,6 +166,7 @@ export const FileExplorer = () => {
     // Log when the component mounts
     useEffect(() => {
         logger.info("FileExplorer component mounted", { currentPath, location: window.location.pathname });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- log once on mount
     }, []);
     // Refresh files when component mounts and user is at Home path
     useEffect(() => {
@@ -173,7 +174,8 @@ export const FileExplorer = () => {
             // Trigger a refresh to ensure default folders are visible
             refetch();
         }
-    }, []); // Empty dependency array means this runs once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh once on mount
+    }, []);
     // Check current route and show appropriate content on mount
     useEffect(() => {
         if (location.pathname === '/profile') {
@@ -850,6 +852,9 @@ export const FileExplorer = () => {
             toast.error(err.message || "Failed to move item out of Vault");
         }
     };
+    // Long-lived listeners below call the latest handleFilterChange through this ref,
+    // so they never use values (e.g. cloud accounts) captured on an earlier render.
+    const handleFilterChangeRef = useRef(null);
     useEffect(() => {
         if (!isVaultUnlocked)
             return;
@@ -858,7 +863,7 @@ export const FileExplorer = () => {
                 if (!st.is_unlocked && isVaultUnlocked) {
                     setIsVaultUnlocked(false);
                     if (isVaultMode) {
-                        handleFilterChange("all");
+                        handleFilterChangeRef.current("all");
                         toast.info("Vault locked due to 15 minutes of inactivity.");
                     }
                 }
@@ -942,6 +947,7 @@ export const FileExplorer = () => {
             setFoldersFirst(true);
         }
     };
+    handleFilterChangeRef.current = handleFilterChange;
     const handleSidebarDrop = async (item, targetFolderName) => {
         try {
             // Construct the source path correctly
@@ -1364,7 +1370,7 @@ export const FileExplorer = () => {
                 setShowSettings(false);
                 setShowUserManagement(false);
                 setShowStorageAnalytics(false);
-                handleFilterChange(e.detail.filter);
+                handleFilterChangeRef.current(e.detail.filter);
             }
         };
         window.addEventListener('changeCategory', handleCategoryChange);

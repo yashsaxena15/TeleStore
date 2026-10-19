@@ -115,6 +115,7 @@ const Login = () => {
             }, 1000);
             return () => clearTimeout(timer);
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialize Google sign-in once on mount
     }, []);
     const handleSubmit = async (e) => {
         e.preventDefault();

@@ -321,71 +321,17 @@ async def stream_handler_for_watch(request: Request, id: str, filename: str = No
 
 @router.get("/watch/{file_name:path}")
 async def watch_handler(request: Request, file_name: str):
-    # Check if this is a request for the video content (not the player page)
-    # We can detect this by checking if the Accept header contains video/ but NOT text/html
-    # This prevents browsers from accidentally triggering streaming when they want the player page
-    accept_header = request.headers.get("Accept", "")
-    
     # First try to get user from session auth or token auth (handled by middleware)
-    user = None
     try:
-        user = require_auth(request)
+        require_auth(request)
     except HTTPException:
-        # If authentication fails, raise 401
         raise HTTPException(status_code=401, detail="Authentication required")
     
-    # If we got here, we have a valid user
-    # Use the user's Telegram ID as the user identifier, or username if no Telegram ID
-    user_id = str(user.telegram_user_id) if user.telegram_user_id else user.username
-    
-    # Decode URL encoded file name
-    import urllib.parse
-    decoded_file_name = urllib.parse.unquote(file_name)
-    
-    # If the request is specifically asking for video content and NOT html, stream it
-    if "video/" in accept_header and "text/html" not in accept_header:
-        # This is a request for the video content, stream it
-        request.state.is_watch = True
-        return await stream_handler(request, file_name)
-    # Also check for direct range requests which are typically video streaming requests
-    elif request.headers.get("Range"):
-        # This is a range request, definitely a streaming request
-        request.state.is_watch = True
-        return await stream_handler(request, file_name)
-    else:
-        # This is a request for the video player page
-        # Look up the file in the database using the file name
-        try:
-            # Search for the file in the Files collection by file name
-            # First try exact match
-            file_data = database.Files.find_one({"file_name": decoded_file_name, "owner_id": user_id})
-            
-            # If not found, try with path variations
-            if not file_data:
-                # Try with leading slash
-                file_data = database.Files.find_one({"file_name": decoded_file_name, "file_path": "/", "owner_id": user_id})
-            
-            if not file_data:
-                print(f"File not found in database for name: {decoded_file_name}")
-                raise HTTPException(status_code=404, detail="File not found")
-            
-            file_name_str = file_data.get("file_name") or f"{secrets.token_hex(2)}.unknown"
-            mime_type = resolve_mime_type(file_name_str)
-            
-            # Create a title from the file information
-            title = file_data.get("file_name") or "Unknown File"
-
-            return templates.TemplateResponse("video_player.html", {
-                "request": request,
-                "id": file_data.get("file_unique_id"),  # Use unique ID for player
-                "title": f"{title}",
-                "mime_type": mime_type,  # Default to MP4, will be overridden by browser
-                "qualities": [],  # No qualities for simple file server
-                "app_name": APP_NAME  # Pass app name to template
-            })
-        except Exception as e:
-            print(f"Exception looking up file with name {decoded_file_name}: {e}")
-            raise HTTPException(status_code=404, detail="File not found or inaccessible")
+    # Video requests and opening the link in a browser tab are both served as a stream;
+    # browsers show their built-in player for media responses. (The old HTML player page
+    # referenced a template that no longer exists and always failed.)
+    request.state.is_watch = True
+    return await stream_handler(request, file_name)
 
 
 @router.get("/watch/{id}/{quality}")

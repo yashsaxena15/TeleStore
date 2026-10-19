@@ -712,6 +712,8 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
         }
         toast.info(`Switched quality to ${q === "original" ? "Auto (Original)" : q}`);
     };
+    const handleQualityChangeRef = useRef(handleQualityChange);
+    handleQualityChangeRef.current = handleQualityChange;
     // Audio track change handler
     const handleAudioTrackChange = (trackIndex) => {
         if (trackIndex === currentAudioTrack)
@@ -756,7 +758,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
             if (isBuffering && currentQuality === "original") {
                 console.log("Stall detected on original MKV stream, optimizing with 1080p transcode...");
                 toast.info("Buffering detected: optimizing video for your browser...");
-                handleQualityChange("1080p");
+                handleQualityChangeRef.current("1080p");
             }
         }, 6000);
         return () => clearTimeout(timer);

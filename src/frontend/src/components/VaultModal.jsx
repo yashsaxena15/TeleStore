@@ -31,6 +31,7 @@ export const VaultModal = ({ isOpen, onClose, onSuccess, userEmail = "" }) => {
             return;
         }
         checkStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- check status each time the modal opens
     }, [isOpen]);
     const checkStatus = async () => {
         setMode("loading");
@@ -71,6 +72,7 @@ export const VaultModal = ({ isOpen, onClose, onSuccess, userEmail = "" }) => {
         };
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- listener is re-registered whenever the PIN state it uses changes
     }, [isOpen, mode, unlockPin]);
     const triggerShake = (msg) => {
         setErrorMsg(msg);

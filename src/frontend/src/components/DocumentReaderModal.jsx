@@ -92,6 +92,7 @@ export const DocumentReaderModal = ({ url, fileName, fileExtension, onClose, }) 
     // Load document content depending on type
     useEffect(() => {
         let isMounted = true;
+        let createdUrls = [];
         setIsLoading(true);
         setError(null);
         const loadContent = async () => {
@@ -146,6 +147,7 @@ export const DocumentReaderModal = ({ url, fileName, fileExtension, onClose, }) 
                         }
                     });
                     const loaded = await Promise.all(imagePromises);
+                    createdUrls = loaded.map((img) => img.url);
                     // Natural alphanumeric sort
                     loaded.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
                     if (isMounted) {
@@ -169,9 +171,10 @@ export const DocumentReaderModal = ({ url, fileName, fileExtension, onClose, }) 
         loadContent();
         return () => {
             isMounted = false;
-            // Revoke comic image object URLs
-            comicImages.forEach((u) => URL.revokeObjectURL(u));
+            // Revoke the comic image object URLs created by this run
+            createdUrls.forEach((u) => URL.revokeObjectURL(u));
         };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the is* flags are derived from ext
     }, [url, ext]);
     const logger_error = (msg, e) => {
         console.error(msg, e);

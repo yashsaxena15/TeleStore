@@ -201,6 +201,7 @@ export default function Settings() {
             }, 500); // Auto-save after 500ms of no changes
             return () => clearTimeout(timer);
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-runs when the values it saves change
     }, [playerPreference, playerPreferenceChanged]);
     // Auto-save URL configuration when it changes
     useEffect(() => {
@@ -214,6 +215,7 @@ export default function Settings() {
                 return () => clearTimeout(timer);
             }
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-runs when the URL it saves changes
     }, [tempServerUrl, serverUrl]);
     return (<div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex-1 overflow-hidden bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 py-6 px-4 sm:px-6">

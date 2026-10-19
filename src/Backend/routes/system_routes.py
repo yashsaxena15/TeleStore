@@ -13,23 +13,19 @@ logger = setup_logger("system_routes")
 # Create router with updated prefix
 router = APIRouter(prefix="/system", tags=["System"])
 
-# Global variable for workloads (if used by other modules, otherwise just for get_workloads)
-# Note: This should ideally be managed at the application level
-work_loads = {}
-
 @router.get("/workloads")
-async def get_workloads(user: User = Depends(require_auth)):
-    try:
-        return {
-            "loads": {
-                f"bot{c + 1}": l
-                for c, (_, l) in enumerate(
-                    sorted(work_loads.items(), key=lambda x: x[1], reverse=True)
-                )
-            } if work_loads else {}
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def get_workloads(request: Request, user: User = Depends(require_auth)):
+    """Current workload of each Telegram bot in the pool (busiest first)."""
+    manager = getattr(request.app.state, "bot_manager", None)
+    loads = {}
+    for index, entry in enumerate(getattr(manager, "work_load", None) or []):
+        for client, tracked in entry.items():
+            name = getattr(client, "name", None) or f"bot{index + 1}"
+            loads[name] = client.get_workload() if hasattr(client, "get_workload") else tracked
+    return {
+        "bots_count": len(loads),
+        "loads": dict(sorted(loads.items(), key=lambda item: item[1], reverse=True)),
+    }
 
 # --- GitHub Webhook for Auto-Update ---
 @router.post("/github")
@@ -137,33 +133,3 @@ async def github_webhook(request: Request):
     else:
         logger.info(f"Unhandled GitHub event type: {event_type}")
         return {"status": "ignored", "message": f"Event type {event_type} not handled"}
-
-# Add new API route for bot information
-@router.get("/bots/info")
-async def get_bots_info(user: User = Depends(require_auth)):
-    try:
-        # Note: bot_manager should be accessed from app state in the main application
-        # This will be handled in the main web.py file
-        return {"bots": [], "logger_bot": None, "workloads": {}}
-    except Exception as e:
-        return {"bots": [], "logger_bot": None, "workloads": {}, "error": str(e)}
-
-@router.get("/bots/workloads")
-async def get_bots_workloads():
-    try:
-        # Note: bot_manager should be accessed from app state in the main application
-        # This will be handled in the main web.py file
-        return {
-            "bots_available": False, 
-            "workloads": {}, 
-            "bots_count": 0, 
-            "active_bots": 0
-        }
-    except Exception as e:
-        return {
-            "bots_available": False, 
-            "workloads": {}, 
-            "bots_count": 0, 
-            "active_bots": 0,
-            "error": str(e)
-        }

@@ -175,6 +175,7 @@ export const SettingsWidget = () => {
             }, 500); // Auto-save after 500ms of no changes
             return () => clearTimeout(timer);
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-runs when the values it saves change
     }, [playerPreference, playerPreferenceChanged]);
     // Auto-save URL configuration when it changes
     useEffect(() => {
@@ -188,6 +189,7 @@ export const SettingsWidget = () => {
                 return () => clearTimeout(timer);
             }
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-runs when the URL it saves changes
     }, [tempServerUrl, serverUrl]);
     return (<Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>

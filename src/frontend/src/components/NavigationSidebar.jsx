@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { FolderOpen, User, Settings, LogOut, Info, ArrowUpDown, X, Star, Trash2, HardDrive, Inbox, Laptop, ShieldCheck } from "lucide-react";
+import { FolderOpen, User, Settings, LogOut, ArrowUpDown, X, Star, Trash2, HardDrive, Inbox, Laptop, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { motion, AnimatePresence } from "framer-motion";
@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils";
 import logger from "@/lib/logger";
 import { api } from "@/lib/api";
 import authService from "@/lib/authService";
+// Pages that should keep the navigation sidebar open
+const pagesWithSidebarOpen = ['/profile', '/settings', '/users', '/storage'];
 export const NavigationSidebar = ({ className }) => {
     // Initialize sidebar as closed by default
     const isMobile = useIsMobile();
@@ -58,8 +60,6 @@ export const NavigationSidebar = ({ className }) => {
             window.removeEventListener("resize", handleResize);
         };
     }, []);
-    // List of pages that should keep the navigation sidebar open
-    const pagesWithSidebarOpen = ['/profile', '/settings', '/users', '/storage'];
     // Automatically open sidebar when on specific pages
     useEffect(() => {
         if (location.pathname === '/login') {
@@ -90,7 +90,6 @@ export const NavigationSidebar = ({ className }) => {
         { name: "Profile", path: "/profile", icon: User },
         { name: "Settings", path: "/settings", icon: Settings },
         { name: "Transfers", path: "/transfers", icon: ArrowUpDown },
-        { name: "Usage", path: "/usage", icon: Info },
     ];
     const ownerNavItems = [
         { name: "Users", path: "/users", icon: User },

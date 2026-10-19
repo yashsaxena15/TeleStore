@@ -3,6 +3,12 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from "@/components/ui/select";
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, } from "lucide-react";
 export const FilePagination = ({ pagination, currentPage, pageSize, onPageChange, onPageSizeChange, isLoading = false, }) => {
+    // Hooks must run on every render, before any early return
+    const [jumpPage, setJumpPage] = useState(currentPage.toString());
+    const [isEditingPage, setIsEditingPage] = useState(false);
+    useEffect(() => {
+        setJumpPage(currentPage.toString());
+    }, [currentPage]);
     if (!pagination || pagination.total_items === 0) {
         return null;
     }
@@ -13,12 +19,6 @@ export const FilePagination = ({ pagination, currentPage, pageSize, onPageChange
     const end_index = isAll ? total_items : pagination.end_index;
     const has_prev = !isAll && pagination.has_prev;
     const has_next = !isAll && pagination.has_next;
-    // Jump to page input state
-    const [jumpPage, setJumpPage] = useState(currentPage.toString());
-    const [isEditingPage, setIsEditingPage] = useState(false);
-    useEffect(() => {
-        setJumpPage(currentPage.toString());
-    }, [currentPage]);
     const handleJumpSubmit = (e) => {
         e.preventDefault();
         const p = parseInt(jumpPage, 10);
