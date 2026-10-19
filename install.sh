@@ -5,10 +5,10 @@ set -e
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_PATH="$PROJECT_DIR/.venv"
 REQUIREMENTS="$PROJECT_DIR/requirements.txt"
-MAIN_FILE="$PROJECT_DIR/__main__.py"
+RUN_CMD="-m telestore"
 SERVICE_NAME="telegram-file-server"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
-FRONTEND_DIR="$PROJECT_DIR/src/frontend"
+FRONTEND_DIR="$PROJECT_DIR/frontend"
 
 # Initialize git submodules if .git exists
 if [ -d "$PROJECT_DIR/.git" ]; then
@@ -72,7 +72,7 @@ Environment="GIT_PYTHON_GIT_EXECUTABLE=/usr/bin/git"
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment=PATH=$VENV_PATH/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-ExecStart=/usr/bin/script -q -c "$VENV_PATH/bin/python $MAIN_FILE" /dev/null
+ExecStart=/usr/bin/script -q -c "$VENV_PATH/bin/python $RUN_CMD" /dev/null
 
 Restart=on-failure
 RestartSec=10
@@ -280,5 +280,5 @@ if [ "$1" = "--service" ]; then
     sudo systemctl status "$SERVICE_NAME"
 else
     echo "Running bot directly..."
-    script -q -c "python3 $MAIN_FILE" /dev/null
+    (cd "$PROJECT_DIR" && script -q -c "python3 $RUN_CMD" /dev/null)
 fi

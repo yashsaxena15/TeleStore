@@ -3,7 +3,7 @@ Utility functions for working with the logger bot
 """
 import logging
 import asyncio
-from typing import Optional, Callable, Any, List, Dict
+from typing import Optional, Callable, Any
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup , WebAppInfo
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -79,8 +79,8 @@ class LoggerBotUtil:
             logger.error(f"Failed to send status command response: {e}")
             try:
                 await update.message.reply_text("❌ Error retrieving status information")
-            except:
-                pass
+            except Exception as err:
+                logger.error(f"Failed to send error reply: {err}")
 
     @classmethod
     async def _echo_command(cls, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -228,7 +228,8 @@ class LoggerBotUtil:
                 reply_markup=reply_markup
             )
             return True
-        except:
+        except Exception as e:
+            logger.debug(f"Failed to edit message text: {e}")
             return False
     
     @classmethod

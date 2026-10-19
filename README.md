@@ -268,7 +268,7 @@ pip install -r requirements.txt
 
 ### 2. Frontend Setup
 ```bash
-cd src/frontend
+cd frontend
 npm install
 npm run build
 cd ../..
@@ -276,7 +276,7 @@ cd ../..
 
 ### 3. Start the Application
 ```bash
-python __main__.py
+python -m telestore
 ```
 
 ---

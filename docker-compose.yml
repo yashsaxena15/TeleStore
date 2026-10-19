@@ -12,14 +12,7 @@ services:
     ports:
       - "127.0.0.1:9000:8000"
     volumes:
-      - ./src/frontend/dist:/app/src/frontend/dist
-      - ./src/Backend:/app/src/Backend
-      - ./src/Database:/app/src/Database
-      - ./src/Config:/app/src/Config
-      - ./src/Telegram:/app/src/Telegram
-      - ./d4rk:/app/d4rk
       - ./cache:/app/cache
-      - ./.env:/app/.env
     depends_on:
       - mongo
 

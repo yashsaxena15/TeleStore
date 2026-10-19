@@ -1,0 +1,10 @@
+# Development compose override file
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+services:
+  app:
+    volumes:
+      - ./frontend/dist:/app/frontend/dist
+      - ./telestore:/app/telestore
+      - ./d4rk:/app/d4rk
+      - ./cache:/app/cache

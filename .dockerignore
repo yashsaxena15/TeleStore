@@ -1,0 +1,16 @@
+# Keep secrets, runtime data and build artefacts out of the Docker image
+.git
+.env
+.env.*
+!.env.example
+*.session
+*.session-journal
+*.log
+cache/
+logs/
+**/node_modules
+**/dist
+**/__pycache__
+conversation-sharing/
+tree.txt
+temp_archives/

@@ -6,9 +6,7 @@ After=network.target
 Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/tele_worker
-Environment="MASTER_URL=https://your-domain.com"
-Environment="WORKER_KEY=your_worker_secret_key"
-Environment="WORKER_ID=vm2-worker"
+EnvironmentFile=/etc/tele_worker.env
 ExecStart=/home/ubuntu/tele_worker/venv/bin/python3 /home/ubuntu/tele_worker/worker.py
 Restart=always
 RestartSec=5

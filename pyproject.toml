@@ -1,0 +1,45 @@
+[project]
+name = "telestore"
+version = "0.1.0"
+description = "Telegram-backed cloud storage server"
+requires-python = ">=3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "cache",
+    "conversation-sharing",
+    "frontend",
+]
+
+[tool.ruff.lint]
+select = [
+    "E9",    # Syntax / fatal runtime errors
+    "F821",  # Undefined names
+    "F811",  # Redefinition of unused name
+    "B006",  # Mutable data structures for argument defaults
+    "E722",  # Bare `except:` clauses
+    "F401",  # Unused imports
+    "F841",  # Unused variables
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+# TODO: Part 5/6 — Security rules (flake8-bandit "S")
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+pythonpath = ["."]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]

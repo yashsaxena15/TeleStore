@@ -43,6 +43,8 @@ cd TelegramFileServer/worker
 sudo bash setup_worker.sh "https://your-master-domain.com" "your_secure_random_key_here" "vm2-mumbai"
 ```
 
+The installer saves configuration to `/etc/tele_worker.env` (with `600` permissions) and loads it into systemd via `EnvironmentFile=/etc/tele_worker.env` so credentials are never visible in `ps aux` or process listings.
+
 ### Step 3: Verify Connection
 You can check the worker status on the worker VPS:
 ```bash

@@ -47,6 +47,14 @@ sudo -u "$TARGET_USER" "$TARGET_DIR/venv/bin/pip" install --upgrade pip -q
 sudo -u "$TARGET_USER" "$TARGET_DIR/venv/bin/pip" install -r "$TARGET_DIR/requirements.txt" -q
 
 echo "[4/4] Creating systemd service..."
+cat <<EOF | sudo tee /etc/tele_worker.env > /dev/null
+MASTER_URL=$MASTER_URL
+WORKER_KEY=$WORKER_KEY
+WORKER_ID=$WORKER_ID
+WORK_DIR=$TARGET_DIR/cache
+EOF
+sudo chmod 600 /etc/tele_worker.env
+
 cat <<EOF | sudo tee /etc/systemd/system/tele_worker.service > /dev/null
 [Unit]
 Description=TelegramFileServer Distributed Leech Worker ($WORKER_ID)
@@ -56,10 +64,7 @@ After=network.target
 Type=simple
 User=$TARGET_USER
 WorkingDirectory=$TARGET_DIR
-Environment="MASTER_URL=$MASTER_URL"
-Environment="WORKER_KEY=$WORKER_KEY"
-Environment="WORKER_ID=$WORKER_ID"
-Environment="WORK_DIR=$TARGET_DIR/cache"
+EnvironmentFile=/etc/tele_worker.env
 ExecStart=$TARGET_DIR/venv/bin/python3 $TARGET_DIR/worker.py
 Restart=always
 RestartSec=5

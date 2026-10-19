@@ -22,3 +22,11 @@ temp_archives/
 **/temp_archives/
 cache/
 **/cache/
+
+# Secrets, sessions and local artefacts
+*.session
+*.session-journal
+*.log
+.env.bak*
+tree.txt
+*.swp

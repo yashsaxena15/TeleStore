@@ -6,6 +6,8 @@ from pyrogram.types import CallbackQuery  ,ChatMemberUpdated
 
 from typing import Union
 from functools import wraps
+from d4rk.Logs import setup_logger
+logger = setup_logger(__name__)
 
 command_registry = []
 last_index_per_chat = {}
@@ -46,7 +48,8 @@ def retry():
                 except FloodWait as e:
                     await asyncio.sleep(e.value)
                     try:return await func(*args, **kwargs)
-                    except:pass
+                    except Exception as err:
+                        logger.debug(f"Retry runner failed: {err}")
             task = asyncio.create_task(runner())
             return await task
         return wrapper

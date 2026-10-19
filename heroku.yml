@@ -3,4 +3,4 @@ build:
     web: Dockerfile
 
 run:
-  web: python __main__.py
+  web: python -m telestore
