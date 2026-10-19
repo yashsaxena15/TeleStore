@@ -31,7 +31,7 @@ export default [
       "no-unused-vars": "off",
       "no-empty": "off",
       "no-control-regex": "off",
-      "no-undef": "off",
+      "no-undef": "error",
       "react-hooks/rules-of-hooks": "warn",
       "react-hooks/exhaustive-deps": "warn",
     },
