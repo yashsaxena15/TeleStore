@@ -20,11 +20,7 @@
 .no-scrollbar { scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 
-/* Height of the phone bottom navigation; floating widgets sit above it */
-:root { --app-bottom-inset: 0px; }
-@media (max-width: 767px) {
-  :root { --app-bottom-inset: calc(60px + env(safe-area-inset-bottom, 0px)); }
-}
+
 
 /* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
 All colors MUST be HSL.

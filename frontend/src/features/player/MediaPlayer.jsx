@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { Play, Pause, RotateCcw, RotateCw, Volume2, Volume1, VolumeX, Settings, Maximize, Minimize, PictureInPicture2, Captions, Check, Download, X, ArrowLeft, Info, FileAudio, ChevronRight, Search, SlidersHorizontal, FileText, List, ExternalLink, Upload, Minimize2, Maximize2, } from "lucide-react";
+import { Play, Pause, RotateCcw, RotateCw, Volume2, Volume1, VolumeX, Settings, Maximize, Minimize, PictureInPicture2, Captions, Check, Download, X, ArrowLeft, Info, ExternalLink, Upload, Minimize2, Maximize2 } from "lucide-react";
+import { createPortal } from "react-dom";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useDockPresence } from "@/components/layout/dock/useDock";
 import { downloadManager } from "@/features/transfers/downloadManager";
 import { toast } from "sonner";
 import { getApiBaseUrl, fetchWithTimeout } from "@/lib/api";
@@ -74,6 +76,9 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
     const [canPiP, setCanPiP] = useState(false);
     const [hasPlaybackError, setHasPlaybackError] = useState(false);
     const [isMini, setIsMini] = useState(false);
+    // Minimized playback lives in the dock; remember position when switching theater <-> dock
+    const dock = useDockPresence("video", isMini);
+    const modeSwitchRef = useRef(null);
     // UI visibility states
     const [areControlsVisible, setAreControlsVisible] = useState(true);
     const [isScrubbing, setIsScrubbing] = useState(false);
@@ -115,7 +120,6 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
     }, [videoDimensions]);
     // Active overlays / submenus: 'none' | 'settings' | 'speed' | 'quality' | 'audio' | 'subtitles' | 'chapters' | 'transcript' | 'info'
     const [activeMenu, setActiveMenu] = useState("none");
-    const [transcriptSearch, setTranscriptSearch] = useState("");
     // Visual feedback states
     const [rippleFeedback, setRippleFeedback] = useState(null);
     const [centralPulse, setCentralPulse] = useState(null);
@@ -274,6 +278,27 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
         }, 600);
         showControls(4500);
     }, [currentTime, seekTo, showControls]);
+    // Theater and dock use separate <video> elements: carry over position and play state
+    const switchPlayerMode = useCallback((mini) => {
+        modeSwitchRef.current = { time: currentTime, play: isPlaying };
+        setIsMini(mini);
+    }, [currentTime, isPlaying]);
+    const resumeAfterModeSwitch = () => {
+        const pending = modeSwitchRef.current;
+        if (!pending)
+            return;
+        modeSwitchRef.current = null;
+        if (pending.time > 1)
+            seekTo(pending.time);
+        if (pending.play)
+            mediaElementRef.current?.play().catch(() => { });
+    };
+    // Starting audio pauses the video (one thing plays at a time)
+    useEffect(() => {
+        const pause = () => mediaElementRef.current?.pause();
+        window.addEventListener("telestore:pause-video", pause);
+        return () => window.removeEventListener("telestore:pause-video", pause);
+    }, []);
     const handleVolumeChange = useCallback((newVol) => {
         const el = mediaElementRef.current;
         const clamped = Math.min(1, Math.max(0, newVol));
@@ -410,6 +435,9 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
     // Keyboard Shortcuts (Desktop)
     useEffect(() => {
         const handleKeyDown = (e) => {
+            // Player shortcuts belong to theater mode; while docked, the page owns the keyboard
+            if (isMini)
+                return;
             const active = document.activeElement;
             if (active &&
                 (active.tagName === "INPUT" ||
@@ -488,6 +516,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
     }, [
+        isMini,
         togglePlay,
         seekRelative,
         handleVolumeChange,
@@ -804,119 +833,46 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
         return Math.min(100, Math.max(0, (bufferedEnd / duration) * 100));
     }, [bufferedEnd, duration]);
     const fileExt = useMemo(() => getFileExtension(fileName), [fileName]);
-    // If file is Audio or Voice, render Google Drive dark glassmorphic audio widget in center dock
-    if (isAudio) {
-        return (<div className="fixed bottom-[calc(1rem+var(--app-bottom-inset))] left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-2rem)] sm:w-[420px] max-w-[calc(100vw-2rem)] backdrop-blur-xl bg-card/95 text-card-foreground border border-border rounded-2xl shadow-2xl p-4 transition-all duration-300 select-none animate-in fade-in slide-in-from-bottom-4">
-        <audio ref={mediaElementRef} src={mediaUrl} preload="auto" autoPlay onTimeUpdate={handleTimeUpdate} onProgress={handleProgress} onLoadedMetadata={handleLoadedMetadata} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onWaiting={() => setIsBuffering(true)} onPlaying={() => setIsBuffering(false)} onCanPlay={() => setIsBuffering(false)} onError={() => setIsBuffering(false)}/>
-
-        {/* Top bar with Title & Badge */}
-        <div className="flex items-center justify-between pb-3 border-b border-border">
-          <div className="flex items-center space-x-2.5 min-w-0 pr-2">
-            <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center flex-shrink-0 border border-primary/20">
-              <FileAudio className="w-4 h-4"/>
-            </div>
-            <div className="min-w-0">
-              <div className="text-sm font-medium truncate text-foreground">{fileName}</div>
-              <div className="flex items-center space-x-2 text-[11px] text-muted-foreground">
-                <span className="font-mono uppercase text-primary font-semibold">{fileExt}</span>
-                <span>•</span>
-                <span>{fileType === "voice" ? "Voice Message" : "Audio Track"}</span>
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center space-x-1 flex-shrink-0">
-            <button onClick={handleDownloadAction} className="p-1.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Download audio" aria-label="Download audio">
-              <Download className="w-4 h-4"/>
-            </button>
-            <button onClick={onClose} className="p-1.5 rounded-full hover:bg-muted text-muted-foreground hover:text-destructive transition-colors" title="Close player" aria-label="Close player">
-              <X className="w-4 h-4"/>
-            </button>
-          </div>
-        </div>
-
-        {/* Timeline */}
-        <div className="pt-3 pb-1">
-          <div ref={timelineRef} onPointerDown={handleTimelinePointerDown} onPointerMove={handleTimelinePointerMove} onPointerUp={handleTimelinePointerUp} onPointerLeave={handleTimelinePointerLeave} className="group relative h-4 flex items-center cursor-pointer touch-none">
-            <div className="w-full h-1.5 bg-secondary rounded-full relative overflow-hidden group-hover:h-2 transition-all">
-              <div className="absolute left-0 top-0 h-full bg-muted-foreground/30 rounded-full transition-all duration-150" style={{ width: `${bufferedPercent}%` }}/>
-              <div className="absolute left-0 top-0 h-full bg-primary rounded-full transition-all duration-100" style={{ width: `${playedPercent}%` }}/>
-            </div>
-            {/* Scrubber thumb */}
-            <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 bg-primary rounded-full shadow-md scale-0 group-hover:scale-100 transition-transform pointer-events-none" style={{ left: `${playedPercent}%` }}/>
-          </div>
-
-          <div className="flex items-center justify-between text-xs text-muted-foreground font-mono pt-1">
-            <span>{formatTime(currentTime)}</span>
-            <span>{formatTime(duration)}</span>
-          </div>
-        </div>
-
-        {/* Audio Controls */}
-        <div className="flex items-center justify-between pt-1">
-          <div className="flex items-center space-x-1">
-            <button onClick={() => seekRelative(-10)} className="p-2 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors relative" title="Rewind 10 seconds" aria-label="Rewind 10 seconds">
-              <RotateCcw className="w-4 h-4"/>
-              <span className="absolute text-[8px] font-bold top-2 left-2">10</span>
-            </button>
-            <button onClick={togglePlay} className="p-2.5 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg transition-transform active:scale-95" title={isPlaying ? "Pause" : "Play"} aria-label={isPlaying ? "Pause" : "Play"}>
-              {isPlaying ? <Pause className="w-5 h-5 fill-current"/> : <Play className="w-5 h-5 fill-current ml-0.5"/>}
-            </button>
-            <button onClick={() => seekRelative(10)} className="p-2 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors relative" title="Forward 10 seconds" aria-label="Forward 10 seconds">
-              <RotateCw className="w-4 h-4"/>
-              <span className="absolute text-[8px] font-bold top-2 left-2">10</span>
-            </button>
-          </div>
-
-          {/* Volume & Speed */}
-          <div className="flex items-center space-x-2">
-            <button onClick={() => {
-                const nextRates = [1, 1.25, 1.5, 2, 0.75];
-                const next = nextRates[(nextRates.indexOf(playbackRate) + 1) % nextRates.length];
-                handlePlaybackRateChange(next);
-            }} className="px-2 py-1 text-xs font-mono rounded-md hover:bg-muted text-muted-foreground hover:text-foreground border border-border transition-colors" title="Playback speed">
-              {playbackRate}x
-            </button>
-            <div className="flex items-center space-x-1 group">
-              <button onClick={toggleMute} className="p-1.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title={isMuted ? "Unmute" : "Mute"} aria-label={isMuted ? "Unmute" : "Mute"}>
-                {isMuted || volume === 0 ? (<VolumeX className="w-4 h-4 text-destructive"/>) : volume < 0.5 ? (<Volume1 className="w-4 h-4"/>) : (<Volume2 className="w-4 h-4"/>)}
-              </button>
-              <input type="range" min="0" max="1" step="0.05" value={isMuted ? 0 : volume} onChange={(e) => handleVolumeChange(parseFloat(e.target.value))} className="w-16 h-1 accent-primary bg-muted rounded-full cursor-pointer" aria-label="Volume slider"/>
-            </div>
-          </div>
-        </div>
-      </div>);
-    }
-    // Mini video player mode docked at bottom center
+    // Docked (minimized) video: compact controls rendered into the app dock
     if (isMini) {
-        return (<div ref={containerRef} className="fixed bottom-[calc(1rem+var(--app-bottom-inset))] left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-2rem)] sm:w-96 aspect-video bg-black/95 rounded-2xl shadow-2xl border border-border overflow-hidden select-none animate-in fade-in slide-in-from-bottom-4 flex flex-col justify-between group">
-          <video ref={mediaElementRef} src={activeStreamUrl} preload="auto" playsInline crossOrigin="anonymous" className="w-full h-full object-contain pointer-events-none" onTimeUpdate={handleTimeUpdate} onProgress={handleProgress} onLoadedMetadata={handleLoadedMetadata} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onWaiting={() => setIsBuffering(true)} onPlaying={() => {
+        const docked = (<div className="flex items-center gap-2.5 w-full min-w-0">
+          <button onClick={() => switchPlayerMode(false)} className="group relative w-[84px] h-[47px] rounded-md overflow-hidden bg-black shrink-0 border border-border" title="Open in theater mode" aria-label="Open video in theater mode">
+            <video ref={mediaElementRef} src={activeStreamUrl} preload="auto" playsInline crossOrigin="anonymous" className="w-full h-full object-cover pointer-events-none" onTimeUpdate={handleTimeUpdate} onProgress={handleProgress} onLoadedMetadata={handleLoadedMetadata} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onEnded={() => setIsPlaying(false)} onWaiting={() => setIsBuffering(true)} onPlaying={() => {
                 setIsBuffering(false);
                 setHasPlaybackError(false);
             }} onCanPlay={() => {
                 setIsBuffering(false);
                 setHasPlaybackError(false);
+                resumeAfterModeSwitch();
             }}/>
-          {/* Mini overlay controls on hover / touch */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-black/70 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity p-2.5 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-white truncate max-w-[200px] drop-shadow-sm">{fileName}</span>
-              <div className="flex items-center gap-1">
-                <button onClick={() => setIsMini(false)} className="p-1 rounded-md hover:bg-white/20 text-white transition-colors" aria-label="Expand to theater mode" title="Expand to theater mode">
-                  <Maximize2 className="w-4 h-4"/>
-                </button>
-                <button onClick={onClose} className="p-1 rounded-md hover:bg-white/20 text-white hover:text-red-400 transition-colors" aria-label="Close video" title="Close video">
-                  <X className="w-4 h-4"/>
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <button onClick={togglePlay} className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition-transform active:scale-95" aria-label={isPlaying ? "Pause video" : "Play video"}>
-                {isPlaying ? <Pause className="w-4 h-4 fill-current"/> : <Play className="w-4 h-4 fill-current ml-0.5"/>}
-              </button>
-              <span className="text-[10px] font-mono text-white/90">{formatTime(currentTime)} / {formatTime(duration)}</span>
-            </div>
+            <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity">
+              <Maximize2 className="w-4 h-4 text-white"/>
+            </span>
+          </button>
+          <div className="min-w-0 flex-1 md:flex-none md:w-44 lg:w-60">
+            <div className="text-[13px] font-medium truncate" title={fileName}>{fileName}</div>
+            <div className="text-[11px] text-muted-foreground font-mono">{isBuffering ? "Buffering…" : `${formatTime(currentTime)} / ${formatTime(duration)}`}</div>
           </div>
+          <div className="flex items-center gap-0.5 shrink-0">
+            <button onClick={() => seekTo(currentTime - 10)} className="hidden sm:flex w-8 h-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted" title="Back 10 seconds" aria-label="Back 10 seconds">
+              <RotateCcw className="w-4 h-4"/>
+            </button>
+            <button onClick={togglePlay} className="w-9 h-9 rounded-full bg-foreground text-background flex items-center justify-center hover:scale-105 active:scale-95 transition-transform" aria-label={isPlaying ? "Pause video" : "Play video"}>
+              {isPlaying ? <Pause className="w-4 h-4 fill-current"/> : <Play className="w-4 h-4 fill-current ml-0.5"/>}
+            </button>
+            <button onClick={() => seekTo(currentTime + 10)} className="hidden sm:flex w-8 h-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted" title="Forward 10 seconds" aria-label="Forward 10 seconds">
+              <RotateCw className="w-4 h-4"/>
+            </button>
+          </div>
+          <input type="range" min={0} max={duration || 0} step={1} value={Math.min(currentTime, duration || 0)} onChange={(e) => seekTo(Number(e.target.value))} className="hidden md:block flex-1 min-w-0 h-1 accent-primary cursor-pointer" aria-label="Seek video"/>
+          <button onClick={() => switchPlayerMode(false)} className="hidden md:flex w-8 h-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted shrink-0" title="Theater mode" aria-label="Open video in theater mode">
+            <Maximize2 className="w-4 h-4"/>
+          </button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0" title="Close video" aria-label="Close video">
+            <X className="w-4 h-4"/>
+          </button>
         </div>);
+        return dock?.mediaSlot ? createPortal(docked, dock.mediaSlot) : null;
     }
     // =========================================================================
     // Google Drive Style Video Player
@@ -938,6 +894,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
         }} onCanPlay={() => {
             setIsBuffering(false);
             setHasPlaybackError(false);
+            resumeAfterModeSwitch();
             if (pendingSeekRef.current !== null && mediaElementRef.current) {
                 const target = pendingSeekRef.current;
                 pendingSeekRef.current = null;
@@ -1058,13 +1015,10 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
             <Info className="w-5 h-5"/>
           </button>
           <button onClick={() => {
-            setIsMini(true);
+            switchPlayerMode(true);
             showControls(3000);
         }} className="p-2 rounded-full hover:bg-white/10 text-white/90 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[40px] min-h-[40px] flex items-center justify-center" title="Minimize to dock" aria-label="Minimize to dock">
             <Minimize2 className="w-5 h-5"/>
-          </button>
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10 text-white/90 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[40px] min-h-[40px] flex items-center justify-center" title="Close viewer" aria-label="Close viewer">
-            <X className="w-5 h-5 sm:w-6 sm:h-6"/>
           </button>
         </div>
       </div>
@@ -1183,6 +1137,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
       {/* ================================================================= */}
       {/* Settings Popover (Desktop) & Bottom Sheet (Mobile)                */}
       {/* ================================================================= */}
+      <input ref={customSubtitleInputRef} type="file" accept=".srt,.vtt" className="hidden" onChange={handleCustomSubtitleUpload}/>
       {activeMenu !== "none" && activeMenu !== "info" && (<>
           {/* Backdrop on mobile */}
           <div onClick={(e) => {
@@ -1191,84 +1146,56 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
                 showControls(4500);
             }} className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 sm:hidden"/>
 
-          <div onClick={(e) => e.stopPropagation()} className="z-50 text-white bg-zinc-900/98 backdrop-blur-xl border border-white/10 shadow-2xl transition-all duration-200 fixed inset-x-0 bottom-0 rounded-t-2xl max-h-[85vh] p-4 sm:absolute sm:inset-auto sm:bottom-20 sm:right-6 sm:w-72 sm:rounded-2xl sm:p-2.5 sm:max-h-[60vh] overflow-y-auto animate-in slide-in-from-bottom duration-200 sm:animate-in sm:fade-in sm:zoom-in-95">
+          <div onClick={(e) => e.stopPropagation()} className="z-50 text-white bg-zinc-900/95 backdrop-blur-xl border border-white/10 shadow-2xl transition-all duration-200 fixed inset-x-0 bottom-0 rounded-t-2xl max-h-[85vh] p-4 sm:absolute sm:inset-auto sm:bottom-20 sm:right-6 sm:w-72 sm:rounded-2xl sm:p-2.5 sm:max-h-[60vh] overflow-y-auto animate-in slide-in-from-bottom duration-200 sm:animate-in sm:fade-in sm:zoom-in-95">
             {/* Main Menu View */}
-            {activeMenu === "settings" && (<div className="space-y-1">
-                <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-white/40 border-b border-white/10 flex items-center justify-between">
-                  <span>Player Settings</span>
+            {activeMenu === "settings" && (<div className="space-y-4">
+                <div className="flex items-center justify-between px-1 pb-2 border-b border-white/10">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-white/50">Player settings</span>
                   <button onClick={() => {
                     setActiveMenu("none");
                     showControls(4500);
-                }} className="p-1 rounded-full hover:bg-white/10 text-white/60 hover:text-white">
+                }} className="p-1 rounded-full hover:bg-white/10 text-white/60 hover:text-white" aria-label="Close settings">
                     <X className="w-4 h-4"/>
                   </button>
                 </div>
-
-                <button onClick={() => setActiveMenu("speed")} className="w-full flex items-center justify-between px-3 py-3 sm:py-2.5 rounded-xl hover:bg-white/10 text-sm transition-colors touch-manipulation">
-                  <span className="flex items-center space-x-2.5">
-                    <SlidersHorizontal className="w-4 h-4 text-white/70"/>
-                    <span>Playback speed</span>
-                  </span>
-                  <div className="flex items-center space-x-1.5 text-white/60 text-xs">
-                    <span>{playbackRate === 1 ? "Normal" : `${playbackRate}x`}</span>
-                    <ChevronRight className="w-4 h-4"/>
+                <section className="px-1" aria-label="Playback speed">
+                  <h4 className="text-[11px] font-semibold uppercase tracking-wider text-white/45 mb-2">Speed</h4>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PLAYBACK_RATES.map((rate) => (<button key={rate} onClick={() => handlePlaybackRateChange(rate)} aria-pressed={playbackRate === rate} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${playbackRate === rate ? "bg-white text-black border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>
+                        {rate === 1 ? "1×" : `${rate}×`}
+                      </button>))}
                   </div>
-                </button>
-
-                <button onClick={() => setActiveMenu("quality")} className="w-full flex items-center justify-between px-3 py-3 sm:py-2.5 rounded-xl hover:bg-white/10 text-sm transition-colors touch-manipulation">
-                  <span className="flex items-center space-x-2.5">
-                    <Settings className="w-4 h-4 text-white/70"/>
-                    <span>Quality</span>
-                  </span>
-                  <div className="flex items-center space-x-1.5 text-white/60 text-xs">
-                    <span>{currentQuality === "original" ? "Auto (Original)" : currentQuality}</span>
-                    <ChevronRight className="w-4 h-4"/>
+                </section>
+                <section className="px-1" aria-label="Quality">
+                  <h4 className="text-[11px] font-semibold uppercase tracking-wider text-white/45 mb-2">Quality</h4>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button onClick={() => handleQualityChange("original")} aria-pressed={currentQuality === "original"} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${currentQuality === "original" ? "bg-white text-black border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>Original</button>
+                    {availableQualities.map((q) => (<button key={q.id} onClick={() => handleQualityChange(q.id)} aria-pressed={currentQuality === q.id} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${currentQuality === q.id ? "bg-white text-black border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>
+                        {q.id}
+                      </button>))}
                   </div>
-                </button>
-
-                <button onClick={() => setActiveMenu("audio")} className="w-full flex items-center justify-between px-3 py-3 sm:py-2.5 rounded-xl hover:bg-white/10 text-sm transition-colors touch-manipulation">
-                  <span className="flex items-center space-x-2.5">
-                    <FileAudio className="w-4 h-4 text-white/70"/>
-                    <span>Audio Track</span>
-                  </span>
-                  <div className="flex items-center space-x-1.5 text-white/60 text-xs">
-                    <span>{audioTracks[currentAudioTrack]?.title || "Default Audio"}</span>
-                    <ChevronRight className="w-4 h-4"/>
+                  <p className="text-[11px] text-white/45 mt-1.5">Original streams the file directly; lower qualities use less data.</p>
+                </section>
+                {audioTracks.length > 1 && (<section className="px-1" aria-label="Audio track">
+                    <h4 className="text-[11px] font-semibold uppercase tracking-wider text-white/45 mb-2">Audio track</h4>
+                    <div className="flex flex-wrap gap-1.5">
+                      {audioTracks.map((track) => (<button key={track.index} onClick={() => handleAudioTrackChange(track.index)} aria-pressed={currentAudioTrack === track.index} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${currentAudioTrack === track.index ? "bg-white text-black border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>
+                          {track.title || `Track ${track.index + 1}`}
+                        </button>))}
+                    </div>
+                  </section>)}
+                <section className="px-1" aria-label="Subtitles">
+                  <h4 className="text-[11px] font-semibold uppercase tracking-wider text-white/45 mb-2">Subtitles</h4>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button onClick={() => setCurrentSubtitle("off")} aria-pressed={currentSubtitle === "off"} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${currentSubtitle === "off" ? "bg-white text-black border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>Off</button>
+                    {subtitlesList.map((sub) => (<button key={sub.id} onClick={() => setCurrentSubtitle(sub.id)} aria-pressed={currentSubtitle === sub.id} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${currentSubtitle === sub.id ? "bg-white text-black border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>
+                        {sub.label}
+                      </button>))}
+                    <button type="button" onClick={() => customSubtitleInputRef.current?.click()} className="h-8 px-2.5 rounded-md text-xs border border-dashed border-white/25 text-white/80 hover:bg-white/10 flex items-center gap-1.5">
+                      <Upload className="w-3.5 h-3.5"/>.srt / .vtt
+                    </button>
                   </div>
-                </button>
-
-                <button onClick={() => setActiveMenu("subtitles")} className="w-full flex items-center justify-between px-3 py-3 sm:py-2.5 rounded-xl hover:bg-white/10 text-sm transition-colors touch-manipulation">
-                  <span className="flex items-center space-x-2.5">
-                    <Captions className="w-4 h-4 text-white/70"/>
-                    <span>Subtitles / CC</span>
-                  </span>
-                  <div className="flex items-center space-x-1.5 text-white/60 text-xs">
-                    <span>{currentSubtitle === "off" ? "Off" : (subtitlesList.find(s => s.id === currentSubtitle)?.label || "Active")}</span>
-                    <ChevronRight className="w-4 h-4"/>
-                  </div>
-                </button>
-
-                <button onClick={() => setActiveMenu("chapters")} className="w-full flex items-center justify-between px-3 py-3 sm:py-2.5 rounded-xl hover:bg-white/10 text-sm transition-colors touch-manipulation">
-                  <span className="flex items-center space-x-2.5">
-                    <List className="w-4 h-4 text-white/70"/>
-                    <span>Chapters</span>
-                  </span>
-                  <div className="flex items-center space-x-1.5 text-white/60 text-xs">
-                    <span>None</span>
-                    <ChevronRight className="w-4 h-4"/>
-                  </div>
-                </button>
-
-                <button onClick={() => setActiveMenu("transcript")} className="w-full flex items-center justify-between px-3 py-3 sm:py-2.5 rounded-xl hover:bg-white/10 text-sm transition-colors touch-manipulation">
-                  <span className="flex items-center space-x-2.5">
-                    <FileText className="w-4 h-4 text-white/70"/>
-                    <span>Transcript</span>
-                  </span>
-                  <div className="flex items-center space-x-1.5 text-white/60 text-xs">
-                    <span>View</span>
-                    <ChevronRight className="w-4 h-4"/>
-                  </div>
-                </button>
+                </section>
               </div>)}
 
             {/* Playback Speed Submenu */}
@@ -1379,7 +1306,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
 
                   {/* Custom Subtitle Upload Button */}
                   <div className="pt-2 border-t border-white/10 mt-2">
-                    <input ref={customSubtitleInputRef} type="file" accept=".srt,.vtt" className="hidden" onChange={handleCustomSubtitleUpload}/>
+                    
                     <button type="button" onClick={() => customSubtitleInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-medium text-white transition-colors">
                       <Upload className="w-3.5 h-3.5"/>
                       <span>Upload Subtitle (.srt / .vtt)</span>
@@ -1388,42 +1315,6 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
                 </div>
               </div>)}
 
-            {/* Chapters Submenu */}
-            {activeMenu === "chapters" && (<div className="space-y-2">
-                <div className="flex items-center space-x-2 px-2 py-2 border-b border-white/10 text-sm font-medium">
-                  <button onClick={() => setActiveMenu("settings")} className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white" aria-label="Back to settings menu">
-                    <ArrowLeft className="w-4 h-4"/>
-                  </button>
-                  <span>Chapters</span>
-                </div>
-                <div className="px-3 py-6 text-center text-white/50 text-xs">
-                  <List className="w-8 h-8 mx-auto mb-2 text-white/30"/>
-                  <p>No chapter markers found in this video stream.</p>
-                </div>
-              </div>)}
-
-            {/* Transcript Submenu */}
-            {activeMenu === "transcript" && (<div className="space-y-2">
-                <div className="flex items-center space-x-2 px-2 py-2 border-b border-white/10 text-sm font-medium">
-                  <button onClick={() => setActiveMenu("settings")} className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white" aria-label="Back to settings menu">
-                    <ArrowLeft className="w-4 h-4"/>
-                  </button>
-                  <span>Transcript</span>
-                </div>
-                <div className="px-2 pt-1">
-                  <div className="relative mb-3">
-                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-white/40"/>
-                    <input type="text" placeholder="Search transcript..." value={transcriptSearch} onChange={(e) => setTranscriptSearch(e.target.value)} aria-label="Search transcript" className="w-full pl-8 pr-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs text-white placeholder-white/40 focus:outline-none focus:ring-1 focus:ring-blue-500"/>
-                  </div>
-                  <div className="p-4 text-center text-white/50 text-xs bg-white/5 rounded-xl border border-white/10">
-                    <FileText className="w-8 h-8 mx-auto mb-2 text-white/30"/>
-                    <p className="font-medium text-white/70 mb-1">Transcript unavailable</p>
-                    <p className="text-[11px] text-white/40 leading-relaxed">
-                      Speech-to-text transcript generation requires backend Whisper/AI integration.
-                    </p>
-                  </div>
-                </div>
-              </div>)}
           </div>
         </>)}
 

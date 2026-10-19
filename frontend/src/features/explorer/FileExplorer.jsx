@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { copyStreamUrl } from "@/lib/utils";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { MobileNav } from "@/components/layout/MobileNav";
+import { Dock } from "@/components/layout/dock/Dock";
 import { CommandPalette } from "@/components/layout/CommandPalette";
 import { ErrorBoundary } from "@/components/feedback/ErrorBoundary";
 import { ConnectCloudModal } from "@/features/cloud/ConnectCloudModal";
@@ -1609,6 +1610,9 @@ export const FileExplorer = () => {
 
           </div>)}
       </div>
+      </ErrorBoundary>
+      <ErrorBoundary name="Dock" fallback="silent">
+        <Dock />
       </ErrorBoundary>
       <MobileNav selectedFilter={selectedFilter} activeView={activeView} onNavigateView={handleNavigateView} onAction={runShellAction}/>
       </div>

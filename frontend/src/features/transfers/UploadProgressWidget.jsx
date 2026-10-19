@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
+import { useDockPresence } from "@/components/layout/dock/useDock";
 const formatBytes = (bytes) => {
     if (!bytes || bytes <= 0)
         return '0 B';
@@ -9,6 +11,7 @@ const formatBytes = (bytes) => {
 };
 export const UploadProgressWidget = ({ files, currentPath, isDirectoryUpload = false, uploadProgress, onComplete, onCancel }) => {
     const [isVisible, setIsVisible] = useState(false);
+    const dock = useDockPresence("upload", true);
     const completionTimer = useRef(null);
     const closeTimer = useRef(null);
     const [hasCompleted, setHasCompleted] = useState(false);
@@ -68,7 +71,7 @@ export const UploadProgressWidget = ({ files, currentPath, isDirectoryUpload = f
                 clearTimeout(closeTimer.current);
         };
     }, [items, hasCompleted, onComplete]);
-    return (<div role="region" aria-label="Upload progress monitor" aria-live="polite" className={`fixed bottom-[calc(5rem+var(--app-bottom-inset))] left-3 right-3 sm:left-auto sm:right-4 z-40 sm:w-96 bg-card text-card-foreground border border-border rounded-xl shadow-2xl transition-all duration-300 ease-in-out ${isVisible ? 'transform translate-y-0 opacity-100' : 'transform translate-y-full opacity-0'}`}>
+    const panel = (<div role="region" aria-label="Upload progress monitor" aria-live="polite" className={`w-full md:max-w-md md:ml-auto bg-card text-card-foreground border border-border rounded-xl shadow-lg overflow-hidden transition-all duration-300 ${isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"}`}>
       <div className="p-4">
         <div className="flex justify-between items-center mb-2">
           <h3 className="font-semibold text-sm truncate text-foreground">
@@ -129,4 +132,6 @@ export const UploadProgressWidget = ({ files, currentPath, isDirectoryUpload = f
         </div>
       </div>
     </div>);
+    // Shown in the dock's panel area, above the dock bar (never floating over the page)
+    return dock?.panelSlot ? createPortal(panel, dock.panelSlot) : null;
 };
