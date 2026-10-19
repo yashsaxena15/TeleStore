@@ -23,6 +23,9 @@ class CancelRemoteGroupModel(BaseModel):
 class ResumeRemoteGroupModel(BaseModel):
     group_id: str
 
+class RetryRemoteTransferModel(BaseModel):
+    task_id: str
+
 @router.post("/add")
 async def add_remote_transfer(
     request: Request,
@@ -154,6 +157,18 @@ async def resume_remote_group(
     user_id = str(user.telegram_user_id or user.username)
     resumed_count = remote_transfer_manager.resume_group(body.group_id, user_id)
     return {"success": True, "resumed_count": resumed_count, "message": f"Resumed {resumed_count} transfer(s) in folder."}
+
+@router.post("/retry")
+async def retry_remote_task(
+    body: RetryRemoteTransferModel,
+    user: User = Depends(require_auth)
+):
+    """Retry a failed or paused remote transfer task."""
+    user_id = str(user.telegram_user_id or user.username)
+    success = remote_transfer_manager.retry_task(body.task_id, user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Task not found or not in retryable state.")
+    return {"success": True, "message": "Transfer retried."}
 
 @router.post("/clear-completed")
 async def clear_completed_remote_tasks(

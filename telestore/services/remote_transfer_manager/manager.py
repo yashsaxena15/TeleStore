@@ -46,12 +46,15 @@ class RemoteTransferManager:
             coll = get_remote_db()["RemoteTransfers"]
             coll.update_many(
                 {"status": {"$in": ["downloading", "uploading_tg"]}},
-                {"$set": {
-                    "status": "queued",
-                    "phase": "Resumed after server restart",
-                    "speed_bps": 0,
-                    "updated_at": datetime.now(timezone.utc)
-                }}
+                {
+                    "$set": {
+                        "status": "queued",
+                        "phase": "Resumed after server restart",
+                        "speed_bps": 0,
+                        "updated_at": datetime.now(timezone.utc)
+                    },
+                    "$unset": {"claimed_by": "", "claimed_at": ""}
+                }
             )
         except Exception as e:
             logger.warning(f"Failed to reset interrupted remote tasks: {e}")
@@ -90,7 +93,7 @@ class RemoteTransferManager:
                             "phase": "Queued (Resumed after quota reset)",
                             "updated_at": now_utc
                         },
-                        "$unset": {"cooldown_until": ""}
+                        "$unset": {"cooldown_until": "", "claimed_by": "", "claimed_at": ""}
                     }
                 )
                 if resumed_res.modified_count > 0:
@@ -822,7 +825,8 @@ class RemoteTransferManager:
                                 "error_message": "Google Drive 24h download limit reached. Transfer will automatically resume when quota resets.",
                                 "speed_bps": 0,
                                 "updated_at": datetime.now(timezone.utc)
-                            }
+                            },
+                            "$unset": {"claimed_by": "", "claimed_at": ""}
                         }
                     )
                     return
@@ -1901,24 +1905,49 @@ class RemoteTransferManager:
         return res.deleted_count
 
     def resume_group(self, group_id: str, user_id: str) -> int:
-        """Manually resume any tasks in a group that were paused due to quota cooldown."""
+        """Manually resume or retry any tasks in a group that were paused due to quota cooldown, failed, or queued."""
         coll = get_remote_db()["RemoteTransfers"]
         res = coll.update_many(
             {
                 "group_id": group_id,
                 "user_id": str(user_id),
-                "status": "paused_quota"
+                "status": {"$in": ["paused_quota", "failed", "queued"]}
             },
             {
                 "$set": {
                     "status": "queued",
                     "phase": "Queued (Resumed by user)",
-                    "updated_at": datetime.now(timezone.utc)
+                    "updated_at": datetime.now(timezone.utc),
+                    "error_message": None
                 },
-                "$unset": {"cooldown_until": ""}
+                "$unset": {"cooldown_until": "", "claimed_by": "", "claimed_at": ""}
             }
         )
         return res.modified_count
+
+    def retry_task(self, task_id: str, user_id: str) -> bool:
+        """Retry a single remote transfer task."""
+        coll = get_remote_db()["RemoteTransfers"]
+        res = coll.update_one(
+            {
+                "task_id": task_id,
+                "user_id": str(user_id),
+                "status": {"$in": ["failed", "paused_quota", "cancelled"]}
+            },
+            {
+                "$set": {
+                    "status": "queued",
+                    "phase": "Queued (Retried by user)",
+                    "progress": 0,
+                    "transferred_bytes": 0,
+                    "speed_bps": 0,
+                    "error_message": None,
+                    "updated_at": datetime.now(timezone.utc)
+                },
+                "$unset": {"cooldown_until": "", "claimed_by": "", "claimed_at": ""}
+            }
+        )
+        return res.modified_count > 0
 
     def get_user_tasks(self, user_id: str) -> List[Dict[str, Any]]:
         coll = get_remote_db()["RemoteTransfers"]

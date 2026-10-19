@@ -109,6 +109,15 @@ export const useTransferManager = () => {
             console.error(e);
         }
     }, [fetchRemoteTransfers]);
+    const retryRemoteTransfer = useCallback(async (taskId) => {
+        try {
+            await api.retryRemoteTransfer(taskId);
+            fetchRemoteTransfers();
+        }
+        catch (e) {
+            console.error(e);
+        }
+    }, [fetchRemoteTransfers]);
     const clearCompletedRemote = useCallback(async () => {
         try {
             await api.clearCompletedRemoteTasks();
@@ -152,6 +161,7 @@ export const useTransferManager = () => {
         cancelRemoteTransfer,
         cancelRemoteGroup,
         resumeRemoteGroup,
+        retryRemoteTransfer,
         clearCompletedRemote,
         refreshRemoteTransfers: fetchRemoteTransfers,
         pauseAll,

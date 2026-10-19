@@ -325,13 +325,17 @@ class DistributedWorker:
                         ext = os.path.splitext(filename)[1].lower()
 
                         if is_single:
-                            if ext in ['.mp4', '.mkv', '.avi', '.mov', '.webm']:
-                                msg = await bot.send_video(chat_id=chat_id, video=p_path, caption=caption, file_name=target_name)
-                            elif ext in ['.mp3', '.wav', '.ogg', '.flac', '.m4a']:
-                                msg = await bot.send_audio(chat_id=chat_id, audio=p_path, caption=caption, file_name=target_name)
-                            elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
-                                msg = await bot.send_photo(chat_id=chat_id, photo=p_path, caption=caption)
-                            else:
+                            try:
+                                if ext in ['.mp4', '.mkv', '.avi', '.mov', '.webm']:
+                                    msg = await bot.send_video(chat_id=chat_id, video=p_path, caption=caption, file_name=target_name)
+                                elif ext in ['.mp3', '.wav', '.ogg', '.flac', '.m4a']:
+                                    msg = await bot.send_audio(chat_id=chat_id, audio=p_path, caption=caption, file_name=target_name)
+                                elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+                                    msg = await bot.send_photo(chat_id=chat_id, photo=p_path, caption=caption)
+                                else:
+                                    msg = await bot.send_document(chat_id=chat_id, document=p_path, caption=caption, file_name=target_name, force_document=True)
+                            except Exception as upload_err:
+                                logger.warning(f"[WORKER_UPLOAD] Specialized upload failed ({upload_err}), falling back to document upload...")
                                 msg = await bot.send_document(chat_id=chat_id, document=p_path, caption=caption, file_name=target_name, force_document=True)
                         else:
                             msg = await bot.send_document(chat_id=chat_id, document=p_path, caption=caption, file_name=target_name, force_document=True)
@@ -436,7 +440,7 @@ class DistributedWorker:
                 await self.report_complete(comp_payload)
 
         except Exception as e:
-            err_msg = str(e)
+            err_msg = str(e) or repr(e)
             logger.error(f"Task {task_id} failed: {err_msg}", exc_info=True)
             is_quota = is_gdrive_quota_error(err_msg)
             await self.report_fail(task_id, err_msg, is_quota)
