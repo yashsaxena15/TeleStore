@@ -103,6 +103,33 @@ flowchart TD
 
 ---
 
+## Code Layout
+
+```
+telestore/                 Python backend package — run with `python -m telestore`
+├── __main__.py            entry point: starts the bot pool, which starts the web server
+├── config/                settings.py (env vars, required secrets), strings, keyboards, links
+├── api/                   FastAPI app
+│   ├── app.py             app factory: middleware, routers, static frontend
+│   ├── server.py          uvicorn server manager used by the bot pool
+│   ├── state.py           in-memory auth tokens, stale-upload cleanup
+│   └── routes/            one module per area (auth, folders, stream, media, vault, cloud,
+│       ├── files/         …) — larger areas are packages:
+│       │                  common (router), browse, manage, upload
+│       └── webdav/        common, dispatcher, propfind, browser (HTML view), transfer, operations
+├── services/              business logic: streaming, caching, archives, torrents, Google Drive,
+│   └── remote_transfer_manager/   helpers, pipeline (stream writer), manager (queue + workers)
+├── security/              credentials, session/token auth, Google sign-in
+├── db/                    client.py (MongoDB connection) + repositories/ (users, files, settings, …)
+├── telegram/              bot.py, user.py, plugins/ (bot commands), user_plugins/
+└── utils/                 passwords (scrypt), text helpers
+d4rk/                      vendored bot-pool/logging framework (kept as-is)
+frontend/src/              React app — app/, components/{ui,layout,feedback}, features/<area>/,
+                           shared hooks/, lib/, contexts/, styles/
+worker/                    standalone remote worker (runs on other VMs)
+tests/                     pytest suite (no .env, network or database needed)
+```
+
 ## 3. End-to-End Request Flows
 
 ### 1. Browser Navigation & API Request Flow
