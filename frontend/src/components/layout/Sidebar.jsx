@@ -188,7 +188,7 @@ const AccountMenuItems = ({ onNavigateView, onAction, isOwner, profile }) => (<D
       {profile?.email && <span className="block text-xs text-muted-foreground truncate">{profile.email}</span>}
     </DropdownMenuLabel>
     <DropdownMenuSeparator />
-    <DropdownMenuItem className="gap-2.5 cursor-pointer" onSelect={() => onNavigateView("profile")}><User className="w-4 h-4 text-muted-foreground"/>Profile</DropdownMenuItem>
+    <DropdownMenuItem className="gap-2.5 cursor-pointer" onSelect={() => onNavigateView("profile")}><User className="w-4 h-4 text-muted-foreground"/>Account</DropdownMenuItem>
     <DropdownMenuItem className="gap-2.5 cursor-pointer" onSelect={() => onNavigateView("settings")}><Settings className="w-4 h-4 text-muted-foreground"/>Settings</DropdownMenuItem>
     {isOwner && <DropdownMenuItem className="gap-2.5 cursor-pointer" onSelect={() => onNavigateView("users")}><Users className="w-4 h-4 text-muted-foreground"/>Users</DropdownMenuItem>}
     <DropdownMenuItem className="gap-2.5 cursor-pointer" onSelect={() => onAction("webdav")}><Laptop className="w-4 h-4 text-muted-foreground"/>Mount as drive (WebDAV)</DropdownMenuItem>

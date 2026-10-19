@@ -3,11 +3,11 @@ import { cn } from "@/lib/utils";
 
 // One quiet line under the filters for places with something to know or one thing to do.
 // Returns nothing for ordinary folders.
-export const SectionStatus = ({ section, itemCount = 0, driveName, driveEmail, onEmptyTrash, onLockVault }) => {
+export const SectionStatus = ({ section, itemCount = 0, driveName, driveEmail, onEmptyTrash, onLockVault, vaultAutoLockMinutes = 15 }) => {
     const config = {
         trash: { icon: Trash2, tone: "text-warning", text: "Items stay here until you empty the trash or delete them forever.", action: itemCount > 0 && onEmptyTrash && { label: "Empty trash", icon: Trash2, onClick: onEmptyTrash, danger: true } },
         "drive-trash": { icon: Trash2, tone: "text-warning", text: "Google Drive trash. Items here are deleted by Drive after 30 days.", action: itemCount > 0 && onEmptyTrash && { label: "Empty trash", icon: Trash2, onClick: onEmptyTrash, danger: true } },
-        vault: { icon: ShieldCheck, tone: "text-cloud", text: "Private vault · locks itself after 15 minutes without activity.", action: onLockVault && { label: "Lock vault", icon: Lock, onClick: onLockVault } },
+        vault: { icon: ShieldCheck, tone: "text-cloud", text: `Private vault · locks itself after ${vaultAutoLockMinutes === 60 ? "1 hour" : `${vaultAutoLockMinutes} minutes`} without activity.`, action: onLockVault && { label: "Lock vault", icon: Lock, onClick: onLockVault } },
         inbox: { icon: Inbox, tone: "text-info", text: "Files sent to your bots land here. Select them and use File to… to put them in a folder." },
         drive: { icon: Cloud, tone: "text-info", text: [driveName || "Google Drive", driveEmail].filter(Boolean).join(" · "), hint: "Copy files here and paste them into Home to move them to Telegram." },
     }[section];

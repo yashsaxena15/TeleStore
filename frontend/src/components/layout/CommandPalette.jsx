@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { ArrowUpDown, HardDrive, User, Settings, Users, Cloud, RefreshCw, Laptop, Moon, Sun, Monitor, LogOut } from "lucide-react";
+import { ArrowUpDown, HardDrive, User, Settings, Users, Cloud, RefreshCw, Laptop, Moon, Sun, Monitor, LogOut, Plug, ShieldCheck } from "lucide-react";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator, CommandShortcut } from "@/components/ui/command";
 import { useCloudAccounts, useIsOwner } from "@/hooks/useShellData";
 import { setTheme } from "@/lib/theme";
@@ -35,9 +35,12 @@ export const CommandPalette = ({ open, onOpenChange, onNavigateView, onAction })
           {cloudAccounts.map((acc) => <Item key={acc.id} icon={Cloud} label={acc.account_name} keywords={["drive", "google", acc.account_email]} hint="Drive" onSelect={() => onNavigateView("files", `cloud:${acc.id}:root`)}/>)}
           <Item icon={ArrowUpDown} label="Transfers" keywords={["downloads", "uploads", "leech"]} onSelect={() => onNavigateView("transfers")}/>
           <Item icon={HardDrive} label="Storage" keywords={["analytics", "usage", "cache"]} onSelect={() => onNavigateView("storage")}/>
-          <Item icon={User} label="Profile" keywords={["account", "telegram"]} onSelect={() => onNavigateView("profile")}/>
-          <Item icon={Settings} label="Settings" keywords={["preferences", "backend", "server"]} onSelect={() => onNavigateView("settings")}/>
-          {isOwner && <Item icon={Users} label="Users" keywords={["admin", "permissions"]} onSelect={() => onNavigateView("users")}/>}
+          <Item icon={User} label="Account" keywords={["profile", "telegram", "password"]} onSelect={() => onNavigateView("settings", "account")}/>
+          <Item icon={Settings} label="Settings" keywords={["preferences"]} onSelect={() => onNavigateView("settings")}/>
+          <Item icon={Plug} label="Connection settings" keywords={["backend", "server", "url", "index chat"]} onSelect={() => onNavigateView("settings", "connection")}/>
+          <Item icon={Cloud} label="Integrations" keywords={["google drive", "webdav", "unlink"]} onSelect={() => onNavigateView("settings", "integrations")}/>
+          <Item icon={ShieldCheck} label="Vault settings" keywords={["pin", "recovery email", "auto-lock"]} onSelect={() => onNavigateView("settings", "vault")}/>
+          {isOwner && <Item icon={Users} label="Users" keywords={["admin", "permissions"]} onSelect={() => onNavigateView("settings", "users")}/>}
         </CommandGroup>
         <CommandSeparator />
         <CommandGroup heading="New">

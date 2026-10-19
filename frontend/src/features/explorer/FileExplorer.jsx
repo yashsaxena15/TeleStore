@@ -35,11 +35,10 @@ import { FolderDownloadDialog } from "@/features/explorer/dialogs/FolderDownload
 import { WebDAVMountDialog } from "@/features/cloud/WebDAVMountDialog";
 import { VaultModal } from "@/features/vault/VaultModal";
 import { RemoteDownloadDialog } from "@/features/cloud/RemoteDownloadDialog";
+import { settingsUrl } from "@/features/settings/settingsTabs";
 
 // Page panels are split into their own chunks and load when first shown
-const ProfileContent = lazy(() => import("@/features/profile/ProfileContent").then((m) => ({ default: m.ProfileContent })));
 const SettingsContent = lazy(() => import("@/features/settings/SettingsContent").then((m) => ({ default: m.SettingsContent })));
-const UserManagementContent = lazy(() => import("@/features/admin/UserManagementContent").then((m) => ({ default: m.UserManagementContent })));
 const StorageAnalyticsContent = lazy(() => import("@/features/storage/StorageAnalyticsContent").then((m) => ({ default: m.StorageAnalyticsContent })));
 const PanelLoading = () => (<div className="flex flex-1 items-center justify-center p-10 text-sm text-muted-foreground">Loading…</div>);
 export const FileExplorer = () => {
@@ -141,18 +140,28 @@ export const FileExplorer = () => {
     const [showWebDAVDialog, setShowWebDAVDialog] = useState(false);
     const [showVaultModal, setShowVaultModal] = useState(false);
     const [isVaultUnlocked, setIsVaultUnlocked] = useState(false);
+    const [vaultAutoLockMinutes, setVaultAutoLockMinutes] = useState(15);
     const [userEmail, setUserEmail] = useState("");
+    const [username, setUsername] = useState("");
     const [remoteDownloadOpen, setRemoteDownloadOpen] = useState(false);
     const queryClient = useQueryClient();
     // Check initial Vault status and user profile
     useEffect(() => {
-        api.getVaultStatus().then(st => {
+        const loadVaultStatus = () => api.getVaultStatus().then(st => {
             setIsVaultUnlocked(st.is_unlocked);
+            if (st.auto_lock_minutes)
+                setVaultAutoLockMinutes(st.auto_lock_minutes);
         }).catch(() => { });
+        loadVaultStatus();
         api.fetchUserProfile().then(p => {
             if (p && p.email)
                 setUserEmail(p.email);
+            if (p && p.username)
+                setUsername(p.username);
         }).catch(() => { });
+        // Settings › Vault announces locks, PIN changes and a new auto-lock time
+        window.addEventListener("vaultStateChanged", loadVaultStatus);
+        return () => window.removeEventListener("vaultStateChanged", loadVaultStatus);
     }, []);
     // Listen for showWebDAVMount custom events
     useEffect(() => {
@@ -916,13 +925,13 @@ export const FileExplorer = () => {
                     setIsVaultUnlocked(false);
                     if (isVaultMode) {
                         handleFilterChangeRef.current("all");
-                        toast.info("Vault locked due to 15 minutes of inactivity.");
+                        toast.info(`Vault locked after ${vaultAutoLockMinutes} minutes without activity.`);
                     }
                 }
             }).catch(() => { });
         }, 45000);
         return () => clearInterval(interval);
-    }, [isVaultUnlocked, isVaultMode]);
+    }, [isVaultUnlocked, isVaultMode, vaultAutoLockMinutes]);
     const handleFilterChange = (filter) => {
         if (filter.startsWith("cloud:")) {
             const parts = filter.split(":");
@@ -1467,35 +1476,20 @@ export const FileExplorer = () => {
         window.addEventListener('changeCategory', handleCategoryChange);
         return () => window.removeEventListener('changeCategory', handleCategoryChange);
     }, []);
-    const activeView = showProfile ? 'profile' :
-        showSettings ? 'settings' :
-            showUserManagement ? 'users' :
+    // Profile and Users are tabs of Settings; their old addresses still open it
+    const showSettingsArea = showProfile || showSettings || showUserManagement;
+    const activeView = showSettingsArea ? 'settings' :
                 showStorageAnalytics ? 'storage' :
                     showTransfers ? 'transfers' : 'files';
     const handleNavigateView = (view, filter) => {
-        if (view === 'profile') {
-            setShowProfile(true);
-            setShowSettings(false);
-            setShowUserManagement(false);
-            setShowStorageAnalytics(false);
-            setShowTransfers(false);
-            navigate('/profile');
-        }
-        else if (view === 'settings') {
+        if (view === 'profile' || view === 'settings' || view === 'users') {
+            // For settings the second argument is the tab to open
             setShowSettings(true);
             setShowProfile(false);
             setShowUserManagement(false);
             setShowStorageAnalytics(false);
             setShowTransfers(false);
-            navigate('/settings');
-        }
-        else if (view === 'users') {
-            setShowUserManagement(true);
-            setShowProfile(false);
-            setShowSettings(false);
-            setShowStorageAnalytics(false);
-            setShowTransfers(false);
-            navigate('/users');
+            navigate(settingsUrl(view === 'settings' ? filter : view));
         }
         else if (view === 'storage') {
             setShowStorageAnalytics(true);
@@ -1583,26 +1577,9 @@ export const FileExplorer = () => {
       <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
       <ErrorBoundary name="This page" key={activeView}>
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        {showProfile ? (<motion.div key="profile" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
+        {showSettingsArea ? (<motion.div key="settings" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
             <Suspense fallback={<PanelLoading />}>
-              <ProfileContent onBack={() => {
-                setShowProfile(false);
-                navigate('/');
-            }}/>
-            </Suspense>
-          </motion.div>) : showSettings ? (<motion.div key="settings" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
-            <Suspense fallback={<PanelLoading />}>
-              <SettingsContent onBack={() => {
-                setShowSettings(false);
-                navigate('/');
-            }}/>
-            </Suspense>
-          </motion.div>) : showUserManagement ? (<motion.div key="user-management" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
-            <Suspense fallback={<PanelLoading />}>
-              <UserManagementContent onBack={() => {
-                setShowUserManagement(false);
-                navigate('/');
-            }}/>
+              <SettingsContent onOpenDrive={(accountId) => handleNavigateView("files", `cloud:${accountId}:root`)} onOpenVault={() => handleNavigateView("files", "vault")} onLogout={() => runShellAction("logout")}/>
             </Suspense>
           </motion.div>) : showStorageAnalytics ? (<motion.div key="storage-analytics" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
             <Suspense fallback={<PanelLoading />}>
@@ -1630,7 +1607,7 @@ export const FileExplorer = () => {
                 setPage(1);
             }} typeCounts={typeCounts} totalCount={effectivePagination?.total_items ?? baseItems.length} filteredCount={filteredItems.length} isInboxMode={isInboxMode} detailsOpen={detailsOpen} onDetailsToggle={() => setDetailsOpen(!detailsOpen)}/>
 
-            <SectionStatus section={getSection({ isTrash: isEffectiveTrashMode, isVault: isVaultMode, isInbox: isInboxMode, isCloud: isCloudMode })} itemCount={filteredItems.length} driveName={cloudQuery.data?.account_name} driveEmail={cloudQuery.data?.account_email} onEmptyTrash={() => setEmptyTrashDialogOpen(true)} onLockVault={handleLockVault}/>
+            <SectionStatus section={getSection({ isTrash: isEffectiveTrashMode, isVault: isVaultMode, isInbox: isInboxMode, isCloud: isCloudMode })} itemCount={filteredItems.length} driveName={cloudQuery.data?.account_name} driveEmail={cloudQuery.data?.account_email} onEmptyTrash={() => setEmptyTrashDialogOpen(true)} onLockVault={handleLockVault} vaultAutoLockMinutes={vaultAutoLockMinutes}/>
 
             <FileGrid items={filteredItems} viewMode={viewMode} onNavigate={handleNavigate} itemCount={filteredItems.length} onCopy={handleCopy} onCut={handleCut} onPaste={hasClipboard && !isClipboardPasted() ? handlePaste : undefined} onDelete={handleDelete} onRename={handleRename} isVaultMode={isVaultMode} onMoveToVault={handleMoveToVault} onMoveToHome={handleMoveToHome} onMove={handleMove} onDownload={handleDownload} renamingItem={renamingItem} onRenameConfirm={confirmRename} onRenameCancel={() => setRenamingItem(null)} currentFolder={currentFolder} currentPath={currentPath} currentApiPath={currentApiPath} onNewFolder={() => setNewFolderDialogOpen(true)} isLoading={isLoading} cutItem={clipboard?.operation === "cut" && !isClipboardPasted() ? clipboard.item : null} cutItems={clipboard?.operation === "cut" && !isClipboardPasted() ? cutItems : []} hasClipboard={hasClipboard} isClipboardPasted={isClipboardPasted()} onRefresh={refetch} isTrashMode={isEffectiveTrashMode} onRestoreItem={handleRestoreItem} onToggleStar={handleToggleStar} isCloudMode={isCloudMode} cloudAccountId={cloudAccountId} cloudFolderId={cloudFolderId} isInboxMode={isInboxMode} uploadRequest={uploadRequest} onUploadRequestHandled={() => setUploadRequest(null)} detailsOpen={detailsOpen} onDetailsOpenChange={setDetailsOpen} onBatch={batchActions}/>
 
@@ -1682,7 +1659,7 @@ export const FileExplorer = () => {
 
       <FolderDownloadDialog open={!!folderDownloadInfo} info={folderDownloadInfo} onClose={() => setFolderDownloadInfo(null)} onDownloadPart={handleDownloadFolderPart} onDownloadAll={handleDownloadAllFolderParts}/>
 
-      <WebDAVMountDialog open={showWebDAVDialog} onOpenChange={setShowWebDAVDialog}/>
+      <WebDAVMountDialog open={showWebDAVDialog} onOpenChange={setShowWebDAVDialog} username={username || undefined}/>
 
       <VaultModal isOpen={showVaultModal} onClose={() => setShowVaultModal(false)} onSuccess={handleVaultUnlocked} userEmail={userEmail}/>
 

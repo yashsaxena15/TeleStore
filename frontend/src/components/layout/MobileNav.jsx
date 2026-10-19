@@ -62,7 +62,7 @@ export const MobileNav = ({ selectedFilter, activeView, onNavigateView, onAction
           </div>
           <div className="mt-3 mb-1 px-2 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Account</div>
           <div className="grid gap-0.5">
-            <SheetRow icon={User} label="Profile" onClick={() => go("profile")}/>
+            <SheetRow icon={User} label="Account" onClick={() => go("profile")}/>
             <SheetRow icon={Settings} label="Settings" onClick={() => go("settings")}/>
             {isOwner && <SheetRow icon={Users} label="Users" onClick={() => go("users")}/>}
             <SheetRow icon={Laptop} label="Mount as drive (WebDAV)" onClick={() => act("webdav")}/>

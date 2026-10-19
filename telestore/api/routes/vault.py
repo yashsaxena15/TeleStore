@@ -20,8 +20,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/vault", tags=["Vault"])
 
-# 15 minutes of inactivity before vault auto-locks
-VAULT_INACTIVITY_TIMEOUT = 900 
+# Default minutes of inactivity before the vault auto-locks; each user can pick one of the allowed values
+VAULT_INACTIVITY_TIMEOUT = 900
+AUTO_LOCK_CHOICES = (5, 15, 30, 60)
+DEFAULT_AUTO_LOCK_MINUTES = 15
+RECOVERY_EMAIL_PURPOSE = "Vault Recovery Email Change"
 
 
 # Pydantic Request Models
@@ -48,6 +51,18 @@ class ForgotPinResetModel(BaseModel):
 class ChangePinModel(BaseModel):
     current_pin: str
     new_pin: str
+
+class VaultSettingsModel(BaseModel):
+    auto_lock_minutes: int
+
+class RecoveryEmailOtpModel(BaseModel):
+    email: str
+    pin: str
+
+class RecoveryEmailConfirmModel(BaseModel):
+    email: str
+    pin: str
+    otp_code: str
 
 class MoveVaultItemModel(BaseModel):
     file_id: str
@@ -111,13 +126,40 @@ def _mask_email(email: str) -> str:
     except Exception:
         return email
 
+def _auto_lock_minutes(config: Optional[dict]) -> int:
+    minutes = (config or {}).get("auto_lock_minutes")
+    return minutes if minutes in AUTO_LOCK_CHOICES else DEFAULT_AUTO_LOCK_MINUTES
+
+
+def _session_timeout(request: Request) -> int:
+    """Inactivity window in seconds for this session (set when the vault was unlocked)."""
+    seconds = request.session.get("vault_timeout")
+    return seconds if isinstance(seconds, int) and seconds > 0 else VAULT_INACTIVITY_TIMEOUT
+
+
+def _start_unlocked_session(request: Request, config: Optional[dict]) -> None:
+    request.session["vault_unlocked"] = True
+    request.session["vault_unlocked_at"] = time.time()
+    request.session["vault_timeout"] = _auto_lock_minutes(config) * 60
+
+
+def _check_pin(config: dict, pin: str) -> bytes:
+    """Return the PIN-derived key when the PIN matches, else raise 401."""
+    if not re.match(r"^\d{4}$", pin or ""):
+        raise HTTPException(status_code=400, detail="Please enter your 4-digit vault PIN.")
+    derived = _derive_pin_key(pin, bytes.fromhex(config["pin_salt"]))
+    if hashlib.sha256(derived).hexdigest() != config["pin_hash"]:
+        raise HTTPException(status_code=401, detail="Incorrect vault PIN.")
+    return derived
+
+
 def is_vault_unlocked(request: Request) -> bool:
     """Check if vault is unlocked and within the inactivity window."""
     unlocked = request.session.get("vault_unlocked", False)
     if not unlocked:
         return False
     unlocked_at = request.session.get("vault_unlocked_at", 0)
-    if time.time() - unlocked_at > VAULT_INACTIVITY_TIMEOUT:
+    if time.time() - unlocked_at > _session_timeout(request):
         request.session["vault_unlocked"] = False
         return False
     # Touch activity timestamp
@@ -137,20 +179,22 @@ async def get_vault_status(request: Request, user: User = Depends(require_auth))
             "is_setup": False,
             "is_unlocked": False,
             "email": None,
-            "remaining_seconds": 0
+            "remaining_seconds": 0,
+            "auto_lock_minutes": DEFAULT_AUTO_LOCK_MINUTES
         }
 
     unlocked = is_vault_unlocked(request)
     remaining_seconds = 0
     if unlocked:
         unlocked_at = request.session.get("vault_unlocked_at", 0)
-        remaining_seconds = max(0, int(VAULT_INACTIVITY_TIMEOUT - (time.time() - unlocked_at)))
+        remaining_seconds = max(0, int(_session_timeout(request) - (time.time() - unlocked_at)))
 
     return {
         "is_setup": True,
         "is_unlocked": unlocked,
         "email": _mask_email(config.get("email", "")),
-        "remaining_seconds": remaining_seconds
+        "remaining_seconds": remaining_seconds,
+        "auto_lock_minutes": _auto_lock_minutes(config)
     }
 
 
@@ -261,8 +305,7 @@ async def verify_and_create_vault(request: Request, body: VerifyAndCreateModel, 
     )
 
     # 6. Unlock session immediately
-    request.session["vault_unlocked"] = True
-    request.session["vault_unlocked_at"] = time.time()
+    _start_unlocked_session(request, None)
 
     return {"success": True, "message": "Private Vault successfully initialized and unlocked!"}
 
@@ -296,8 +339,7 @@ async def unlock_vault(request: Request, body: UnlockVaultModel, user: User = De
         logger.error(f"Vault recovery migration skipped for user {user_id}: {e}")
 
     # Successful unlock
-    request.session["vault_unlocked"] = True
-    request.session["vault_unlocked_at"] = time.time()
+    _start_unlocked_session(request, config)
 
     return {"success": True, "message": "Vault successfully unlocked."}
 
@@ -391,8 +433,7 @@ async def forgot_pin_reset(request: Request, body: ForgotPinResetModel, user: Us
     )
 
     # 4. Automatically unlock session
-    request.session["vault_unlocked"] = True
-    request.session["vault_unlocked_at"] = time.time()
+    _start_unlocked_session(request, config)
 
     return {"success": True, "message": "PIN successfully reset and Vault unlocked!"}
 
@@ -449,9 +490,81 @@ async def change_pin(request: Request, body: ChangePinModel, user: User = Depend
         }
     )
 
-    request.session["vault_unlocked"] = True
-    request.session["vault_unlocked_at"] = time.time()
+    _start_unlocked_session(request, config)
     return {"success": True, "message": "PIN changed successfully."}
+
+
+@router.put("/settings")
+async def update_vault_settings(request: Request, body: VaultSettingsModel, user: User = Depends(require_auth)):
+    """Change how long the vault stays unlocked without activity. The PIN is still needed to unlock."""
+    if body.auto_lock_minutes not in AUTO_LOCK_CHOICES:
+        raise HTTPException(status_code=400, detail=f"Auto-lock must be one of {', '.join(map(str, AUTO_LOCK_CHOICES))} minutes.")
+
+    user_id = str(user.telegram_user_id or user.username or "admin")
+    vault_coll = get_vault_db()["VaultConfig"]
+    result = vault_coll.update_one(
+        {"user_id": user_id},
+        {"$set": {"auto_lock_minutes": body.auto_lock_minutes, "updated_at": datetime.now(timezone.utc)}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Vault is not set up yet.")
+
+    # Apply to the current session too, so the change takes effect without unlocking again
+    if is_vault_unlocked(request):
+        request.session["vault_timeout"] = body.auto_lock_minutes * 60
+    return {"success": True, "auto_lock_minutes": body.auto_lock_minutes}
+
+
+def _normalize_new_email(email: str, config: dict) -> str:
+    email = (email or "").strip().lower()
+    if not re.match(r"^[^@]+@[^@]+\.[^@]+$", email):
+        raise HTTPException(status_code=400, detail="Please enter a valid email address.")
+    if email == (config.get("email") or "").strip().lower():
+        raise HTTPException(status_code=400, detail="That is already your recovery email.")
+    return email
+
+
+@router.post("/recovery-email/request-otp")
+async def request_recovery_email_otp(body: RecoveryEmailOtpModel, user: User = Depends(require_auth)):
+    """Step 1 of changing the recovery email: confirm the PIN, then send a code to the new address."""
+    user_id = str(user.telegram_user_id or user.username or "admin")
+    config = get_vault_db()["VaultConfig"].find_one({"user_id": user_id})
+    if not config:
+        raise HTTPException(status_code=404, detail="Vault is not set up yet.")
+
+    _check_pin(config, body.pin.strip())
+    email = _normalize_new_email(body.email, config)
+    try:
+        await create_and_send_vault_otp(email, user_id, purpose=RECOVERY_EMAIL_PURPOSE)
+        return {"success": True, "message": f"Verification code sent to {_mask_email(email)}"}
+    except ValueError as ve:
+        raise HTTPException(status_code=429, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Failed to send recovery email OTP: {e}")
+        raise HTTPException(status_code=500, detail="Failed to dispatch verification email. Please try again.")
+
+
+@router.post("/recovery-email/confirm")
+async def confirm_recovery_email(body: RecoveryEmailConfirmModel, user: User = Depends(require_auth)):
+    """Step 2: check the PIN and the code sent to the new address, then save it.
+    The recovery envelope is keyed to the user, not the email, so no re-encryption is needed."""
+    user_id = str(user.telegram_user_id or user.username or "admin")
+    vault_coll = get_vault_db()["VaultConfig"]
+    config = vault_coll.find_one({"user_id": user_id})
+    if not config:
+        raise HTTPException(status_code=404, detail="Vault is not set up yet.")
+
+    _check_pin(config, body.pin.strip())
+    email = _normalize_new_email(body.email, config)
+    try:
+        valid = await verify_vault_otp(email, user_id, body.otp_code.strip(), purpose=RECOVERY_EMAIL_PURPOSE)
+        if not valid:
+            raise HTTPException(status_code=400, detail="Invalid or expired verification code.")
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+
+    vault_coll.update_one({"user_id": user_id}, {"$set": {"email": email, "updated_at": datetime.now(timezone.utc)}})
+    return {"success": True, "email": _mask_email(email)}
 
 
 @router.post("/move-in")
