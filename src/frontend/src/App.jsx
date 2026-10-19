@@ -7,7 +7,6 @@ import NotFound from "./pages/NotFound";
 import Index from "./pages/Index";
 import { NavigationSidebar } from "@/components/NavigationSidebar";
 import { TransfersWidget } from "@/components/TransfersWidget";
-// Remove the import for DownloadQueue since we're moving it to the FileExplorer
 import logger from "@/lib/logger";
 // Import the new backend connection hook
 import { useBackendConnection } from "@/hooks/useViteConnection";
