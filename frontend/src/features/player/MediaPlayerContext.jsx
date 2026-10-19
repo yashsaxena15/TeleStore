@@ -1,18 +1,24 @@
-import React, { createContext, useContext, useState, lazy, Suspense } from "react";
+import React, { createContext, useContext, useState, useCallback, lazy, Suspense } from "react";
 import { ErrorBoundary } from "@/components/feedback/ErrorBoundary";
 import { PersistentAudioPlayer } from "./PersistentAudioPlayer";
 import { downloadManager } from "@/features/transfers/downloadManager";
+import { findVideoIndex, getNextVideoIndex, getPrevVideoIndex } from "./videoPlaylistHelpers";
 
 // The video player is split into its own chunk and loads on first play
 const MediaPlayer = lazy(() => import("./MediaPlayer").then((m) => ({ default: m.MediaPlayer })));
 export const MediaPlayerContext = createContext(undefined);
 export const MediaPlayerProvider = ({ children }) => {
-    // Video modal media
+    // Video modal media & playlist state
     const [currentMedia, setCurrentMedia] = useState(null);
+    const [videoPlaylist, setVideoPlaylist] = useState([]);
+    const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
+    const [isVideoMini, setIsVideoMini] = useState(false);
+
     // Persistent audio player state
     const [activeAudioTrack, setActiveAudioTrack] = useState(null);
     const [audioPlaylist, setAudioPlaylist] = useState([]);
     const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
+
     const closeMedia = () => {
         if (currentMedia?.url.startsWith("blob:")) {
             try {
@@ -21,12 +27,17 @@ export const MediaPlayerProvider = ({ children }) => {
             catch (e) { }
         }
         setCurrentMedia(null);
+        setVideoPlaylist([]);
+        setCurrentVideoIndex(0);
+        setIsVideoMini(false);
     };
+
     const closeAudioPlayer = () => {
         setActiveAudioTrack(null);
         setAudioPlaylist([]);
         setCurrentTrackIndex(0);
     };
+
     const playAudio = (track, playlist) => {
         // One thing plays at a time: starting audio pauses a docked or open video
         window.dispatchEvent(new Event("telestore:pause-video"));
@@ -43,6 +54,7 @@ export const MediaPlayerProvider = ({ children }) => {
             setActiveAudioTrack(track);
         }
     };
+
     const playMedia = (media, playlist) => {
         const isAudio = media.fileType === "audio" || media.fileType === "voice";
         if (isAudio) {
@@ -56,6 +68,7 @@ export const MediaPlayerProvider = ({ children }) => {
             playAudio(track, playlist);
             return;
         }
+
         // Video media: open the theater player and pause any audio
         window.dispatchEvent(new Event("telestore:pause-audio"));
         if (currentMedia?.url && currentMedia.url !== media.url && currentMedia.url.startsWith("blob:")) {
@@ -64,12 +77,59 @@ export const MediaPlayerProvider = ({ children }) => {
             }
             catch (e) { }
         }
-        setCurrentMedia(media);
+
+        if (playlist && playlist.length > 0) {
+            setVideoPlaylist(playlist);
+            const idx = findVideoIndex(playlist, media);
+            setCurrentVideoIndex(idx);
+            setCurrentMedia(playlist[idx] || media);
+        } else {
+            setVideoPlaylist([media]);
+            setCurrentVideoIndex(0);
+            setCurrentMedia(media);
+        }
     };
+
+    const playNextVideo = useCallback(() => {
+        setCurrentVideoIndex((prevIdx) => {
+            const nextIdx = getNextVideoIndex(prevIdx, videoPlaylist.length);
+            if (nextIdx !== null && videoPlaylist[nextIdx]) {
+                setCurrentMedia(videoPlaylist[nextIdx]);
+                return nextIdx;
+            }
+            return prevIdx;
+        });
+    }, [videoPlaylist]);
+
+    const playPrevVideo = useCallback(() => {
+        setCurrentVideoIndex((prevIdx) => {
+            const prevTargetIdx = getPrevVideoIndex(prevIdx);
+            if (prevTargetIdx !== null && videoPlaylist[prevTargetIdx]) {
+                setCurrentMedia(videoPlaylist[prevTargetIdx]);
+                return prevTargetIdx;
+            }
+            return prevIdx;
+        });
+    }, [videoPlaylist]);
+
+    const playVideoAtIndex = useCallback((idx) => {
+        if (idx >= 0 && idx < videoPlaylist.length && videoPlaylist[idx]) {
+            setCurrentVideoIndex(idx);
+            setCurrentMedia(videoPlaylist[idx]);
+        }
+    }, [videoPlaylist]);
+
     return (<MediaPlayerContext.Provider value={{
             currentMedia,
             playMedia,
             closeMedia,
+            videoPlaylist,
+            currentVideoIndex,
+            playNextVideo,
+            playPrevVideo,
+            playVideoAtIndex,
+            isVideoMini,
+            setIsVideoMini,
             activeAudioTrack,
             audioPlaylist,
             currentTrackIndex,
@@ -81,9 +141,25 @@ export const MediaPlayerProvider = ({ children }) => {
       {/* Video Modal Player */}
       <ErrorBoundary name="Video player" fallback="silent">
       <Suspense fallback={null}>
-      {currentMedia && currentMedia.fileType === "video" && (<MediaPlayer key={currentMedia.url} mediaUrl={currentMedia.url} fileName={currentMedia.fileName} fileType={currentMedia.fileType} onDownload={() => {
-                downloadManager.addDownload(currentMedia.url, currentMedia.fileName);
-            }} onClose={closeMedia}/>)}
+      {currentMedia && currentMedia.fileType === "video" && (
+        <MediaPlayer
+          key={currentMedia.url + (currentMedia.id || currentVideoIndex)}
+          mediaUrl={currentMedia.url}
+          fileName={currentMedia.fileName || currentMedia.name}
+          fileType={currentMedia.fileType}
+          playlist={videoPlaylist}
+          currentIndex={currentVideoIndex}
+          onNext={currentVideoIndex < videoPlaylist.length - 1 ? playNextVideo : undefined}
+          onPrev={currentVideoIndex > 0 ? playPrevVideo : undefined}
+          onSelectTrack={playVideoAtIndex}
+          isMini={isVideoMini}
+          onMiniChange={setIsVideoMini}
+          onDownload={() => {
+            downloadManager.addDownload(currentMedia.url, currentMedia.fileName || currentMedia.name);
+          }}
+          onClose={closeMedia}
+        />
+      )}
       </Suspense>
       </ErrorBoundary>
 

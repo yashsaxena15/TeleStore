@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { Play, Pause, RotateCcw, RotateCw, Volume2, Volume1, VolumeX, Settings, Maximize, Minimize, PictureInPicture2, Captions, Check, Download, X, ArrowLeft, Info, ExternalLink, Upload, Minimize2, Maximize2, Smartphone, Copy } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, ListVideo, RotateCcw, RotateCw, Volume2, Volume1, VolumeX, Settings, Maximize, Minimize, PictureInPicture2, Captions, Check, Download, X, ArrowLeft, Info, ExternalLink, Upload, Minimize2, Maximize2, Smartphone, Copy } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useDockPresence } from "@/components/layout/dock/useDock";
 import { downloadManager } from "@/features/transfers/downloadManager";
 import { toast } from "sonner";
 import { getApiBaseUrl, fetchWithTimeout } from "@/lib/api";
+import { formatBytes } from "@/lib/utils";
+import { shouldAutoplayOnBufferReady } from "./videoPlaylistHelpers";
 const PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const ALL_QUALITIES = [
     { id: "4k", label: "4K (2160p)", height: 2160 },
@@ -36,7 +38,21 @@ const getFileExtension = (name) => {
     }
     return "MEDIA";
 };
-export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClose, onDownload, }) => {
+export const MediaPlayer = ({
+    mediaUrl,
+    fileName,
+    fileType,
+    startPosition,
+    onClose,
+    onDownload,
+    playlist = [],
+    currentIndex = 0,
+    onNext,
+    onPrev,
+    onSelectTrack,
+    isMini: isMiniProp,
+    onMiniChange,
+}) => {
     const isMobile = useIsMobile();
     const isAudio = fileType === "audio" || fileType === "voice";
     const fullMediaUrl = useMemo(() => {
@@ -59,6 +75,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
     const lastTapTimeRef = useRef(0);
     const lastTapZoneRef = useRef("center");
     const retryCountRef = useRef(0);
+    const userPausedRef = useRef(false);
     // Playback states
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
@@ -75,7 +92,9 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
     const [isPiPActive, setIsPiPActive] = useState(false);
     const [canPiP, setCanPiP] = useState(false);
     const [hasPlaybackError, setHasPlaybackError] = useState(false);
-    const [isMini, setIsMini] = useState(false);
+    const [isMiniState, setIsMiniState] = useState(false);
+    const isMini = onMiniChange !== undefined ? Boolean(isMiniProp) : isMiniState;
+    const setIsMini = onMiniChange !== undefined ? onMiniChange : setIsMiniState;
     // Minimized playback lives in the dock; remember position when switching theater <-> dock
     const dock = useDockPresence("video", isMini);
     const modeSwitchRef = useRef(null);
@@ -199,6 +218,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
         if (!el)
             return;
         if (el.paused) {
+            userPausedRef.current = false;
             el.play().then(() => {
                 setIsPlaying(true);
                 setCentralPulse("play");
@@ -209,6 +229,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
             });
         }
         else {
+            userPausedRef.current = true;
             el.pause();
             setIsPlaying(false);
             setCentralPulse("pause");
@@ -265,7 +286,10 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
         setActiveStreamUrl(newUrl);
         el.load();
         if (wasPlaying) {
+            userPausedRef.current = false;
             el.play().catch(() => { });
+        } else {
+            userPausedRef.current = true;
         }
     }, [currentQuality, currentAudioTrack, duration, isPlaying, buildStreamUrl, fileName]);
     const seekRelative = useCallback((deltaSeconds) => {
@@ -282,17 +306,60 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
     const switchPlayerMode = useCallback((mini) => {
         modeSwitchRef.current = { time: currentTime, play: isPlaying };
         setIsMini(mini);
-    }, [currentTime, isPlaying]);
-    const resumeAfterModeSwitch = () => {
+    }, [currentTime, isPlaying, setIsMini]);
+    const resumeAfterModeSwitch = useCallback(() => {
         const pending = modeSwitchRef.current;
         if (!pending)
             return;
         modeSwitchRef.current = null;
         if (pending.time > 1)
             seekTo(pending.time);
-        if (pending.play)
+        if (pending.play) {
+            userPausedRef.current = false;
             mediaElementRef.current?.play().catch(() => { });
-    };
+        } else {
+            userPausedRef.current = true;
+        }
+    }, [seekTo]);
+    const handleCanPlay = useCallback(() => {
+        setIsBuffering(false);
+        setHasPlaybackError(false);
+        if (modeSwitchRef.current) {
+            resumeAfterModeSwitch();
+        } else if (shouldAutoplayOnBufferReady(userPausedRef.current, mediaElementRef.current?.paused ?? false, true)) {
+            mediaElementRef.current?.play().then(() => {
+                setIsPlaying(true);
+            }).catch((err) => {
+                console.warn("Autoplay play() error:", err);
+            });
+        }
+        if (pendingSeekRef.current !== null && mediaElementRef.current) {
+            const target = pendingSeekRef.current;
+            pendingSeekRef.current = null;
+            try {
+                mediaElementRef.current.currentTime = target;
+            }
+            catch (err) {
+                console.warn("Failed to set currentTime on canplay:", err);
+            }
+        }
+    }, [resumeAfterModeSwitch]);
+    const handleVideoEnded = useCallback(() => {
+        if (playlist && playlist.length > 1 && onNext && currentIndex < playlist.length - 1) {
+            onNext();
+        } else {
+            setIsPlaying(false);
+            setAreControlsVisible(true);
+        }
+    }, [playlist, onNext, currentIndex]);
+    // Autoplay when stream URL changes and media element buffer is ready
+    useEffect(() => {
+        userPausedRef.current = false;
+        const el = mediaElementRef.current;
+        if (el && shouldAutoplayOnBufferReady(userPausedRef.current, el.paused, el.readyState)) {
+            el.play().then(() => setIsPlaying(true)).catch(() => { });
+        }
+    }, [activeStreamUrl]);
     // Starting audio pauses the video (one thing plays at a time)
     useEffect(() => {
         const pause = () => mediaElementRef.current?.pause();
@@ -511,6 +578,22 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
                     }
                     break;
                 }
+                case "N":
+                case "]": {
+                    if (onNext) {
+                        e.preventDefault();
+                        onNext();
+                    }
+                    break;
+                }
+                case "P":
+                case "[": {
+                    if (onPrev) {
+                        e.preventDefault();
+                        onPrev();
+                    }
+                    break;
+                }
             }
         };
         window.addEventListener("keydown", handleKeyDown);
@@ -528,6 +611,8 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
         onClose,
         playbackRate,
         handlePlaybackRateChange,
+        onNext,
+        onPrev,
     ]);
     // Robust Viewport Pointer/Tap Handler:
     // Handles Single Tap (Toggle controls on touch / Play-Pause on desktop)
@@ -837,23 +922,31 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
     if (isMini) {
         const docked = (<div className="flex items-center gap-2.5 w-full min-w-0">
           <button onClick={() => switchPlayerMode(false)} className="group relative w-[84px] h-[47px] rounded-md overflow-hidden bg-black shrink-0 border border-border" title="Open in theater mode" aria-label="Open video in theater mode">
-            <video ref={mediaElementRef} src={activeStreamUrl} preload="auto" playsInline crossOrigin="anonymous" className="w-full h-full object-cover pointer-events-none" onTimeUpdate={handleTimeUpdate} onProgress={handleProgress} onLoadedMetadata={handleLoadedMetadata} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onEnded={() => setIsPlaying(false)} onWaiting={() => setIsBuffering(true)} onPlaying={() => {
+            <video ref={mediaElementRef} src={activeStreamUrl} autoPlay preload="auto" playsInline crossOrigin="anonymous" className="w-full h-full object-cover pointer-events-none" onTimeUpdate={handleTimeUpdate} onProgress={handleProgress} onLoadedMetadata={handleLoadedMetadata} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onEnded={handleVideoEnded} onWaiting={() => setIsBuffering(true)} onPlaying={() => {
                 setIsBuffering(false);
                 setHasPlaybackError(false);
-            }} onCanPlay={() => {
-                setIsBuffering(false);
-                setHasPlaybackError(false);
-                resumeAfterModeSwitch();
-            }}/>
+            }} onCanPlay={handleCanPlay}/>
             <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity">
               <Maximize2 className="w-4 h-4 text-white"/>
             </span>
           </button>
           <div className="min-w-0 flex-1 md:flex-none md:w-44 lg:w-60">
             <div className="text-[13px] font-medium truncate" title={fileName}>{fileName}</div>
-            <div className="text-[11px] text-muted-foreground font-mono">{isBuffering ? "Buffering…" : `${formatTime(currentTime)} / ${formatTime(duration)}`}</div>
+            <div className="text-[11px] text-muted-foreground font-mono flex items-center gap-1.5">
+              {playlist && playlist.length > 1 && (
+                <span className="text-[10px] px-1 py-0.2 rounded bg-muted text-muted-foreground font-semibold">
+                  {currentIndex + 1}/{playlist.length}
+                </span>
+              )}
+              <span>{isBuffering ? "Buffering…" : `${formatTime(currentTime)} / ${formatTime(duration)}`}</span>
+            </div>
           </div>
           <div className="flex items-center gap-0.5 shrink-0">
+            {playlist && playlist.length > 1 && (
+              <button onClick={onPrev} disabled={!onPrev || currentIndex <= 0} className="w-8 h-8 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:pointer-events-none" title="Previous video" aria-label="Previous video">
+                <SkipBack className="w-4 h-4 fill-current"/>
+              </button>
+            )}
             <button onClick={() => seekTo(currentTime - 10)} className="hidden sm:flex w-8 h-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted" title="Back 10 seconds" aria-label="Back 10 seconds">
               <RotateCcw className="w-4 h-4"/>
             </button>
@@ -863,6 +956,11 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
             <button onClick={() => seekTo(currentTime + 10)} className="hidden sm:flex w-8 h-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted" title="Forward 10 seconds" aria-label="Forward 10 seconds">
               <RotateCw className="w-4 h-4"/>
             </button>
+            {playlist && playlist.length > 1 && (
+              <button onClick={onNext} disabled={!onNext || currentIndex >= playlist.length - 1} className="w-8 h-8 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:pointer-events-none" title="Next video" aria-label="Next video">
+                <SkipForward className="w-4 h-4 fill-current"/>
+              </button>
+            )}
           </div>
           <input type="range" min={0} max={duration || 0} step={1} value={Math.min(currentTime, duration || 0)} onChange={(e) => seekTo(Number(e.target.value))} className="hidden md:block flex-1 min-w-0 h-1 accent-primary cursor-pointer" aria-label="Seek video"/>
           <button onClick={() => switchPlayerMode(false)} className="hidden md:flex w-8 h-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted shrink-0" title="Theater mode" aria-label="Open video in theater mode">
@@ -879,33 +977,16 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
     // =========================================================================
     return (<div ref={containerRef} onMouseMove={() => showControls(4000)} className={`fixed inset-0 z-50 bg-[#0a0a0a] text-white flex flex-col select-none overflow-hidden ${!areControlsVisible && isPlaying ? "cursor-none" : "cursor-default"}`}>
       {/* Native Video Element */}
-      <video ref={mediaElementRef} src={activeStreamUrl} preload="auto" playsInline crossOrigin="anonymous" className="w-full h-full object-contain pointer-events-none" onTimeUpdate={handleTimeUpdate} onProgress={handleProgress} onLoadedMetadata={handleLoadedMetadata} onPlay={() => {
+      <video ref={mediaElementRef} src={activeStreamUrl} autoPlay preload="auto" playsInline crossOrigin="anonymous" className="w-full h-full object-contain pointer-events-none" onTimeUpdate={handleTimeUpdate} onProgress={handleProgress} onLoadedMetadata={handleLoadedMetadata} onPlay={() => {
             setIsPlaying(true);
             showControls(4500);
         }} onPause={() => {
             setIsPlaying(false);
             setAreControlsVisible(true);
-        }} onEnded={() => {
-            setIsPlaying(false);
-            setAreControlsVisible(true);
-        }} onWaiting={() => setIsBuffering(true)} onPlaying={() => {
+        }} onEnded={handleVideoEnded} onWaiting={() => setIsBuffering(true)} onPlaying={() => {
             setIsBuffering(false);
             setHasPlaybackError(false);
-        }} onCanPlay={() => {
-            setIsBuffering(false);
-            setHasPlaybackError(false);
-            resumeAfterModeSwitch();
-            if (pendingSeekRef.current !== null && mediaElementRef.current) {
-                const target = pendingSeekRef.current;
-                pendingSeekRef.current = null;
-                try {
-                    mediaElementRef.current.currentTime = target;
-                }
-                catch (err) {
-                    console.warn("Failed to set currentTime on canplay:", err);
-                }
-            }
-        }} onError={() => {
+        }} onCanPlay={handleCanPlay} onError={() => {
             const videoEl = mediaElementRef.current;
             const err = videoEl?.error;
             console.warn("Video playback error code:", err?.code, err?.message);
@@ -1000,8 +1081,21 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
           </div>
         </div>
 
-        {/* Right: Actions (External Player, Download, Info, Close) */}
+        {/* Right: Actions (Playlist, External Player, Download, Info, Close) */}
         <div className="flex items-center space-x-0.5 sm:space-x-1 flex-shrink-0">
+          {playlist && playlist.length > 0 && (
+            <button onClick={() => {
+              setActiveMenu((prev) => (prev === "playlist" ? "none" : "playlist"));
+              showControls(5000);
+            }} className={`p-2 rounded-full hover:bg-white/10 text-white/90 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[40px] min-h-[40px] flex items-center justify-center gap-1.5 ${activeMenu === "playlist" ? "bg-primary text-primary-foreground" : ""}`} title="Playlist" aria-label="Playlist">
+              <ListVideo className="w-5 h-5"/>
+              {playlist.length > 1 && (
+                <span className="text-[11px] font-mono font-medium px-1.5 py-0.5 rounded-full bg-white/20">
+                  {currentIndex + 1}/{playlist.length}
+                </span>
+              )}
+            </button>
+          )}
           <button onClick={() => {
             setActiveMenu((prev) => (prev === "external" ? "none" : "external"));
             showControls(5000);
@@ -1060,12 +1154,26 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
 
         {/* Playback Controls Row */}
         <div className="flex items-center justify-between text-white">
-          {/* Left Controls: Play, Rewind 10s, Forward 10s, Time, Volume */}
+          {/* Left Controls: Previous, Play, Next, Rewind 10s, Forward 10s, Time, Volume */}
           <div className="flex items-center space-x-1 sm:space-x-2">
+            {/* Previous Track */}
+            {playlist && playlist.length > 1 && (
+              <button onClick={onPrev} disabled={!onPrev || currentIndex <= 0} className="p-2 sm:p-2 rounded-full hover:bg-white/10 text-white/85 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Previous video (Shift+P or [)" aria-label="Previous video">
+                <SkipBack className="w-5 h-5 fill-current"/>
+              </button>
+            )}
+
             {/* Play/Pause Button */}
             <button onClick={togglePlay} className="p-2 sm:p-2.5 rounded-full hover:bg-white/10 text-white transition-transform active:scale-90 focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[40px] min-h-[40px] flex items-center justify-center" title={isPlaying ? "Pause (Space/k)" : "Play (Space/k)"} aria-label={isPlaying ? "Pause" : "Play"}>
               {isPlaying ? (<Pause className="w-5 h-5 sm:w-6 sm:h-6 fill-current"/>) : (<Play className="w-5 h-5 sm:w-6 sm:h-6 fill-current ml-0.5"/>)}
             </button>
+
+            {/* Next Track */}
+            {playlist && playlist.length > 1 && (
+              <button onClick={onNext} disabled={!onNext || currentIndex >= playlist.length - 1} className="p-2 sm:p-2 rounded-full hover:bg-white/10 text-white/85 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Next video (Shift+N or ])" aria-label="Next video">
+                <SkipForward className="w-5 h-5 fill-current"/>
+              </button>
+            )}
 
             {/* Rewind 10s */}
             <button onClick={() => seekRelative(-10)} className="p-2 rounded-full hover:bg-white/10 text-white/85 hover:text-white transition-colors relative focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Rewind 10 seconds (Left Arrow/j)" aria-label="Rewind 10 seconds">
@@ -1095,8 +1203,24 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
             </div>
           </div>
 
-          {/* Right Controls: Subtitles, Settings, PiP, Fullscreen */}
+          {/* Right Controls: Playlist, Subtitles, Settings, PiP, Fullscreen */}
           <div className="flex items-center space-x-1 sm:space-x-2 relative">
+            {/* Playlist Toggle */}
+            {playlist && playlist.length > 0 && (
+              <button onClick={(e) => {
+                e.stopPropagation();
+                setActiveMenu((prev) => (prev === "playlist" ? "none" : "playlist"));
+                showControls(5000);
+            }} className={`p-2 sm:p-2 rounded-full hover:bg-white/10 text-white/85 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center gap-1 ${activeMenu === "playlist" ? "bg-white/20 text-white" : ""}`} title="Playlist" aria-label="Playlist">
+                <ListVideo className="w-5 h-5"/>
+                {playlist.length > 1 && (
+                  <span className="hidden sm:inline text-[11px] font-mono">
+                    {currentIndex + 1}/{playlist.length}
+                  </span>
+                )}
+              </button>
+            )}
+
             {/* Subtitles / CC Toggle */}
             <button onClick={(e) => {
             e.stopPropagation();
@@ -1146,7 +1270,55 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
                 showControls(4500);
             }} className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 sm:hidden"/>
 
-          <div onClick={(e) => e.stopPropagation()} className="z-50 text-white bg-zinc-900/95 backdrop-blur-xl border border-white/10 shadow-2xl transition-all duration-200 fixed inset-x-0 bottom-0 rounded-t-2xl max-h-[85vh] p-4 sm:absolute sm:inset-auto sm:bottom-20 sm:right-6 sm:w-72 sm:rounded-2xl sm:p-2.5 sm:max-h-[60vh] overflow-y-auto animate-in slide-in-from-bottom duration-200 sm:animate-in sm:fade-in sm:zoom-in-95">
+          <div onClick={(e) => e.stopPropagation()} className={`z-50 text-white bg-zinc-900/95 backdrop-blur-xl border border-white/10 shadow-2xl transition-all duration-200 fixed inset-x-0 bottom-0 rounded-t-2xl max-h-[85vh] p-4 sm:absolute sm:inset-auto sm:bottom-20 sm:right-6 sm:rounded-2xl sm:p-2.5 sm:max-h-[60vh] overflow-y-auto animate-in slide-in-from-bottom duration-200 sm:animate-in sm:fade-in sm:zoom-in-95 ${activeMenu === "playlist" ? "sm:w-84 md:w-96" : "sm:w-72"}`}>
+            {/* Playlist View */}
+            {activeMenu === "playlist" && (<div className="space-y-2">
+                <div className="flex items-center justify-between px-2 py-2 border-b border-white/10 text-sm font-medium">
+                  <div className="flex items-center gap-2">
+                    <ListVideo className="w-4 h-4 text-primary"/>
+                    <span>Playlist</span>
+                    <span className="text-xs font-mono text-white/50 px-1.5 py-0.5 rounded bg-white/10">
+                      {currentIndex + 1} of {playlist.length}
+                    </span>
+                  </div>
+                  <button onClick={() => {
+                    setActiveMenu("none");
+                    showControls(4500);
+                }} className="p-1 rounded-full hover:bg-white/10 text-white/70 hover:text-white" aria-label="Close playlist">
+                    <X className="w-4 h-4"/>
+                  </button>
+                </div>
+                <div className="py-1 max-h-72 sm:max-h-96 overflow-y-auto space-y-1 px-1">
+                  {playlist.map((video, idx) => {
+                    const isActive = idx === currentIndex;
+                    const vName = video.name || video.fileName || "";
+                    const vExt = getFileExtension(vName);
+                    return (<button key={video.id || video.url || idx} onClick={() => {
+                        if (onSelectTrack) {
+                            onSelectTrack(idx);
+                        }
+                        setActiveMenu("none");
+                    }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left text-sm transition-all touch-manipulation ${isActive ? "bg-primary/20 text-white border border-primary/40 font-medium" : "hover:bg-white/10 text-white/80 border border-transparent"}`}>
+                        <span className="w-5 text-center font-mono text-xs text-white/40 shrink-0">
+                          {isActive ? <Play className="w-3.5 h-3.5 fill-primary text-primary mx-auto"/> : idx + 1}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className={`truncate text-[13px] ${isActive ? "text-primary font-semibold" : "text-white/90"}`} title={vName}>
+                            {vName}
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px] text-white/50 font-mono mt-0.5">
+                            <span className="uppercase text-[10px] font-bold px-1 py-0.2 rounded bg-white/10 text-white/70">{vExt}</span>
+                            {video.size ? <span>{formatBytes(video.size)}</span> : null}
+                          </div>
+                        </div>
+                        {isActive && (<span className="text-[10px] font-mono uppercase tracking-wider text-primary px-1.5 py-0.5 rounded bg-primary/20 shrink-0">
+                            Playing
+                          </span>)}
+                      </button>);
+                })}
+                </div>
+              </div>)}
+
             {/* Main Menu View */}
             {activeMenu === "settings" && (<div className="space-y-4">
                 <div className="flex items-center justify-between px-1 pb-2 border-b border-white/10">
