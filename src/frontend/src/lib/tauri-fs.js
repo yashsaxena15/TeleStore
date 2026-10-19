@@ -1,6 +1,6 @@
 // Tauri file system utilities for native folder scanning
 import logger from '@/lib/logger';
-import authService from '@/lib/authService';
+import authService from '@/features/auth/authService';
 // Check if we're running in Tauri environment
 export const isTauriEnvironment = () => {
     return typeof window !== 'undefined' && authService.isTauri();

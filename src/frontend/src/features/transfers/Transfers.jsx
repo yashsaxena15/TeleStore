@@ -1,0 +1,390 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { ArrowUpDown, ArrowUpCircle, ArrowDownCircle, CloudDownload, Pause, Play, X, RotateCcw, Trash2, FolderOpen, AlertCircle, Clock, Folder, Magnet, FolderArchive, ChevronDown, ChevronUp, FileText } from "lucide-react";
+import { useTransferManager } from "./useTransferManager";
+import { formatBytes } from "@/lib/utils";
+import { invoke } from "@tauri-apps/api/core";
+import { groupRemoteTransfers } from "./transferGrouping";
+export const Transfers = () => {
+    const navigate = useNavigate();
+    const { uploads, downloads, remoteTransfers, stats, pauseUpload, resumeUpload, cancelUpload, retryUpload, pauseDownload, resumeDownload, cancelDownload, retryDownload, cancelRemoteTransfer, cancelRemoteGroup, resumeRemoteGroup, pauseAll, resumeAll, cancelAll, clearCompleted } = useTransferManager();
+    const [activeTab, setActiveTab] = useState("all");
+    const [expandedGroups, setExpandedGroups] = useState({});
+    const toggleGroup = (groupId) => {
+        setExpandedGroups(prev => ({ ...prev, [groupId]: !prev[groupId] }));
+    };
+    const formatSpeed = (bytesPerSec) => {
+        if (!bytesPerSec || bytesPerSec <= 0)
+            return "";
+        return `${formatBytes(bytesPerSec)}/s`;
+    };
+    const formatEta = (seconds) => {
+        if (!seconds || !isFinite(seconds) || seconds <= 0)
+            return "";
+        if (seconds > 3600)
+            return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+        if (seconds > 60)
+            return `${Math.floor(seconds / 60)}m ${Math.floor(seconds % 60)}s`;
+        return `${Math.round(seconds)}s`;
+    };
+    const openDownloadedFile = async (path) => {
+        if (!path)
+            return;
+        try {
+            await invoke("open_file_in_folder", { path });
+        }
+        catch (error) {
+            console.error("Failed to open file folder:", error);
+        }
+    };
+    // Group remote transfers by group_id
+    const { groupedRemoteItems, singleRemoteItems } = groupRemoteTransfers(remoteTransfers);
+    // Build unified item list
+    const transferItems = [
+        ...groupedRemoteItems,
+        ...singleRemoteItems,
+        ...uploads.map(u => ({ ...u, type: "upload" })),
+        ...downloads.map(d => ({
+            ...d,
+            type: "download",
+            filesize: d.size || 0,
+            bytesUploaded: d.downloaded || 0,
+            file: null
+        }))
+    ];
+    // Sort: active/paused items first, then completed/failed by start time
+    transferItems.sort((a, b) => {
+        const aActive = a.status === "uploading" || a.status === "downloading" || a.status === "uploading_tg" || a.status === "queued" || a.status === "paused" || a.status === "paused_quota" || a.status === "discovering";
+        const bActive = b.status === "uploading" || b.status === "downloading" || b.status === "uploading_tg" || b.status === "queued" || b.status === "paused" || b.status === "paused_quota" || b.status === "discovering";
+        if (aActive && !bActive)
+            return -1;
+        if (!aActive && bActive)
+            return 1;
+        const aTime = a.startTime ? new Date(a.startTime).getTime() : 0;
+        const bTime = b.startTime ? new Date(b.startTime).getTime() : 0;
+        return bTime - aTime;
+    });
+    const filteredItems = transferItems.filter(item => {
+        if (activeTab === "uploads")
+            return item.type === "upload";
+        if (activeTab === "downloads")
+            return item.type === "download";
+        if (activeTab === "remote")
+            return item.type === "remote";
+        if (activeTab === "completed")
+            return item.status === "completed";
+        return true;
+    });
+    const hasActiveTransfers = stats.totalActive > 0;
+    const hasPausedTransfers = stats.pausedCount > 0;
+    return (<div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 overflow-auto bg-gradient-to-br from-blue-50/50 to-indigo-100/50 dark:from-gray-900 dark:to-gray-800/80 py-8 px-4 sm:px-6">
+        <div className="max-w-5xl mx-auto">
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+            <div>
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-primary/10 text-primary">
+                  <ArrowUpDown className="w-6 h-6"/>
+                </div>
+                <div>
+                  <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    Transfers
+                    {stats.totalActive > 0 && (<span className="text-xs px-2.5 py-0.5 rounded-full bg-primary text-primary-foreground font-semibold animate-pulse">
+                        {stats.totalActive} active
+                      </span>)}
+                  </h1>
+                  <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
+                    Monitor and manage local uploads, downloads, and cloud-to-cloud transfers
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button variant="outline" size="sm" onClick={pauseAll} disabled={!hasActiveTransfers} className="gap-1.5" title="Pause all ongoing transfers">
+                <Pause className="w-3.5 h-3.5"/>
+                Pause All
+              </Button>
+              <Button variant="outline" size="sm" onClick={resumeAll} disabled={!hasPausedTransfers} className="gap-1.5" title="Resume all paused transfers">
+                <Play className="w-3.5 h-3.5"/>
+                Resume All
+              </Button>
+              <Button variant="outline" size="sm" onClick={cancelAll} disabled={!hasActiveTransfers && !hasPausedTransfers} className="gap-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30" title="Cancel all active & paused transfers">
+                <X className="w-3.5 h-3.5"/>
+                Cancel All
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => navigate("/")} className="gap-1.5 ml-auto sm:ml-2">
+                Back to Files
+              </Button>
+            </div>
+          </div>
+
+          {/* Filter Tabs Card */}
+          <Card className="bg-white/90 dark:bg-gray-800/90 border border-border shadow-sm rounded-xl mb-6">
+            <div className="p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+                <Button variant={activeTab === "all" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("all")} className="rounded-lg text-xs sm:text-sm">
+                  All ({transferItems.length})
+                </Button>
+                <Button variant={activeTab === "remote" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("remote")} className="rounded-lg text-xs sm:text-sm flex items-center gap-1.5 text-purple-600 dark:text-purple-400">
+                  <CloudDownload className="w-3.5 h-3.5"/>
+                  Cloud Leech ({groupedRemoteItems.length + singleRemoteItems.length})
+                </Button>
+                <Button variant={activeTab === "uploads" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("uploads")} className="rounded-lg text-xs sm:text-sm flex items-center gap-1.5">
+                  <ArrowUpCircle className="w-3.5 h-3.5 text-blue-500"/>
+                  Uploads ({uploads.length})
+                </Button>
+                <Button variant={activeTab === "downloads" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("downloads")} className="rounded-lg text-xs sm:text-sm flex items-center gap-1.5">
+                  <ArrowDownCircle className="w-3.5 h-3.5 text-emerald-500"/>
+                  Downloads ({downloads.length})
+                </Button>
+                <Button variant={activeTab === "completed" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("completed")} className="rounded-lg text-xs sm:text-sm">
+                  Completed ({stats.completedUploads + stats.completedDownloads + stats.completedRemote})
+                </Button>
+              </div>
+
+              <Button variant="ghost" size="sm" onClick={clearCompleted} className="text-xs text-muted-foreground hover:text-foreground shrink-0 self-end sm:self-auto">
+                <Trash2 className="w-3.5 h-3.5 mr-1"/>
+                Clear Completed
+              </Button>
+            </div>
+          </Card>
+
+          {/* Transfers List */}
+          {filteredItems.length === 0 ? (<Card className="bg-white/80 dark:bg-gray-800/80 border border-border p-12 text-center rounded-xl">
+              <ArrowUpDown className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-50"/>
+              <h3 className="text-base font-semibold text-foreground">No transfers found</h3>
+              <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+                {activeTab === "all"
+                ? "When you initiate cloud downloads, uploads, or downloads, they will show up here live."
+                : `No ${activeTab} items at this moment.`}
+              </p>
+              <div className="mt-5">
+                <Button size="sm" onClick={() => navigate("/")}>
+                  Go to Files
+                </Button>
+              </div>
+            </Card>) : (<div className="flex flex-col gap-3">
+              {filteredItems.map(item => {
+                const isGroup = Boolean(item.isGroup);
+                const isRemote = item.type === "remote";
+                const isUpload = item.type === "upload";
+                const isTransferring = item.status === "uploading" || item.status === "downloading" || item.status === "uploading_tg";
+                const isPaused = item.status === "paused";
+                const isPausedQuota = item.status === "paused_quota" || Boolean(item.isPausedQuota);
+                const isDiscovering = item.status === "discovering" || Boolean(item.isDiscovering);
+                const isCompleted = item.status === "completed";
+                const isFailed = item.status === "failed";
+                const isQueued = item.status === "queued";
+                const transferredBytes = item.bytesUploaded || (item.downloaded || 0);
+                const totalBytes = item.filesize || (item.size || 0);
+                const speedText = formatSpeed(item.speed);
+                const etaText = formatEta(item.eta);
+                return (<Card key={`${item.type}_${item.id}`} className="bg-white dark:bg-gray-800 border border-border/80 shadow-xs hover:shadow-md transition-all rounded-xl overflow-hidden">
+                    <div className="p-4 flex flex-col gap-3">
+                      {/* Top row: Icon, Name, Badges, Actions */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <div className={`p-2 rounded-lg shrink-0 ${isPausedQuota ? "bg-amber-100 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400"
+                        : isDiscovering ? "bg-indigo-100 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 animate-pulse"
+                            : isRemote ? "bg-purple-100 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400"
+                                : isUpload ? "bg-blue-100 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400"
+                                    : "bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400"}`}>
+                            {isGroup ? (<FolderArchive className="w-5 h-5"/>) : isRemote ? (item.source_type === "magnet" || item.source_type === "torrent_file" ? (<Magnet className="w-5 h-5"/>) : (<CloudDownload className="w-5 h-5"/>)) : isUpload ? (<ArrowUpCircle className="w-5 h-5"/>) : (<ArrowDownCircle className="w-5 h-5"/>)}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-semibold text-sm text-foreground truncate max-w-xs sm:max-w-md">
+                                {item.filename}
+                              </span>
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium uppercase tracking-wider ${isRemote ? "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300"
+                        : isUpload ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                            : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"}`}>
+                                {isGroup
+                        ? item.group_type === "torrent"
+                            ? "Torrent Leech"
+                            : item.group_type === "file"
+                                ? "Multi-Node Leech ⚡"
+                                : "Folder Leech"
+                        : isRemote
+                            ? item.source_type === "magnet"
+                                ? "Magnet Leech"
+                                : item.source_type === "torrent_file"
+                                    ? "Torrent Leech"
+                                    : "Cloud Leech"
+                            : isUpload ? "Upload" : "Download"}
+                              </span>
+                              {/* Group file/part counter badge */}
+                              {isGroup && (<span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300 border border-indigo-500/20">
+                                  {item.completedCount}/{item.totalCount} {item.group_type === "file" ? "parts" : "files"}
+                                </span>)}
+                              {/* Peer Count Badge */}
+                              {isRemote && item.peer_count > 0 && (<span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 flex items-center gap-1 border border-amber-500/20">
+                                  ⚡ {item.peer_count} peers
+                                </span>)}
+                              {/* Status Badge */}
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${isCompleted ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" :
+                        isPausedQuota ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-500/30 animate-pulse font-semibold" :
+                            isDiscovering ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-500/30 animate-pulse font-semibold" :
+                                isPaused ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" :
+                                    isFailed ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" :
+                                        isQueued ? "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" :
+                                            "bg-primary/10 text-primary"}`}>
+                                {isPausedQuota ? "QUOTA LIMIT (24H)" : isDiscovering ? "DISCOVERING FILES..." : item.status.toUpperCase()}
+                              </span>
+                            </div>
+
+                            {/* Phase or Destination info */}
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 flex-wrap">
+                              {isRemote && item.phase && (<span className={`font-medium ${isPausedQuota ? "text-amber-600 dark:text-amber-400 font-semibold" :
+                            isDiscovering ? "text-indigo-600 dark:text-indigo-400 font-semibold" :
+                                isPaused ? "text-amber-600 dark:text-amber-400" :
+                                    "text-purple-600 dark:text-purple-400"}`}>
+                                  {item.phase}
+                                </span>)}
+                              {isRemote && item.destination_path && (<span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                  <Folder className="w-3 h-3"/> {item.destination_path}
+                                </span>)}
+                            </div>
+
+                            {/* Secondary stats */}
+                            <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1 flex-wrap">
+                              <span>
+                                {formatBytes(transferredBytes)}
+                                {totalBytes > 0 ? ` / ${formatBytes(totalBytes)}` : ""}
+                              </span>
+                              {isTransferring && speedText && (<span className="font-medium text-foreground">{speedText}</span>)}
+                              {isTransferring && etaText && (<span className="flex items-center gap-1">
+                                  <Clock className="w-3 h-3"/> ETA: {etaText}
+                                </span>)}
+                              {item.error && (<span className="text-red-500 font-medium">{item.error}</span>)}
+                              {isRemote && item.error_message && (<span className="text-red-500 font-medium">{item.error_message}</span>)}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Action buttons */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {isGroup && (<Button variant="outline" size="sm" className="h-8 px-2.5 text-xs flex items-center gap-1.5 text-muted-foreground hover:text-foreground font-medium" onClick={() => toggleGroup(item.group_id)}>
+                              {expandedGroups[item.group_id] ? (<>Hide Files <ChevronUp className="w-3.5 h-3.5"/></>) : (<>Show Files ({item.items.length}) <ChevronDown className="w-3.5 h-3.5"/></>)}
+                            </Button>)}
+
+                          {isPausedQuota && (<Button variant="outline" size="sm" className="h-8 px-2.5 text-xs flex items-center gap-1.5 text-amber-700 border-amber-400 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-600 font-medium shadow-xs" title="Bypass 24h wait and attempt transfer immediately" onClick={() => {
+                            if (isGroup) {
+                                resumeRemoteGroup(item.group_id);
+                            }
+                            else {
+                                resumeRemoteGroup(item.id);
+                            }
+                        }}>
+                              <Play className="w-3.5 h-3.5 fill-current"/>
+                              Resume Now
+                            </Button>)}
+
+                          {!isRemote && isTransferring && (<Button variant="outline" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" title="Pause" onClick={() => isUpload ? pauseUpload(item.id) : pauseDownload(item.id)}>
+                              <Pause className="w-4 h-4"/>
+                            </Button>)}
+
+                          {!isRemote && isPaused && (<Button variant="outline" size="icon" className="h-8 w-8 text-primary hover:text-primary/80" title="Resume" onClick={() => isUpload ? resumeUpload(item.id) : resumeDownload(item.id)}>
+                              <Play className="w-4 h-4"/>
+                            </Button>)}
+
+                          {(isTransferring || isPaused || isQueued || isPausedQuota || isDiscovering) && (<Button variant="outline" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30" title={isGroup ? "Cancel entire folder" : "Cancel"} onClick={() => {
+                            if (isGroup) {
+                                cancelRemoteGroup(item.group_id);
+                            }
+                            else if (isRemote) {
+                                cancelRemoteTransfer(item.id);
+                            }
+                            else if (isUpload) {
+                                cancelUpload(item.id);
+                            }
+                            else {
+                                cancelDownload(item.id);
+                            }
+                        }}>
+                              <X className="w-4 h-4"/>
+                            </Button>)}
+
+                          {isFailed && !isRemote && (<Button variant="outline" size="icon" className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30" title="Retry" onClick={() => isUpload ? retryUpload(item.id) : retryDownload(item)}>
+                              <RotateCcw className="w-4 h-4"/>
+                            </Button>)}
+
+                          {isCompleted && !isUpload && !isRemote && item.savePath && (<Button variant="outline" size="icon" className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30" title="Show in folder" onClick={() => openDownloadedFile(item.savePath)}>
+                              <FolderOpen className="w-4 h-4"/>
+                            </Button>)}
+                        </div>
+                      </div>
+
+                      {/* Quota Limit Banner */}
+                      {isPausedQuota && (<div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5"/>
+                          <div className="flex-1">
+                            <span className="font-semibold">Google Drive Quota Hit: </span>
+                            Google has temporarily rate-limited downloads. Remaining files are safely paused in queue and will automatically resume once the 24h cooldown expires. Or click <strong>Resume Now</strong> above to retry anytime.
+                          </div>
+                        </div>)}
+
+                      {/* Folder Discovery Banner */}
+                      {isDiscovering && (<div className="bg-indigo-500/10 border border-indigo-500/30 rounded-lg p-2.5 text-xs text-indigo-800 dark:text-indigo-200 flex items-center gap-2">
+                          <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin shrink-0"/>
+                          <div className="flex-1">
+                            <span className="font-semibold">Analyzing Google Drive Folder: </span>
+                            Crawling files and folder structure in the background. Downloads will start as files are resolved.
+                          </div>
+                        </div>)}
+
+                      {/* Progress Bar */}
+                      <Progress value={item.progress} className={`h-1.5 w-full ${isRemote ? "[&>div]:bg-purple-500" :
+                        isPaused ? "[&>div]:bg-amber-500" :
+                            isCompleted ? "[&>div]:bg-emerald-500" :
+                                isFailed ? "[&>div]:bg-red-500" : ""}`}/>
+
+                      {/* Collapsible files list inside group */}
+                      {isGroup && expandedGroups[item.group_id] && (<div className="mt-3 pt-3 border-t border-border/60 flex flex-col gap-2 bg-muted/20 dark:bg-gray-900/30 -mx-4 -mb-4 p-4 rounded-b-xl">
+                          <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 flex items-center justify-between">
+                            <span>Files in this folder ({item.items.length})</span>
+                            <span>{item.completedCount} / {item.totalCount} Completed</span>
+                          </div>
+                          {item.items.map((sub) => (<div key={sub.id} className="flex flex-col gap-1 text-xs py-2 px-2.5 rounded-lg bg-card/60 border border-border/40">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium truncate max-w-xs sm:max-w-md text-foreground flex items-center gap-1.5" title={sub.filename}>
+                                  <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0"/>
+                                  {sub.filename}
+                                </span>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${sub.status === 'completed' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' :
+                                sub.status === 'paused_quota' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-500/20' :
+                                    sub.status === 'discovering' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300' :
+                                        sub.status === 'downloading' || sub.status === 'uploading_tg' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' :
+                                            sub.status === 'cancelled' ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' :
+                                                'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
+                                    {sub.status === 'paused_quota' ? 'PAUSED (QUOTA)' : sub.status.toUpperCase()}
+                                  </span>
+                                  {(sub.status === 'downloading' || sub.status === 'uploading_tg' || sub.status === 'queued' || sub.status === 'paused_quota') && (<Button variant="ghost" size="icon" className="h-6 w-6 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30" onClick={() => cancelRemoteTransfer(sub.id)} title="Cancel this file">
+                                      <X className="w-3 h-3"/>
+                                    </Button>)}
+                                </div>
+                              </div>
+                              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                                <span className="truncate max-w-[250px]">{sub.phase || (sub.filesize > 0 ? formatBytes(sub.filesize) : '')}</span>
+                                <span className="font-mono">{sub.progress}%</span>
+                              </div>
+                              <Progress value={sub.progress} className={`h-1 w-full ${sub.status === 'completed' ? '[&>div]:bg-emerald-500' :
+                                sub.status === 'cancelled' ? '[&>div]:bg-gray-400' :
+                                    '[&>div]:bg-purple-500'}`}/>
+                            </div>))}
+                        </div>)}
+                    </div>
+                  </Card>);
+            })}
+            </div>)}
+        </div>
+      </div>
+    </div>);
+};
+export default Transfers;

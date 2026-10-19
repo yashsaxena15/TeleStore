@@ -1,6 +1,6 @@
 // API base URL - will use proxy in development
 import logger from '@/lib/logger';
-import authService from './authService';
+import authService from '@/features/auth/authService';
 const getDefaultApiUrl = () => {
     const savedUrl = localStorage.getItem("serverUrl");
     if (savedUrl) {

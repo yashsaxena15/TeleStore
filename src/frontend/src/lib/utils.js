@@ -1,7 +1,7 @@
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { invoke } from "@tauri-apps/api/core";
-import authService from "@/lib/authService";
+import authService from "@/features/auth/authService";
 import { getApiBaseUrl } from "@/lib/api";
 import { toast } from "sonner";
 // Tauri imports (only available in Tauri environment)

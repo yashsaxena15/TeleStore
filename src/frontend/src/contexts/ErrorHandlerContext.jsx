@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState } from 'react';
-import CustomErrorDialog from '@/components/CustomErrorDialog';
+import CustomErrorDialog from '@/components/feedback/CustomErrorDialog';
 const ErrorContext = createContext(undefined);
 export const ErrorProvider = ({ children }) => {
     const [isOpen, setIsOpen] = useState(false);
