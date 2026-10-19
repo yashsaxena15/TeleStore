@@ -4,7 +4,7 @@
 services:
   app:
     volumes:
-      - ./src/frontend/dist:/app/src/frontend/dist
+      - ./frontend/dist:/app/frontend/dist
       - ./src/Backend:/app/src/Backend
       - ./src/Database:/app/src/Database
       - ./src/Config:/app/src/Config

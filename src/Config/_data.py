@@ -5,6 +5,11 @@ from dotenv import load_dotenv
 from pyrogram.types import ChatPrivileges
 load_dotenv()
 
+# Repository root (/app in the container) and the React app built by `npm run build`
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+FRONTEND_DIR = os.path.join(PROJECT_ROOT, "frontend")
+FRONTEND_DIST = os.path.join(FRONTEND_DIR, "dist")
+
 APP_NAME = os.getenv("APP_NAME", "TeleStore")
 TIME_ZONE = os.getenv("TIME_ZONE", "+5:30")
 WEB_APP = os.getenv("WEB_APP", None)

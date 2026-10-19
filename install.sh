@@ -8,7 +8,7 @@ REQUIREMENTS="$PROJECT_DIR/requirements.txt"
 MAIN_FILE="$PROJECT_DIR/__main__.py"
 SERVICE_NAME="telegram-file-server"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
-FRONTEND_DIR="$PROJECT_DIR/src/frontend"
+FRONTEND_DIR="$PROJECT_DIR/frontend"
 
 # Initialize git submodules if .git exists
 if [ -d "$PROJECT_DIR/.git" ]; then

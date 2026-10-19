@@ -32,7 +32,7 @@ from .routes.webdav_routes import router as webdav_router
 # Import exception handlers
 from .routes.error_handlers import exception_handlers
 
-from src.Config import APP_NAME, OWNER, SESSION_SECRET_KEY
+from src.Config import APP_NAME, OWNER, SESSION_SECRET_KEY, FRONTEND_DIST
 from src.Database import database
 
 # Import utility functions and global variables
@@ -157,7 +157,7 @@ app.include_router(worker_router)
 # fresh checkout), so check_dir=False lets the API start without it.
 app.mount(
     "/assets",
-    StaticFiles(directory=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "dist", "assets"), check_dir=False),
+    StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets"), check_dir=False),
     name="assets",
 )
 # Register exception handlers

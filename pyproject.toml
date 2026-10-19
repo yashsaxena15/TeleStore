@@ -14,7 +14,7 @@ exclude = [
     "__pycache__",
     "cache",
     "conversation-sharing",
-    "src/frontend",
+    "frontend",
 ]
 
 [tool.ruff.lint]

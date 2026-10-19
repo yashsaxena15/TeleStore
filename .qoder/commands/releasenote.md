@@ -14,7 +14,7 @@ Your task:
    - If none exists, fall back to locating the latest commit whose message contains "new release" followed by a version number.
 2. Collect all commits made AFTER that release, up to the current HEAD, in both:
    - The main repository
-   - The submodule at `src/frontend`
+   - The submodule at `frontend`
 3. Generate a professional, well-structured release note based on those commits.
 
 Strict rules (non-negotiable):

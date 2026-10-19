@@ -268,7 +268,7 @@ pip install -r requirements.txt
 
 ### 2. Frontend Setup
 ```bash
-cd src/frontend
+cd frontend
 npm install
 npm run build
 cd ../..

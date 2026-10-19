@@ -45,7 +45,7 @@ Thank you for contributing to TeleStore. This document outlines development prac
 
 1. Navigate to the frontend directory:
    ```bash
-   cd src/frontend
+   cd frontend
    ```
 
 2. Install dependencies:
@@ -84,7 +84,7 @@ Backend tests use mocks for MongoDB and Telegram, running completely isolated wi
 
 Run frontend unit tests using Vitest:
 ```bash
-cd src/frontend
+cd frontend
 npm test
 ```
 
@@ -109,7 +109,7 @@ Configuration is defined in `pyproject.toml`. Current active rules:
 
 Check JavaScript and JSX code with ESLint:
 ```bash
-cd src/frontend
+cd frontend
 npm run lint
 ```
 
@@ -117,7 +117,7 @@ npm run lint
 
 Verify that Vite can build the production frontend bundle without errors:
 ```bash
-cd src/frontend
+cd frontend
 npm run build
 ```
 

@@ -71,7 +71,7 @@ flowchart TD
 
 ### A. Frontend Single-Page Application (SPA)
 - **Tech Stack**: React 18, Vite, Tailwind CSS, Lucide React icons, Vitest.
-- **Delivery**: Static build in `src/frontend/dist/`, served by FastAPI via fallback routing.
+- **Delivery**: Static build in `frontend/dist/`, served by FastAPI via fallback routing.
 - **Capabilities**: Multi-file explorer, drag-and-drop upload, video/audio player with seeking, photo viewer, document viewer, remote transfer monitor, cloud storage connectors.
 
 ### B. FastAPI Application Server (`src/Backend/web.py`)

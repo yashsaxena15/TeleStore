@@ -4,6 +4,8 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import HTMLResponse, FileResponse
 import os
 
+from src.Config import FRONTEND_DIR, FRONTEND_DIST
+
 router = APIRouter()
 
 API_PREFIXES = (
@@ -29,13 +31,12 @@ async def serve_frontend(request: Request, full_path: str):
     if first_segment in API_PREFIXES:
         return Response(status_code=404)
     
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    frontend_dist = os.path.normpath(os.path.join(current_dir, "..", "..", "frontend", "dist"))
+    frontend_dist = os.path.normpath(FRONTEND_DIST)
     
     # 1. If requesting a static file from dist (e.g. favicon.ico, placeholder.svg, robots.txt)
     if full_path:
         requested_file = os.path.normpath(os.path.join(frontend_dist, full_path))
-        if requested_file.startswith(frontend_dist) and os.path.isfile(requested_file):
+        if requested_file.startswith(frontend_dist + os.sep) and os.path.isfile(requested_file):
             return FileResponse(requested_file)
     
     # 2. Serve built production frontend index.html for SPA routing
@@ -44,7 +45,7 @@ async def serve_frontend(request: Request, full_path: str):
         return FileResponse(dist_index)
     
     # 3. Fallback to development index.html if dist does not exist
-    dev_index = os.path.normpath(os.path.join(current_dir, "..", "..", "frontend", "index.html"))
+    dev_index = os.path.join(FRONTEND_DIR, "index.html")
     if os.path.isfile(dev_index):
         return FileResponse(dev_index)
     
