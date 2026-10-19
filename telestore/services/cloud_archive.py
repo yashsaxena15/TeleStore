@@ -12,13 +12,12 @@ from pyrogram import Client
 
 from d4rk.Logs import setup_logger
 from telestore.db import database
-from telestore.config import LOGS, MOVIE
+from telestore.config import LOGS, MOVIE, TEMP_ARCHIVE_DIR
 from telestore.services.byte_streamer import ByteStreamer
 from telestore.services.priority_manager import priority_manager
 
 logger = setup_logger("cloud_archive")
 
-TEMP_ARCHIVE_DIR = "/home/ubuntu/projects/TelegramFileServer/src/Backend/temp_archives"
 os.makedirs(TEMP_ARCHIVE_DIR, exist_ok=True)
 
 

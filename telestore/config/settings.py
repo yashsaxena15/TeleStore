@@ -9,6 +9,8 @@ load_dotenv()
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 FRONTEND_DIR = os.path.join(PROJECT_ROOT, "frontend")
 FRONTEND_DIST = os.path.join(FRONTEND_DIR, "dist")
+# Scratch space for archives built on the server (zip/7z downloads, archive extraction)
+TEMP_ARCHIVE_DIR = os.getenv("TEMP_ARCHIVE_DIR", os.path.join(PROJECT_ROOT, "temp_archives"))
 
 APP_NAME = os.getenv("APP_NAME", "TeleStore")
 TIME_ZONE = os.getenv("TIME_ZONE", "+5:30")

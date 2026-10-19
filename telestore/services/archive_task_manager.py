@@ -8,13 +8,12 @@ from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timezone
 from pymongo import MongoClient
 
-from telestore.config import DATABASE_URL, APP_NAME
+from telestore.config import DATABASE_URL, APP_NAME, TEMP_ARCHIVE_DIR
 from telestore.db import database
 from d4rk.Logs import setup_logger
 
 logger = setup_logger("archive_task_manager")
 
-TEMP_ARCHIVE_DIR = "/home/ubuntu/projects/TelegramFileServer/src/Backend/temp_archives"
 os.makedirs(TEMP_ARCHIVE_DIR, exist_ok=True)
 
 # Mandatory safety buffer: 25 GB
