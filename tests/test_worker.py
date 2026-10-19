@@ -105,7 +105,7 @@ class TestWorkerAuthentication:
         assert response.status_code == 401
         assert response.json()["detail"] == "Invalid or missing X-Worker-Key header"
 
-    @patch("src.Backend.routes.worker_routes.get_remote_db")
+    @patch("telestore.api.routes.worker.get_remote_db")
     def test_worker_heartbeat_accepts_valid_key(self, mock_get_remote_db, client, test_secrets):
         """Worker endpoint accepts request when provided with valid X-Worker-Key."""
         mock_db = MagicMock()

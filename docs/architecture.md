@@ -74,7 +74,7 @@ flowchart TD
 - **Delivery**: Static build in `frontend/dist/`, served by FastAPI via fallback routing.
 - **Capabilities**: Multi-file explorer, drag-and-drop upload, video/audio player with seeking, photo viewer, document viewer, remote transfer monitor, cloud storage connectors.
 
-### B. FastAPI Application Server (`src/Backend/web.py`)
+### B. FastAPI Application Server (`telestore/api/app.py`)
 - **Routing & Endpoints**:
   - `/auth`: Local password authentication, Google OAuth login.
   - `/files`: Hierarchical folder browsing, pagination, renaming, deletion, tagging, and chunked uploads.
@@ -84,7 +84,7 @@ flowchart TD
   - `/webdav`: WebDAV protocol support for external clients (Mixplorer, rclone, native OS file managers).
 - **Security & Session Management**:
   - Encrypted Starlette session cookies (`SESSION_SECRET_KEY`).
-  - Scrypt password hashing with backward-compatible auto-upgrade for legacy SHA-256 hashes (`src/Utils/passwords.py`).
+  - Scrypt password hashing with backward-compatible auto-upgrade for legacy SHA-256 hashes (`telestore/utils/passwords.py`).
   - Strict header authentication (`X-Worker-Key`) for distributed worker nodes.
   - HMAC-SHA256 signature verification for GitHub auto-update webhooks (`X-Hub-Signature-256`).
 
@@ -93,7 +93,7 @@ flowchart TD
 - **Load Balancing**: Distributes download and stream chunk requests across bots to avoid Telegram API rate limits and maximize bandwidth.
 - **Workload Tracking**: Dynamically reports per-bot active download streams via `/system/workloads`.
 
-### D. MongoDB Layer (`src/Database/Mongodb`)
+### D. MongoDB Layer (`telestore/db`)
 - **Collections**:
   - `Users`: User accounts, hashed passwords, verified Telegram identities, active tokens.
   - `Files`: File metadata, original filenames, sizes, MIME types, Telegram `file_unique_id`, `chat_id`, `message_id`, folder hierarchy, trash state.

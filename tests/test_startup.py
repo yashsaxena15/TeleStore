@@ -2,7 +2,7 @@
 
 import pytest
 from unittest.mock import patch
-from src.Config._data import _required_secret
+from telestore.config.settings import _required_secret
 
 
 def test_required_secret_missing():

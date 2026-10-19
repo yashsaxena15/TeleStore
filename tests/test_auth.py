@@ -2,9 +2,9 @@
 
 import hashlib
 from unittest.mock import MagicMock
-from src.Database import database
-from src.Database.Mongodb._users import Users
-from src.Utils.passwords import hash_password, needs_rehash, verify_password
+from telestore.db import database
+from telestore.db.repositories.users import Users
+from telestore.utils.passwords import hash_password, needs_rehash, verify_password
 
 
 class TestPasswordHashing:

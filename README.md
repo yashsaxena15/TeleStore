@@ -276,7 +276,7 @@ cd ../..
 
 ### 3. Start the Application
 ```bash
-python __main__.py
+python -m telestore
 ```
 
 ---

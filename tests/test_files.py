@@ -1,7 +1,7 @@
 """Tests for /files endpoints."""
 
-from src.Backend.security.credentials import User, require_auth
-from src.Database import database
+from telestore.security.credentials import User, require_auth
+from telestore.db import database
 
 
 class TestFilesRoutes:
@@ -14,7 +14,7 @@ class TestFilesRoutes:
 
     def test_list_files_authenticated_empty(self, client):
         """Authenticated requests with no files return empty items list."""
-        from src.Backend.web import app
+        from telestore.api.app import app
 
         app.dependency_overrides[require_auth] = lambda: User(
             username="admin", telegram_user_id=123456
@@ -32,7 +32,7 @@ class TestFilesRoutes:
 
     def test_list_files_authenticated_with_items(self, client):
         """Authenticated requests return formatted files list."""
-        from src.Backend.web import app
+        from telestore.api.app import app
 
         app.dependency_overrides[require_auth] = lambda: User(
             username="admin", telegram_user_id=123456

@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 import pytest
 
-# 1. Set required secrets in environment BEFORE importing src.Config
+# 1. Set required secrets in environment BEFORE importing telestore.config
 TEST_SESSION_SECRET = "dummy-session-key-for-tests-only-min-32-chars-long"
 TEST_WORKER_SECRET = "dummy-worker-key-for-tests-only-min-24-chars-long"
 TEST_ADMIN_PASSWORD = "dummy-admin-password-test-only"
@@ -33,7 +33,7 @@ if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 
 # 2. Mock MongoDB database object before route modules load
-from src.Database import database  # noqa: E402
+from telestore.db import database
 
 mock_users = MagicMock()
 mock_files = MagicMock()
@@ -58,7 +58,7 @@ database.is_connected = True
 
 # 3. Import FastAPI app after mocks are in place
 from fastapi.testclient import TestClient  # noqa: E402
-from src.Backend.web import app  # noqa: E402
+from telestore.api.app import app
 
 
 @pytest.fixture(autouse=True)

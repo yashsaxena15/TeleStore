@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import json
 from unittest.mock import MagicMock, patch
-from src.Backend.security.credentials import User, require_auth
+from telestore.security.credentials import User, require_auth
 
 
 class TestGithubWebhook:
@@ -64,7 +64,7 @@ class TestGithubWebhook:
 
     def test_github_webhook_disabled_when_secret_unset(self, client):
         """When GITHUB_WEBHOOK_SECRET is empty/unset, webhook responds with 503."""
-        with patch("src.Config.GITHUB_WEBHOOK_SECRET", ""):
+        with patch("telestore.config.GITHUB_WEBHOOK_SECRET", ""):
             response = client.post(
                 "/system/github",
                 content=json.dumps({"ref": "refs/heads/main"}),
@@ -84,7 +84,7 @@ class TestSystemWorkloads:
 
     def test_get_workloads_authenticated_sorted_busiest_first(self, client):
         """Authenticated requests return bot workloads sorted by busiest first."""
-        from src.Backend.web import app
+        from telestore.api.app import app
 
         # Create mock bot manager with mock clients having get_workload()
         mock_bot1 = MagicMock()

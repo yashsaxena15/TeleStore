@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from starlette.requests import Request
 from starlette.responses import StreamingResponse
-from src.Backend.routes.stream_routes import media_streamer
-from src.Backend.security.credentials import User
+from telestore.api.routes.stream import media_streamer
+from telestore.security.credentials import User
 
 
 async def dummy_byte_generator(*args, **kwargs):
@@ -20,7 +20,7 @@ class TestRangeRequestStreaming:
     @pytest.mark.anyio
     async def test_media_streamer_range_request_returns_206(self):
         """When a Range header is sent, media_streamer returns 206 with Content-Range."""
-        from src.Backend.web import app
+        from telestore.api.app import app
         scope = {
             "type": "http",
             "method": "GET",
@@ -43,7 +43,7 @@ class TestRangeRequestStreaming:
         mock_tg_connect = MagicMock()
         mock_tg_connect.yield_parts = dummy_byte_generator
 
-        with patch("src.Backend.routes.stream_routes.get_byte_streamer", return_value=mock_tg_connect):
+        with patch("telestore.api.routes.stream.get_byte_streamer", return_value=mock_tg_connect):
             response = await media_streamer(
                 request=request,
                 client=mock_client,
@@ -65,7 +65,7 @@ class TestRangeRequestStreaming:
     @pytest.mark.anyio
     async def test_media_streamer_full_request_returns_200(self):
         """When no Range header is sent, media_streamer returns 200 without Content-Range."""
-        from src.Backend.web import app
+        from telestore.api.app import app
         scope = {
             "type": "http",
             "method": "GET",
@@ -85,7 +85,7 @@ class TestRangeRequestStreaming:
         mock_tg_connect = MagicMock()
         mock_tg_connect.yield_parts = dummy_byte_generator
 
-        with patch("src.Backend.routes.stream_routes.get_byte_streamer", return_value=mock_tg_connect):
+        with patch("telestore.api.routes.stream.get_byte_streamer", return_value=mock_tg_connect):
             response = await media_streamer(
                 request=request,
                 client=mock_client,
@@ -110,8 +110,8 @@ class TestRangeRequestStreaming:
 
     def test_dl_route_with_range_header_integration(self, client):
         """Integration test: GET /dl/file with Range header returns 206 via TestClient."""
-        from src.Backend.web import app
-        from src.Database import database
+        from telestore.api.app import app
+        from telestore.db import database
 
         test_user = User(username="testuser", telegram_user_id=123456)
 
@@ -150,8 +150,8 @@ class TestRangeRequestStreaming:
         mock_streamer.yield_parts = dummy_byte_generator
 
         try:
-            with patch("src.Backend.routes.stream_routes.require_auth", return_value=test_user), \
-                 patch("src.Backend.routes.stream_routes.get_byte_streamer", return_value=mock_streamer):
+            with patch("telestore.api.routes.stream.require_auth", return_value=test_user), \
+                 patch("telestore.api.routes.stream.get_byte_streamer", return_value=mock_streamer):
                 response = client.get(
                     "/dl/movie.mp4?file_id=file_uniq_123",
                     headers={"Range": "bytes=0-499"},

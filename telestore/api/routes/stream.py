@@ -1,0 +1,591 @@
+import os
+import sys
+import re
+import urllib.parse
+import secrets
+import mimetypes
+
+from pathlib import Path
+from fastapi import APIRouter, Request, HTTPException
+from fastapi.responses import StreamingResponse, JSONResponse
+from concurrent.futures import ThreadPoolExecutor
+
+from pyrogram import Client
+from pyrogram import raw
+from telestore.db import database
+from telestore.config import APP_NAME
+from telestore.security.credentials import require_auth
+
+
+from d4rk.Logs import setup_logger
+
+# Import utility functions from streaming_utils module
+from telestore.services.streaming_utils import parse_range_header, resolve_mime_type
+
+# Import ByteStreamer class from byte_streamer module
+from telestore.services.byte_streamer import get_byte_streamer
+
+current_dir = Path(__file__).parent
+parent_dir = current_dir.parent
+sys.path.append(str(parent_dir))
+
+LOGGER = setup_logger(__name__)
+
+executor = ThreadPoolExecutor()
+
+router = APIRouter(tags=["Streaming"])
+class_cache = {}
+
+
+@router.get("/dl/{file_name:path}")
+@router.head("/dl/{file_name:path}")
+async def stream_handler(request: Request, file_name: str):
+    # Check if this request is for streaming/inline viewing or explicit download
+    range_header = request.headers.get("Range", "")
+    accept_header = request.headers.get("Accept", "")
+    sec_dest = request.headers.get("Sec-Fetch-Dest", "")
+    inline_query = request.query_params.get("inline") in ("1", "true") or request.query_params.get("watch") in ("1", "true")
+    download_query = request.query_params.get("download") in ("1", "true")
+
+    ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
+    is_media_ext = ext in (
+        "mp4", "mkv", "webm", "avi", "mov", "flv", "wmv", "m4v", "3gp", "ts",
+        "mp3", "wav", "ogg", "flac", "m4a", "aac", "opus", "wma",
+        "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"
+    )
+
+    if download_query:
+        request.state.is_watch = False
+    elif inline_query or range_header or sec_dest in ("video", "audio", "image") or "video/" in accept_header or "audio/" in accept_header or is_media_ext:
+        request.state.is_watch = True
+    else:
+        request.state.is_watch = False
+    # Handle download request
+    
+    # First try to get user from session auth or token auth (handled by middleware)
+    user = None
+    try:
+        user = require_auth(request)
+    except HTTPException:
+        # If authentication fails, raise 401
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    # If we got here, we have a valid user
+    # Use the user's Telegram ID as the user identifier, or username if no Telegram ID
+    user_id = str(user.telegram_user_id) if user.telegram_user_id else user.username
+    
+    # Decode URL encoded file name
+    import urllib.parse
+    decoded_file_name = urllib.parse.unquote(file_name)
+    
+    # Get bot manager from app state
+    bot_manager = request.app.state.bot_manager if hasattr(request.app.state, 'bot_manager') else None
+    if not bot_manager:
+        raise HTTPException(status_code=500, detail="Bot manager not available")
+    
+    client: Client = bot_manager.get_least_busy_client() if hasattr(bot_manager, 'get_least_busy_client') else None
+    if not client:
+        raise HTTPException(status_code=500, detail="No available bot clients")
+    
+    # Look up the file in the database using file_id, path, or file name
+    try:
+        file_id_param = request.query_params.get("file_id")
+        path_param = request.query_params.get("path")
+        extracted_filename = os.path.basename(decoded_file_name)
+        file_data = None
+
+        # 1. If file_id is provided, match by ObjectId, unique_id, or message_id
+        if file_id_param:
+            from bson import ObjectId
+            try:
+                if ObjectId.is_valid(file_id_param):
+                    file_data = database.Files.find_one({"_id": ObjectId(file_id_param), "trashed": {"$ne": True}})
+            except Exception:
+                pass
+            if not file_data:
+                file_data = database.Files.find_one({"file_unique_id": file_id_param, "trashed": {"$ne": True}})
+            if not file_data and file_id_param.isdigit():
+                file_data = database.Files.find_one({"message_id": int(file_id_param), "trashed": {"$ne": True}})
+
+        # 2. If path is provided, match file_name and file_path
+        if not file_data and path_param:
+            file_data = database.Files.find_one({
+                "file_name": extracted_filename,
+                "file_path": path_param,
+                "owner_id": user_id,
+                "trashed": {"$ne": True}
+            })
+            if not file_data:
+                file_data = database.Files.find_one({
+                    "file_name": extracted_filename,
+                    "file_path": path_param,
+                    "trashed": {"$ne": True}
+                })
+
+        # 3. Fallback to name search (excluding trashed first)
+        if not file_data:
+            file_data = database.Files.find_one({"file_name": extracted_filename, "owner_id": user_id, "trashed": {"$ne": True}})
+            if not file_data:
+                file_data = database.Files.find_one({"file_name": decoded_file_name, "owner_id": user_id, "trashed": {"$ne": True}})
+            if not file_data:
+                file_data = database.Files.find_one({"file_name": extracted_filename, "trashed": {"$ne": True}})
+            if not file_data:
+                file_data = database.Files.find_one({"file_name": decoded_file_name, "trashed": {"$ne": True}})
+            # Final fallback even if trashed (e.g. previewing trashed item)
+            if not file_data:
+                file_data = database.Files.find_one({"file_name": extracted_filename})
+            if not file_data:
+                file_data = database.Files.find_one({"file_name": decoded_file_name})
+
+        if not file_data:
+            print(f"File not found in database for name: {decoded_file_name}")
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Check vault security
+        if file_data.get("is_vault"):
+            from telestore.api.routes.vault import is_vault_unlocked
+            if not is_vault_unlocked(request):
+                raise HTTPException(status_code=403, detail="Vault is locked. Please unlock Private Vault first.")
+        
+        # Get file unique ID for Telegram lookup
+        file_unique_id = file_data.get("file_unique_id")
+        chat_id = file_data.get("chat_id")
+        message_id = file_data.get("message_id")
+        
+        is_split = file_data.get("is_split", False)
+        parts_list = file_data.get("parts") if is_split else None
+        total_file_size = file_data.get("file_size")
+        stored_file_name = file_data.get("file_name", decoded_file_name)
+        
+        if not file_unique_id or not chat_id or not message_id:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Reconstruct the full chat_id with -100 prefix if needed
+            
+    except ValueError as e:
+        # Handle case where ID cannot be converted to integer
+        print(f"ValueError converting file data: {e}")
+        raise HTTPException(status_code=404, detail="Invalid file data")
+    except Exception as e:
+        print(f"Exception looking up file with name {decoded_file_name}: {e}")
+        raise HTTPException(status_code=404, detail="File not found or inaccessible")
+    
+    clients_to_try = [client]
+    if bot_manager and hasattr(bot_manager, 'client_list') and bot_manager.client_list:
+        for c in bot_manager.client_list:
+            if c not in clients_to_try:
+                clients_to_try.append(c)
+
+    message = None
+    successful_client = None
+    for c in clients_to_try:
+        try:
+            msg = await c.get_messages(chat_id, message_id)
+            if msg and (msg.video or msg.document or msg.photo or msg.audio or msg.voice):
+                message = msg
+                successful_client = c
+                break
+        except Exception as e:
+            LOGGER.warning(f"Client {getattr(c, 'name', str(c))} failed to get_messages for chat {chat_id}, msg {message_id}: {e}")
+            continue
+
+    if not message:
+        raise HTTPException(status_code=404, detail="File not found or inaccessible from bots")
+
+    client = successful_client
+    file = message.video or message.document or message.photo or message.audio or message.voice
+    file_hash = file.file_unique_id[:6]
+
+    is_split = file_data.get("is_split", False)
+    parts = file_data.get("parts", [])
+    total_file_size = file_data.get("file_size")
+    file_name_db = file_data.get("file_name")
+
+    return await media_streamer(
+        request,
+        client=client,
+        chat_id=chat_id,
+        id=message_id,
+        file=file,
+        secure_hash=file_hash,
+        total_file_size=total_file_size,
+        parts_list=parts_list or parts,
+        file_name=stored_file_name or file_name_db
+    )
+
+# parse_range_header function has been moved to streaming_utils module
+
+# resolve_mime_type function has been moved to streaming_utils module
+
+async def stream_handler_for_watch(request: Request, id: str, filename: str = None):
+    # Handle watch request (this is separate from download handler)
+    
+    # Ensure is_watch flag is set for watch requests
+    request.state.is_watch = True
+    
+    # Get bot manager from app state
+    bot_manager = request.app.state.bot_manager if hasattr(request.app.state, 'bot_manager') else None
+    if not bot_manager:
+        raise HTTPException(status_code=500, detail="Bot manager not available")
+    
+    # Get the least busy client from bot manager
+    client: Client = bot_manager.get_least_busy_client() if hasattr(bot_manager, 'get_least_busy_client') else None
+    if not client:
+        raise HTTPException(status_code=500, detail="No available bot clients")
+    
+    # Look up the file in the database using the file unique ID
+    try:
+        
+        # Search for the file in all movie resolutions
+        file_data = database.Movies.get_movie_file_by_id(id)
+        if not file_data or not file_data.file_data or len(file_data.file_data) == 0:
+            print(f"File not found in database for ID: {id}")
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # If a specific filename is requested, find the matching file_data entry
+        file_info = None
+        if filename:
+            for fd in file_data.file_data:
+                if fd.filename == filename:
+                    file_info = fd
+                    break
+        
+        # If no specific filename matched or no filename provided, use the first file_data
+        if not file_info:
+            file_info = file_data.file_data[0]
+            
+        chat_id = file_info.chat_id
+        message_id = file_info.message_id
+        
+        if not chat_id or not message_id:
+            raise HTTPException(status_code=404, detail="File not found")
+                    
+    except ValueError as e:
+        # Handle case where ID cannot be converted to integer
+        print(f"ValueError converting ID {id} to integer: {e}")
+        raise HTTPException(status_code=404, detail="Invalid file ID format")
+    except Exception as e:
+        print(f"Exception looking up file with ID {id}: {e}")
+        raise HTTPException(status_code=404, detail="File not found or inaccessible")
+    
+    clients_to_try = [client]
+    if bot_manager and hasattr(bot_manager, 'client_list') and bot_manager.client_list:
+        for c in bot_manager.client_list:
+            if c not in clients_to_try:
+                clients_to_try.append(c)
+
+    message = None
+    successful_client = None
+    for c in clients_to_try:
+        try:
+            msg = await c.get_messages(chat_id, message_id)
+            if msg and (msg.video or msg.document or msg.audio or msg.voice or msg.photo):
+                message = msg
+                successful_client = c
+                break
+        except Exception as e:
+            LOGGER.warning(f"Client {getattr(c, 'name', str(c))} failed in stream_handler_for_watch for chat {chat_id}, msg {message_id}: {e}")
+            continue
+
+    if not message:
+        raise HTTPException(status_code=404, detail="File not found or inaccessible from bots")
+
+    client = successful_client
+    file = message.video or message.document or message.audio or message.voice or message.photo
+    file_hash = file.file_unique_id[:6]
+
+    return await media_streamer(
+        request,
+        client=client,
+        chat_id=chat_id,
+        id=message_id,
+        file=file,
+        secure_hash=file_hash
+    )
+
+
+@router.get("/watch/{file_name:path}")
+async def watch_handler(request: Request, file_name: str):
+    # First try to get user from session auth or token auth (handled by middleware)
+    try:
+        require_auth(request)
+    except HTTPException:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    # Video requests and opening the link in a browser tab are both served as a stream;
+    # browsers show their built-in player for media responses. (The old HTML player page
+    # referenced a template that no longer exists and always failed.)
+    request.state.is_watch = True
+    return await stream_handler(request, file_name)
+
+
+@router.get("/watch/{id}/{quality}")
+async def watch_quality_handler(request: Request, id: str, quality: str):
+    # First try to get user from session auth or token auth (handled by middleware)
+    try:
+        require_auth(request)
+    except HTTPException:
+        # If authentication fails, raise 401
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    # Check if this is a request for the video content (not the player page)
+    # We can detect this by checking if the Accept header contains video/ but NOT text/html
+    # This prevents browsers from accidentally triggering streaming when they want the player page
+    accept_header = request.headers.get("Accept", "")
+    
+    # If the request is specifically asking for video content and NOT html, stream it
+    if "video/" in accept_header and "text/html" not in accept_header:
+        # This is a request for the video content, stream it
+        request.state.is_watch = True
+        # Find the file with the specified quality
+        try:
+            # Search for the file in all movie resolutions
+            file_data = database.Movies.get_movie_file_by_id(id)
+            if not file_data or not file_data.file_data or len(file_data.file_data) == 0:
+                print(f"File not found in database for ID: {id}")
+                raise HTTPException(status_code=404, detail="File not found")
+            
+            # If we found the file, stream it
+            return await stream_handler_for_watch(request, id)
+        except Exception as e:
+            print(f"Exception looking up file with ID {id}: {e}")
+            raise HTTPException(status_code=404, detail="File not found or inaccessible")
+    else:
+        # This is a request for the video player page
+        # Look up the file in the database using the file unique ID
+        try:
+            # Search for the file in all movie resolutions
+            file_data = database.Movies.get_movie_file_by_id(id)
+            if not file_data or not file_data.file_data or len(file_data.file_data) == 0:
+                print(f"File not found in database for ID: {id}")
+                raise HTTPException(status_code=404, detail="File not found")
+            
+            # Get the first file data (should be the main file)
+            file_info = file_data.file_data[0]
+            file_name = file_info.filename or f"{secrets.token_hex(2)}.unknown"
+            mime_type = resolve_mime_type(file_name)
+            
+            # Create a title from the file information
+            title = file_data.display_name or "Unknown Movie"
+            
+            # Get all available qualities for this movie
+            qualities = []
+            qualities_data = database.Movies.get_movie_qualities_by_id(id)
+            print(f"Qualities data for file ID {id}: {qualities_data}")  # Debug print
+            
+            # Create a list of unique resolutions with their file IDs
+            resolution_map = {}
+            for quality_data in qualities_data:
+                resolution = quality_data["resolution"]
+                # Always take the first file ID for each resolution
+                if resolution not in resolution_map:
+                    resolution_map[resolution] = quality_data["file_id"]
+            
+            # Convert to the format expected by the template
+            for resolution, file_id in resolution_map.items():
+                qualities.append({
+                    "resolution": resolution,
+                    "file_id": file_id
+                })
+            
+            # Sort qualities by resolution (higher resolution first)
+            def resolution_sort_key(quality):
+                resolution = quality["resolution"].upper()
+                # Extract numeric part from resolution string
+                import re
+                match = re.search(r'(\d+)', resolution)
+                if match:
+                    return int(match.group(1))
+                # Handle non-numeric resolutions
+                priority_map = {
+                    'SD': 1, 'HD': 3, 'FHD': 5, 'UHD': 9
+                }
+                return priority_map.get(resolution, 0)
+            
+            qualities.sort(key=resolution_sort_key, reverse=True)
+            
+            print(f"Available qualities: {qualities}")  # Debug print
+            
+            # Get app name from config or environment
+            
+            # Return JSON with stream info instead of HTML template
+            return JSONResponse({
+                "id": id,
+                "title": title,
+                "mime_type": mime_type,
+                "qualities": qualities,
+                "stream_url": f"/dl/{id}/{file_name}",
+                "app_name": APP_NAME
+            })
+        except Exception as e:
+            print(f"Exception looking up file with ID {id}: {e}")
+            raise HTTPException(status_code=404, detail="File not found or inaccessible")
+
+
+async def media_streamer(
+    request: Request,
+    client,
+    chat_id: int,
+    id: int,
+    file: raw.types.MessageMediaDocument,
+    secure_hash: str,
+    total_file_size: int = None,
+    parts_list: list = None,
+    file_name: str = None,
+    is_split: bool = False,
+    file_size: int = None,
+    parts: list = None,
+) -> StreamingResponse:
+    range_header = request.headers.get("Range", "")
+    
+    tg_connect = get_byte_streamer(client)
+
+    # Determine true total file size
+    effective_file_size = total_file_size or file_size
+    if effective_file_size and effective_file_size > 0:
+        file_size = effective_file_size
+    elif hasattr(file, 'file_size') and file.file_size:
+        file_size = file.file_size
+    else:
+        file_size = 0
+
+    parts_list = parts_list or parts
+
+    from_bytes, until_bytes = parse_range_header(range_header, file_size)
+
+    chunk_size = 1024 * 1024
+    req_length = until_bytes - from_bytes + 1
+
+    # Prepare parts to stream
+    if not parts_list:
+        parts_list = [{
+            "part_index": 1,
+            "chat_id": chat_id,
+            "message_id": id,
+            "start_byte": 0,
+            "end_byte": file_size - 1,
+            "part_size": file_size,
+        }]
+
+    parts_to_stream = []
+    for p in parts_list:
+        p_start = p.get("start_byte", 0)
+        p_end = p.get("end_byte", p_start + p.get("part_size", 0) - 1)
+        if p_end < from_bytes or p_start > until_bytes:
+            continue
+
+        overlap_start = max(from_bytes, p_start)
+        overlap_end = min(until_bytes, p_end)
+
+        parts_to_stream.append({
+            "chat_id": p.get("chat_id", chat_id),
+            "message_id": p.get("message_id", id),
+            "part_from_byte": overlap_start - p_start,
+            "part_until_byte": overlap_end - p_start,
+            "part_index": p.get("part_index", 1),
+        })
+
+    # Collect active bot workers
+    bot_manager = getattr(request.app.state, 'bot_manager', None)
+    active_clients = []
+    if bot_manager and hasattr(bot_manager, 'client_list') and bot_manager.client_list:
+        active_clients = [c for c in bot_manager.client_list if getattr(c, 'is_connected', False)]
+    if not active_clients:
+        active_clients = [client]
+
+    LOGGER.info(
+        f"Streaming range {from_bytes}-{until_bytes}/{file_size} across {len(parts_to_stream)} part(s) using {len(active_clients)} bot client(s)"
+    )
+
+    body = tg_connect.yield_parts(
+        parts_to_stream=parts_to_stream,
+        chunk_size=chunk_size,
+        client_list=active_clients,
+    )
+
+    # Check if this is a watch request
+    is_watch = hasattr(request.state, 'is_watch') and request.state.is_watch
+
+    if file_name:
+        resolved_file_name = file_name
+    elif hasattr(file, 'file_name') and file.file_name:
+        resolved_file_name = file.file_name
+    elif hasattr(file, "width"):
+        resolved_file_name = f"Photo_{file.file_unique_id}.jpg"
+    else:
+        resolved_file_name = f"Media_{file.file_unique_id}"
+
+    ext = resolved_file_name.rsplit(".", 1)[-1].lower() if "." in resolved_file_name else ""
+    ext_mime_map = {
+        "mp4": "video/mp4",
+        "m4v": "video/mp4",
+        "mkv": "video/x-matroska",
+        "webm": "video/webm",
+        "mov": "video/quicktime",
+        "avi": "video/x-msvideo",
+        "flv": "video/x-flv",
+        "wmv": "video/x-ms-wmv",
+        "ts": "video/mp2t",
+        "3gp": "video/3gpp",
+        "mp3": "audio/mpeg",
+        "wav": "audio/wav",
+        "ogg": "audio/ogg",
+        "opus": "audio/ogg",
+        "flac": "audio/flac",
+        "m4a": "audio/mp4",
+        "aac": "audio/aac",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "png": "image/png",
+        "gif": "image/gif",
+        "webp": "image/webp",
+        "svg": "image/svg+xml",
+        "pdf": "application/pdf",
+    }
+
+    if hasattr(file, 'mime_type') and file.mime_type and file.mime_type not in ("application/octet-stream", "binary/octet-stream"):
+        mime_type = file.mime_type
+    else:
+        mime_type = ext_mime_map.get(ext) or mimetypes.guess_type(resolved_file_name)[0] or "application/octet-stream"
+
+    # For watch/streaming requests, guarantee browser-friendly media MIME types
+    if is_watch and ext in ext_mime_map:
+        mime_type = ext_mime_map[ext]
+
+    if not resolved_file_name and "/" in mime_type:
+        resolved_file_name = f"{secrets.token_hex(2)}.{mime_type.split('/')[1]}"
+
+    encoded_filename = urllib.parse.quote(resolved_file_name)
+    ascii_fallback = re.sub(r'[^\x20-\x7E]', '_', resolved_file_name).replace('"', '_').replace('\\', '_')
+    if not ascii_fallback.strip('_ '):
+        ascii_fallback = f"media_{secrets.token_hex(4)}"
+    disposition_type = "inline" if is_watch else "attachment"
+    content_disposition = f'{disposition_type}; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded_filename}'
+
+    headers = {
+        "Content-Type": mime_type,
+        "Content-Length": str(req_length),
+        "Content-Disposition": content_disposition,
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "public, max-age=3600, immutable",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+    }
+
+    # Add additional headers for video streaming
+    if is_watch and mime_type and (mime_type.startswith('video/') or mime_type.startswith('audio/')):
+        headers["X-Content-Type-Options"] = "nosniff"
+        headers["X-Frame-Options"] = "SAMEORIGIN"
+
+    if range_header:
+        headers["Content-Range"] = f"bytes {from_bytes}-{until_bytes}/{file_size}"
+        status_code = 206
+    else:
+        status_code = 200
+
+    return StreamingResponse(
+        status_code=status_code,
+        content=body,
+        headers=headers,
+        media_type=mime_type,
+    )

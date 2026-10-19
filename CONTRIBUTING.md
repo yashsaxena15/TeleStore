@@ -38,7 +38,7 @@ Thank you for contributing to TeleStore. This document outlines development prac
 
 4. Run backend locally:
    ```bash
-   python __main__.py
+   python -m telestore
    ```
 
 ### Frontend Setup
