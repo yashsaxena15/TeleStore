@@ -49,7 +49,7 @@ export const TransfersWidget = () => {
             return "";
         return `${formatBytes(bytesPerSec)}/s`;
     };
-    return (<div role="region" aria-label="Transfers monitor" aria-live="polite" className={cn("fixed right-4 z-40 w-[calc(100vw-2rem)] sm:w-80 md:w-96 max-w-[calc(100vw-2rem)] shadow-2xl rounded-xl border border-border bg-card text-card-foreground overflow-hidden transition-all duration-300 ease-in-out", needsDockElevation ? "bottom-28 sm:bottom-24 2xl:bottom-4" : "bottom-4")}>
+    return (<div role="region" aria-label="Transfers monitor" aria-live="polite" className={cn("fixed right-4 z-40 w-[calc(100vw-2rem)] sm:w-80 md:w-96 max-w-[calc(100vw-2rem)] shadow-2xl rounded-xl border border-border bg-card text-card-foreground overflow-hidden transition-all duration-300 ease-in-out", needsDockElevation ? "bottom-[calc(7rem+var(--app-bottom-inset))] sm:bottom-[calc(6rem+var(--app-bottom-inset))] 2xl:bottom-4" : "bottom-[calc(1rem+var(--app-bottom-inset))]")}>
       {/* Header Bar */}
       <div className="px-4 py-2.5 bg-card hover:bg-muted/15 border-b border-border flex items-center justify-between transition-colors">
         <div role="button" tabIndex={0} aria-expanded={isExpanded} aria-label={isExpanded ? "Collapse transfers panel" : "Expand transfers panel"} className="flex items-center gap-2 cursor-pointer select-none flex-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 rounded-md" onClick={() => setIsExpanded(!isExpanded)} onKeyDown={(e) => {

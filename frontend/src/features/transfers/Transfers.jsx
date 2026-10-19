@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -80,49 +81,23 @@ export const Transfers = () => {
     });
     const hasActiveTransfers = stats.totalActive > 0;
     const hasPausedTransfers = stats.pausedCount > 0;
-    return (<div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex-1 overflow-auto bg-gradient-to-br from-blue-50/50 to-indigo-100/50 dark:from-gray-900 dark:to-gray-800/80 py-8 px-4 sm:px-6">
+    return (<div className="flex-1 flex flex-col overflow-hidden bg-background">
+      <PageHeader icon={ArrowUpDown} title="Transfers" subtitle={stats.totalActive > 0 ? `${stats.totalActive} active · uploads, downloads and cloud leeches` : "Uploads, downloads and cloud leeches"} actions={<>
+          <Button variant="outline" size="sm" onClick={pauseAll} disabled={!hasActiveTransfers} className="gap-1.5" title="Pause all ongoing transfers">
+            <Pause className="w-3.5 h-3.5"/>
+            Pause all
+          </Button>
+          <Button variant="outline" size="sm" onClick={resumeAll} disabled={!hasPausedTransfers} className="gap-1.5" title="Resume all paused transfers">
+            <Play className="w-3.5 h-3.5"/>
+            Resume all
+          </Button>
+          <Button variant="outline" size="sm" onClick={cancelAll} disabled={!hasActiveTransfers && !hasPausedTransfers} className="gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10" title="Cancel all active and paused transfers">
+            <X className="w-3.5 h-3.5"/>
+            Cancel all
+          </Button>
+        </>}/>
+      <div className="flex-1 overflow-auto py-6 px-4 sm:px-6">
         <div className="max-w-5xl mx-auto">
-          {/* Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-            <div>
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 rounded-xl bg-primary/10 text-primary">
-                  <ArrowUpDown className="w-6 h-6"/>
-                </div>
-                <div>
-                  <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                    Transfers
-                    {stats.totalActive > 0 && (<span className="text-xs px-2.5 py-0.5 rounded-full bg-primary text-primary-foreground font-semibold animate-pulse">
-                        {stats.totalActive} active
-                      </span>)}
-                  </h1>
-                  <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-                    Monitor and manage local uploads, downloads, and cloud-to-cloud transfers
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              <Button variant="outline" size="sm" onClick={pauseAll} disabled={!hasActiveTransfers} className="gap-1.5" title="Pause all ongoing transfers">
-                <Pause className="w-3.5 h-3.5"/>
-                Pause All
-              </Button>
-              <Button variant="outline" size="sm" onClick={resumeAll} disabled={!hasPausedTransfers} className="gap-1.5" title="Resume all paused transfers">
-                <Play className="w-3.5 h-3.5"/>
-                Resume All
-              </Button>
-              <Button variant="outline" size="sm" onClick={cancelAll} disabled={!hasActiveTransfers && !hasPausedTransfers} className="gap-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30" title="Cancel all active & paused transfers">
-                <X className="w-3.5 h-3.5"/>
-                Cancel All
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => navigate("/")} className="gap-1.5 ml-auto sm:ml-2">
-                Back to Files
-              </Button>
-            </div>
-          </div>
-
           {/* Filter Tabs Card */}
           <Card className="bg-white/90 dark:bg-gray-800/90 border border-border shadow-sm rounded-xl mb-6">
             <div className="p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">

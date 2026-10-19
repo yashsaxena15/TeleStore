@@ -806,7 +806,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
     const fileExt = useMemo(() => getFileExtension(fileName), [fileName]);
     // If file is Audio or Voice, render Google Drive dark glassmorphic audio widget in center dock
     if (isAudio) {
-        return (<div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-2rem)] sm:w-[420px] max-w-[calc(100vw-2rem)] backdrop-blur-xl bg-card/95 text-card-foreground border border-border rounded-2xl shadow-2xl p-4 transition-all duration-300 select-none animate-in fade-in slide-in-from-bottom-4">
+        return (<div className="fixed bottom-[calc(1rem+var(--app-bottom-inset))] left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-2rem)] sm:w-[420px] max-w-[calc(100vw-2rem)] backdrop-blur-xl bg-card/95 text-card-foreground border border-border rounded-2xl shadow-2xl p-4 transition-all duration-300 select-none animate-in fade-in slide-in-from-bottom-4">
         <audio ref={mediaElementRef} src={mediaUrl} preload="auto" autoPlay onTimeUpdate={handleTimeUpdate} onProgress={handleProgress} onLoadedMetadata={handleLoadedMetadata} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onWaiting={() => setIsBuffering(true)} onPlaying={() => setIsBuffering(false)} onCanPlay={() => setIsBuffering(false)} onError={() => setIsBuffering(false)}/>
 
         {/* Top bar with Title & Badge */}
@@ -888,7 +888,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
     }
     // Mini video player mode docked at bottom center
     if (isMini) {
-        return (<div ref={containerRef} className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-2rem)] sm:w-96 aspect-video bg-black/95 rounded-2xl shadow-2xl border border-border overflow-hidden select-none animate-in fade-in slide-in-from-bottom-4 flex flex-col justify-between group">
+        return (<div ref={containerRef} className="fixed bottom-[calc(1rem+var(--app-bottom-inset))] left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-2rem)] sm:w-96 aspect-video bg-black/95 rounded-2xl shadow-2xl border border-border overflow-hidden select-none animate-in fade-in slide-in-from-bottom-4 flex flex-col justify-between group">
           <video ref={mediaElementRef} src={activeStreamUrl} preload="auto" playsInline crossOrigin="anonymous" className="w-full h-full object-contain pointer-events-none" onTimeUpdate={handleTimeUpdate} onProgress={handleProgress} onLoadedMetadata={handleLoadedMetadata} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onWaiting={() => setIsBuffering(true)} onPlaying={() => {
                 setIsBuffering(false);
                 setHasPlaybackError(false);

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, lazy, Suspense } from "react";
+import { ErrorBoundary } from "@/components/feedback/ErrorBoundary";
 import { PersistentAudioPlayer } from "./PersistentAudioPlayer";
 import { downloadManager } from "@/features/transfers/downloadManager";
 
@@ -80,19 +81,23 @@ export const MediaPlayerProvider = ({ children }) => {
       {children}
 
       {/* Video Modal Player */}
+      <ErrorBoundary name="Video player" fallback="silent">
       <Suspense fallback={null}>
       {currentMedia && currentMedia.fileType === "video" && (<MediaPlayer key={currentMedia.url} mediaUrl={currentMedia.url} fileName={currentMedia.fileName} fileType={currentMedia.fileType} onDownload={() => {
                 downloadManager.addDownload(currentMedia.url, currentMedia.fileName);
             }} onClose={closeMedia}/>)}
       </Suspense>
+      </ErrorBoundary>
 
       {/* Persistent Floating Bottom Audio Player */}
+      <ErrorBoundary name="Audio player" fallback="silent">
       {activeAudioTrack && (<PersistentAudioPlayer key={activeAudioTrack.id || activeAudioTrack.url} activeTrack={activeAudioTrack} playlist={audioPlaylist} currentIndex={currentTrackIndex} isMinimized={isAudioMinimized} onToggleMinimize={setIsAudioMinimized} onTrackChange={(newIdx) => {
                 if (newIdx >= 0 && newIdx < audioPlaylist.length) {
                     setCurrentTrackIndex(newIdx);
                     setActiveAudioTrack(audioPlaylist[newIdx]);
                 }
             }} onClose={closeAudioPlayer}/>)}
+      </ErrorBoundary>
     </MediaPlayerContext.Provider>);
 };
 export const useMediaPlayer = () => {

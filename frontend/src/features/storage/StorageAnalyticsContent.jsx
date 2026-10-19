@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, HardDrive, Video, Music, Image as ImageIcon, FileText, Archive, File, Trash2, Star, RefreshCw, Folder, Files, Zap } from "lucide-react";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { HardDrive, Video, Music, Image as ImageIcon, FileText, Archive, File, Trash2, Star, RefreshCw, Folder, Files, Zap } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -72,31 +73,13 @@ export const StorageAnalyticsContent = ({ onBack, onOpenTrash }) => {
         { key: "archive", label: "Archives", icon: Archive, color: "bg-rose-500", textColor: "text-rose-500", rawColor: "#f43f5e" },
         { key: "other", label: "Other", icon: File, color: "bg-slate-400", textColor: "text-slate-400", rawColor: "#94a3b8" },
     ];
-    return (<div className="flex-1 overflow-y-auto bg-gradient-to-br from-slate-50 to-blue-50/30 dark:from-gray-950 dark:to-gray-900 p-4 sm:p-6 select-none">
-      <div className="max-w-5xl mx-auto space-y-6">
-        {/* Top Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" onClick={onBack} className="rounded-full hover:bg-muted">
-              <ArrowLeft className="w-5 h-5"/>
-            </Button>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2.5">
-                <HardDrive className="w-6 h-6 text-blue-600 dark:text-blue-400"/>
-                Storage & Analytics
-              </h1>
-              <p className="text-xs text-muted-foreground">
-                Overview of your cloud storage footprint, files, and category distribution
-              </p>
-            </div>
-          </div>
-
-          <Button variant="outline" size="sm" onClick={fetchAnalytics} disabled={loading} className="gap-2 text-xs h-8">
+    return (<div className="flex-1 flex flex-col min-h-0 bg-background">
+      <PageHeader icon={HardDrive} title="Storage" subtitle="How much you store, by type, and the streaming cache" actions={<Button variant="outline" size="sm" onClick={fetchAnalytics} disabled={loading} className="gap-2 text-xs h-8">
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}/>
             Refresh
-          </Button>
-        </div>
-
+          </Button>}/>
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 select-none min-h-0">
+      <div className="max-w-5xl mx-auto space-y-6">
         {/* Main Total Storage Card */}
         <Card className="border-border shadow-sm bg-card/80 backdrop-blur-sm">
           <CardHeader className="pb-3">
@@ -310,6 +293,7 @@ export const StorageAnalyticsContent = ({ onBack, onOpenTrash }) => {
               </div>)}
           </CardContent>
         </Card>
+      </div>
       </div>
     </div>);
 };

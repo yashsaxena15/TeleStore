@@ -6,6 +6,26 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Native controls and scrollbars follow the active theme */
+:root { color-scheme: light; }
+:root.dark { color-scheme: dark; }
+
+/* Thin scrollbars in theme colours everywhere */
+* { scrollbar-width: thin; scrollbar-color: hsl(var(--border)) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 99px; border: 2px solid transparent; background-clip: padding-box; }
+
+/* Horizontally scrolling rows (filter chips, breadcrumbs) hide their scrollbar */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Height of the phone bottom navigation; floating widgets sit above it */
+:root { --app-bottom-inset: 0px; }
+@media (max-width: 767px) {
+  :root { --app-bottom-inset: calc(60px + env(safe-area-inset-bottom, 0px)); }
+}
+
 /* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
 All colors MUST be HSL.
 */

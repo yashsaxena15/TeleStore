@@ -68,7 +68,7 @@ export const UploadProgressWidget = ({ files, currentPath, isDirectoryUpload = f
                 clearTimeout(closeTimer.current);
         };
     }, [items, hasCompleted, onComplete]);
-    return (<div role="region" aria-label="Upload progress monitor" aria-live="polite" className={`fixed bottom-20 left-3 right-3 sm:left-auto sm:right-4 sm:bottom-20 z-40 sm:w-96 bg-card text-card-foreground border border-border rounded-xl shadow-2xl transition-all duration-300 ease-in-out ${isVisible ? 'transform translate-y-0 opacity-100' : 'transform translate-y-full opacity-0'}`}>
+    return (<div role="region" aria-label="Upload progress monitor" aria-live="polite" className={`fixed bottom-[calc(5rem+var(--app-bottom-inset))] left-3 right-3 sm:left-auto sm:right-4 z-40 sm:w-96 bg-card text-card-foreground border border-border rounded-xl shadow-2xl transition-all duration-300 ease-in-out ${isVisible ? 'transform translate-y-0 opacity-100' : 'transform translate-y-full opacity-0'}`}>
       <div className="p-4">
         <div className="flex justify-between items-center mb-2">
           <h3 className="font-semibold text-sm truncate text-foreground">

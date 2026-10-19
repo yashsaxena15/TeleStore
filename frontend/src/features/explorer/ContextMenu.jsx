@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { FolderOpen, Pencil, Trash2, Copy, Scissors, Clipboard, Info, Download, Share2, Eye, Star, RefreshCw, Upload, RotateCcw, Archive, Link, ShieldCheck, } from "lucide-react";
-export const ContextMenu = ({ x, y, onClose, itemType, itemName, onOpen, onCopy, onCut, onPaste, onDelete, onRename, onNewFolder, onDownload, onUploadFiles, // Destructure the new prop
+export const ContextMenu = ({ x, y, onClose, onRefresh, itemType, itemName, onOpen, onCopy, onCut, onPaste, onDelete, onRename, onNewFolder, onDownload, onUploadFiles, // Destructure the new prop
 onUploadFolder, // Destructure the new prop
 isClipboardPasted, // Destructure the new prop
 hasClipboard, // Destructure the new prop
@@ -61,6 +61,10 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
     }, [onClose]);
     const handleAction = async (action) => {
         switch (action) {
+            case "refresh":
+                onRefresh?.();
+                onClose();
+                break;
             case "open":
                 onOpen?.();
                 onClose();
@@ -148,8 +152,7 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                     icon: RefreshCw,
                     label: "Refresh",
                     action: "refresh",
-                    shortcut: "F5",
-                    disabled: true,
+                    disabled: !onRefresh,
                 },
             ]
             : [
@@ -180,8 +183,7 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                         icon: RefreshCw,
                         label: "Refresh",
                         action: "refresh",
-                        shortcut: "F5",
-                        disabled: true,
+                        disabled: !onRefresh,
                     },
                 ]
                 : [
@@ -213,8 +215,7 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                         icon: RefreshCw,
                         label: "Refresh",
                         action: "refresh",
-                        shortcut: "F5",
-                        disabled: true,
+                        disabled: !onRefresh,
                     },
                 ])
             : isVirtualFolder

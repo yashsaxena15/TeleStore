@@ -38,7 +38,7 @@ const ArchiveInspectDialog = lazy(() => import("@/features/archives/ArchiveInspe
 export const getItemKey = (item) => item.id || item.file_unique_id || item.name;
 export const FileGrid = ({ items, viewMode, onNavigate, itemCount, onCopy, onCut, onPaste, onDelete, onRename, onMove, onDownload, renamingItem, onRenameConfirm, onRenameCancel, currentFolder, onNewFolder, onUploadFiles, // Add this
 onUploadFolder, // Add this
-isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUploaded, onItemsChange, onRefresh, currentPath, currentApiPath, isTrashMode, onRestoreItem, onToggleStar, isVaultMode = false, onMoveToVault, onMoveToHome, isCloudMode = false, cloudAccountId, cloudFolderId, isInboxMode = false, }) => {
+isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUploaded, onItemsChange, onRefresh, currentPath, currentApiPath, isTrashMode, onRestoreItem, onToggleStar, isVaultMode = false, onMoveToVault, onMoveToHome, isCloudMode = false, cloudAccountId, cloudFolderId, isInboxMode = false, uploadRequest = null, onUploadRequestHandled, }) => {
     const isEffectiveInboxMode = Boolean(isInboxMode ||
         currentFolder === "Telegram Inbox" ||
         currentApiPath === "/inbox" ||
@@ -491,6 +491,13 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
     // Reference for the hidden file input
     const fileInputRef = useRef(null);
     const directoryInputRef = useRef(null);
+    // The New menu / command palette ask for an upload; open the matching file picker
+    useEffect(() => {
+        if (!uploadRequest)
+            return;
+        (uploadRequest.kind === "folder" ? directoryInputRef : fileInputRef).current?.click();
+        onUploadRequestHandled?.();
+    }, [uploadRequest]); // eslint-disable-line react-hooks/exhaustive-deps -- run once per request
     // Add Tauri event listeners for drag and drop
     useEffect(() => {
         if (!isTauri)
@@ -2241,7 +2248,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                     }
                 }} onCompress={() => {
                     setCompressDialog(true);
-                }} isStarred={isItemStarred(contextMenu.item)} onToggleStar={() => contextMenu.item && onToggleStar?.(contextMenu.item)} isTrashMode={isTrashMode || cloudFolderId === "trash" || Boolean(contextMenu.item?.is_trashed)} onRestore={() => contextMenu.item && onRestoreItem?.(contextMenu.item)} isCloudMode={isCloudMode} isVirtualFolder={Boolean(contextMenu.item?.is_virtual)} isRestrictedEmptyArea={isRestrictedEmptyArea}/>);
+                }} isStarred={isItemStarred(contextMenu.item)} onToggleStar={() => contextMenu.item && onToggleStar?.(contextMenu.item)} isTrashMode={isTrashMode || cloudFolderId === "trash" || Boolean(contextMenu.item?.is_trashed)} onRestore={() => contextMenu.item && onRestoreItem?.(contextMenu.item)} isCloudMode={isCloudMode} isVirtualFolder={Boolean(contextMenu.item?.is_virtual)} isRestrictedEmptyArea={isRestrictedEmptyArea} onRefresh={onRefresh}/>);
         })()}
 
       {/* Image Viewer */}

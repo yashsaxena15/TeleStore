@@ -288,7 +288,7 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
     // Compact / Minimized View (Centered Floating Dock Pill)
     // -------------------------------------------------------------
     if (isMinimized) {
-        return (<div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-card/95 backdrop-blur-xl border border-border shadow-2xl rounded-full px-3.5 py-2 transition-all duration-300 animate-in fade-in slide-in-from-bottom-3 text-card-foreground select-none max-w-[calc(100vw-2rem)]">
+        return (<div className="fixed bottom-[calc(1rem+var(--app-bottom-inset))] left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-card/95 backdrop-blur-xl border border-border shadow-2xl rounded-full px-3.5 py-2 transition-all duration-300 animate-in fade-in slide-in-from-bottom-3 text-card-foreground select-none max-w-[calc(100vw-2rem)]">
         <audio ref={audioRef} onTimeUpdate={handleTimeUpdate} onLoadedMetadata={handleLoadedMetadata} onEnded={handleEnded} onError={() => {
                 setHasError(true);
                 setIsLoading(false);
@@ -334,7 +334,7 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
     // -------------------------------------------------------------
     // Full Media Dock - Centered Floating Bottom Player Bar
     // -------------------------------------------------------------
-    return (<div className="fixed bottom-3 left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-1.5rem)] sm:w-[calc(100vw-2rem)] md:w-[calc(100vw-4rem)] lg:max-w-4xl xl:max-w-5xl select-none animate-in fade-in slide-in-from-bottom-4 duration-300 pointer-events-none">
+    return (<div className="fixed bottom-[calc(0.75rem+var(--app-bottom-inset))] left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-1.5rem)] sm:w-[calc(100vw-2rem)] md:w-[calc(100vw-4rem)] lg:max-w-4xl xl:max-w-5xl select-none animate-in fade-in slide-in-from-bottom-4 duration-300 pointer-events-none">
       <audio ref={audioRef} onTimeUpdate={handleTimeUpdate} onLoadedMetadata={handleLoadedMetadata} onEnded={handleEnded} onError={() => {
             setHasError(true);
             setIsLoading(false);

@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,7 +12,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import logger from "@/lib/logger";
 import { api } from "@/lib/api";
-import { X as XIcon } from "lucide-react";
 export const UserManagementContent = ({ onBack }) => {
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -182,21 +183,10 @@ export const UserManagementContent = ({ onBack }) => {
             return email;
         return email.substring(0, 5) + "...";
     };
-    return (<div className="flex-1 overflow-auto bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 py-8 px-4 sm:px-6">
+    return (<div className="flex-1 flex flex-col min-h-0 bg-background">
+      <PageHeader icon={Users} title="Users" subtitle="Accounts and what each one can read or change"/>
+      <div className="flex-1 overflow-auto py-8 px-4 sm:px-6 min-h-0">
       <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Users</h1>
-          <button onClick={() => {
-            // Close the users page and navigate back to file explorer
-            onBack();
-            // Update the browser history to reflect we're back on the main page
-            window.history.pushState({ path: ["Home"] }, '', '/');
-            // Dispatch event to show file explorer
-            window.dispatchEvent(new CustomEvent('showFiles'));
-        }} className="rounded-full p-2 hover:bg-gray-200 dark:hover:bg-gray-700">
-            <XIcon className="h-5 w-5 text-gray-900 dark:text-white"/>
-          </button>
-        </div>
 
         <Card className="mb-8 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg rounded-xl">
           <CardHeader>
@@ -445,5 +435,6 @@ export const UserManagementContent = ({ onBack }) => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </div>
     </div>);
 };

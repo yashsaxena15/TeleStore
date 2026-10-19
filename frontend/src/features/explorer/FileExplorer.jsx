@@ -8,6 +8,11 @@ import { useFileOperations } from "@/features/explorer/hooks/useFileOperations";
 import { toast } from "sonner";
 import { copyStreamUrl } from "@/lib/utils";
 import { Sidebar } from "@/components/layout/Sidebar";
+import { MobileNav } from "@/components/layout/MobileNav";
+import { CommandPalette } from "@/components/layout/CommandPalette";
+import { ErrorBoundary } from "@/components/feedback/ErrorBoundary";
+import { ConnectCloudModal } from "@/features/cloud/ConnectCloudModal";
+import authService from "@/features/auth/authService";
 import { TopBar } from "@/components/layout/TopBar";
 import { FileGrid } from "./FileGrid";
 import { FilePagination } from "./FilePagination";
@@ -74,8 +79,26 @@ export const FileExplorer = () => {
     const [showUserManagement, setShowUserManagement] = useState(() => window.location.pathname === '/users');
     const [showStorageAnalytics, setShowStorageAnalytics] = useState(() => window.location.pathname === '/storage');
     const [showTransfers, setShowTransfers] = useState(() => window.location.pathname === '/transfers' || window.location.pathname === '/downloads');
-    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-    const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+        try {
+            return localStorage.getItem("telestore.sidebarCollapsed") === "1";
+        }
+        catch {
+            return false;
+        }
+    });
+    useEffect(() => {
+        try {
+            localStorage.setItem("telestore.sidebarCollapsed", sidebarCollapsed ? "1" : "0");
+        }
+        catch {
+            // Storage blocked (private mode): collapse state just isn't remembered
+        }
+    }, [sidebarCollapsed]);
+    const [paletteOpen, setPaletteOpen] = useState(false);
+    const [connectDriveOpen, setConnectDriveOpen] = useState(false);
+    // Upload requests from the New menu / command palette; FileGrid opens the file picker for each new nonce
+    const [uploadRequest, setUploadRequest] = useState(null);
     const [emptyTrashDialogOpen, setEmptyTrashDialogOpen] = useState(false); // State to confirm empty trash
     const [isEmptyingTrash, setIsEmptyingTrash] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
@@ -290,9 +313,6 @@ export const FileExplorer = () => {
             setShowTransfers(false);
             // Reset currentPath to Home when returning to file view
             setCurrentPath(["Home"]);
-            // Close navigation sidebar when returning to file view
-            const event = new CustomEvent('toggleNavigationSidebar', { detail: { action: 'close' } });
-            window.dispatchEvent(event);
         };
         window.addEventListener('showFiles', handleShowFiles);
         return () => {
@@ -1362,10 +1382,6 @@ export const FileExplorer = () => {
             setSelectedFilter(filter);
         }
     }, [currentPath, selectedFilter]);
-    // Sync category changes with NavigationSidebar for mobile
-    useEffect(() => {
-        window.dispatchEvent(new CustomEvent('currentCategoryChanged', { detail: { filter: selectedFilter } }));
-    }, [selectedFilter]);
     useEffect(() => {
         const handleCategoryChange = (e) => {
             if (e.detail?.filter) {
@@ -1437,9 +1453,63 @@ export const FileExplorer = () => {
             }
         }
     };
+    // Places where nothing can be added (uploads, new folders); returns why, or null when allowed
+    const newItemBlockedReason = () => {
+        if (isInboxMode)
+            return "Telegram Inbox only holds files that arrive from Telegram. Open Home or a folder to add files.";
+        if (isEffectiveTrashMode)
+            return "You can't add files to Trash. Open Home or a folder first.";
+        if (selectedFilter === "starred" || currentFolder === "Starred")
+            return "Starred only lists starred items. Open Home or a folder to add files.";
+        if (isCloudMode && (!cloudFolderId || ["root", "google_drive", "trash", "starred", "shared_with_me"].includes(cloudFolderId)))
+            return "Open My Drive, or a folder inside it, to add files.";
+        return null;
+    };
+    // Actions from the New menu, the phone + button, the account menu and the command palette
+    const runShellAction = (id) => {
+        switch (id) {
+            case "upload-files":
+            case "upload-folder":
+            case "new-folder": {
+                const reason = activeView === "files" ? newItemBlockedReason() : null;
+                if (reason) {
+                    toast.error(reason);
+                    return;
+                }
+                if (activeView !== "files")
+                    handleNavigateView("files");
+                if (id === "new-folder")
+                    setNewFolderDialogOpen(true);
+                else
+                    setUploadRequest({ kind: id === "upload-folder" ? "folder" : "files", nonce: Date.now() });
+                return;
+            }
+            case "remote-leech":
+                setRemoteDownloadOpen(true);
+                return;
+            case "connect-drive":
+                setConnectDriveOpen(true);
+                return;
+            case "webdav":
+                setShowWebDAVDialog(true);
+                return;
+            case "refresh":
+                if (activeView !== "files")
+                    handleNavigateView("files");
+                refetch();
+                return;
+            case "logout":
+                Promise.resolve(authService.logout()).catch(() => { }).finally(() => navigate("/login"));
+                return;
+            default:
+                logger.warn("Unknown shell action", id);
+        }
+    };
     return (<div className="flex h-full w-full bg-background text-foreground select-none min-h-0 overflow-hidden">
-      <Sidebar currentPath={currentPath} onNavigate={handleFilterChange} onDrop={handleSidebarDrop} files={files} selectedFilter={selectedFilter} activeView={activeView} onNavigateView={handleNavigateView} onOpenWebDAV={() => setShowWebDAVDialog(true)} isCollapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(prev => !prev)} onNewFolder={() => setNewFolderDialogOpen(true)} mobileOpen={mobileDrawerOpen} onCloseMobile={() => setMobileDrawerOpen(false)}/>
+      <Sidebar selectedFilter={selectedFilter} activeView={activeView} onNavigateView={handleNavigateView} onDrop={handleSidebarDrop} onAction={runShellAction} onOpenPalette={() => setPaletteOpen(true)} isCollapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(prev => !prev)} isVaultUnlocked={isVaultUnlocked}/>
 
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+      <ErrorBoundary name="This page" key={activeView}>
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {showProfile ? (<motion.div key="profile" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
             <Suspense fallback={<PanelLoading />}>
@@ -1476,14 +1546,7 @@ export const FileExplorer = () => {
           </motion.div>) : showTransfers ? (<motion.div key="transfers" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
             <Transfers />
           </motion.div>) : (<div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            <TopBar currentPath={currentPath} searchQuery={searchQuery} viewMode={viewMode} onSearchChange={setSearchQuery} onViewModeChange={setViewMode} onBack={() => window.history.back()} onRefresh={refetch} onBreadcrumbClick={handleBreadcrumbClick} onToggleSidebar={() => {
-                if (window.innerWidth < 768) {
-                    setMobileDrawerOpen(prev => !prev);
-                }
-                else {
-                    setSidebarCollapsed(prev => !prev);
-                }
-            }} sortField={sortField} sortOrder={sortOrder} foldersFirst={foldersFirst} onSortChange={(field, order) => {
+            <TopBar currentPath={currentPath} searchQuery={searchQuery} viewMode={viewMode} onSearchChange={setSearchQuery} onViewModeChange={setViewMode} onBreadcrumbClick={handleBreadcrumbClick} sortField={sortField} sortOrder={sortOrder} foldersFirst={foldersFirst} onSortChange={(field, order) => {
                 setSortField(field);
                 setSortOrder(order);
                 setPage(1);
@@ -1493,7 +1556,7 @@ export const FileExplorer = () => {
                 setDateFilter("all");
                 setSearchQuery("");
                 setPage(1);
-            }} typeCounts={typeCounts} totalCount={effectivePagination?.total_items ?? baseItems.length} filteredCount={filteredItems.length} isInboxMode={isInboxMode} onOpenRemoteDownload={() => setRemoteDownloadOpen(true)}/>
+            }} typeCounts={typeCounts} totalCount={effectivePagination?.total_items ?? baseItems.length} filteredCount={filteredItems.length} isInboxMode={isInboxMode}/>
 
             {/* Trash Banner */}
             {isEffectiveTrashMode && (<div className="flex items-center justify-between px-4 py-2.5 bg-amber-500/10 border-b border-amber-500/20 text-sm">
@@ -1536,7 +1599,7 @@ export const FileExplorer = () => {
                 </div>
               </div>)}
 
-            <FileGrid items={filteredItems} viewMode={viewMode} onNavigate={handleNavigate} itemCount={filteredItems.length} onCopy={handleCopy} onCut={handleCut} onPaste={hasClipboard && !isClipboardPasted() ? handlePaste : undefined} onDelete={handleDelete} onRename={handleRename} isVaultMode={isVaultMode} onMoveToVault={handleMoveToVault} onMoveToHome={handleMoveToHome} onMove={handleMove} onDownload={handleDownload} renamingItem={renamingItem} onRenameConfirm={confirmRename} onRenameCancel={() => setRenamingItem(null)} currentFolder={currentFolder} currentPath={currentPath} currentApiPath={currentApiPath} onNewFolder={() => setNewFolderDialogOpen(true)} isLoading={isLoading} cutItem={clipboard?.operation === "cut" && !isClipboardPasted() ? clipboard.item : null} cutItems={clipboard?.operation === "cut" && !isClipboardPasted() ? cutItems : []} hasClipboard={hasClipboard} isClipboardPasted={isClipboardPasted()} onRefresh={refetch} isTrashMode={isEffectiveTrashMode} onRestoreItem={handleRestoreItem} onToggleStar={handleToggleStar} isCloudMode={isCloudMode} cloudAccountId={cloudAccountId} cloudFolderId={cloudFolderId} isInboxMode={isInboxMode}/>
+            <FileGrid items={filteredItems} viewMode={viewMode} onNavigate={handleNavigate} itemCount={filteredItems.length} onCopy={handleCopy} onCut={handleCut} onPaste={hasClipboard && !isClipboardPasted() ? handlePaste : undefined} onDelete={handleDelete} onRename={handleRename} isVaultMode={isVaultMode} onMoveToVault={handleMoveToVault} onMoveToHome={handleMoveToHome} onMove={handleMove} onDownload={handleDownload} renamingItem={renamingItem} onRenameConfirm={confirmRename} onRenameCancel={() => setRenamingItem(null)} currentFolder={currentFolder} currentPath={currentPath} currentApiPath={currentApiPath} onNewFolder={() => setNewFolderDialogOpen(true)} isLoading={isLoading} cutItem={clipboard?.operation === "cut" && !isClipboardPasted() ? clipboard.item : null} cutItems={clipboard?.operation === "cut" && !isClipboardPasted() ? cutItems : []} hasClipboard={hasClipboard} isClipboardPasted={isClipboardPasted()} onRefresh={refetch} isTrashMode={isEffectiveTrashMode} onRestoreItem={handleRestoreItem} onToggleStar={handleToggleStar} isCloudMode={isCloudMode} cloudAccountId={cloudAccountId} cloudFolderId={cloudFolderId} isInboxMode={isInboxMode} uploadRequest={uploadRequest} onUploadRequestHandled={() => setUploadRequest(null)}/>
 
             {/* Pagination Controls */}
             <FilePagination pagination={effectivePagination} currentPage={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={(newSize) => {
@@ -1546,7 +1609,12 @@ export const FileExplorer = () => {
 
           </div>)}
       </div>
+      </ErrorBoundary>
+      <MobileNav selectedFilter={selectedFilter} activeView={activeView} onNavigateView={handleNavigateView} onAction={runShellAction}/>
+      </div>
 
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} onNavigateView={handleNavigateView} onAction={runShellAction}/>
+      <ConnectCloudModal open={connectDriveOpen} onOpenChange={setConnectDriveOpen} onSuccess={() => window.dispatchEvent(new Event("cloudAccountsChanged"))}/>
 
       <DeleteDialog open={!!deleteDialog} itemName={deleteDialog?.item.name || ""} itemType={deleteDialog?.item.type || "file"} onConfirm={confirmDelete} onCancel={cancelDelete} isTrashMode={isEffectiveTrashMode} isCloudMode={isCloudMode}/>
 

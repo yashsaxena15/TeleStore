@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { getApiBaseUrl, resetApiBaseUrl, api } from "@/lib/api";
-import { X, Sun, Moon, Monitor } from "lucide-react";
+import { Sun, Moon, Monitor, Settings as SettingsIcon } from "lucide-react";
 import { toast } from "sonner";
 // Add the Tauri dialog import
 // Add Tauri path import for getting user profile directory
@@ -229,21 +230,10 @@ export const SettingsContent = ({ onBack }) => {
             });
         }
     };
-    return (<div className="flex-1 overflow-hidden bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 py-6 px-4 sm:px-6">
+    return (<div className="flex-1 flex flex-col min-h-0 bg-background">
+      <PageHeader icon={SettingsIcon} title="Settings" subtitle="Appearance, server connection and downloads"/>
+      <div className="flex-1 overflow-hidden py-6 px-4 sm:px-6 min-h-0">
       <div className="max-w-4xl mx-auto h-full flex flex-col">
-        <div className="flex items-center justify-between mb-6 flex-shrink-0">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
-          <button onClick={() => {
-            // Close the settings page and navigate back to file explorer
-            onBack();
-            // Update the browser history to reflect we're back on the main page
-            window.history.pushState({ path: ["Home"] }, '', '/');
-            // Dispatch event to show file explorer
-            window.dispatchEvent(new CustomEvent('showFiles'));
-        }} className="rounded-full p-2 hover:bg-gray-200 dark:hover:bg-gray-700">
-            <X className="h-5 w-5 text-gray-900 dark:text-white"/>
-          </button>
-        </div>
         
         <div className="flex-1 overflow-y-auto custom-scrollbar space-y-6">
           {/* Appearance & Theme Card */}
@@ -414,6 +404,7 @@ export const SettingsContent = ({ onBack }) => {
             </CardFooter>
           </Card>
         </div>
+      </div>
       </div>
     </div>);
 };
