@@ -12,7 +12,7 @@ start_time = datetime.datetime.now()
 def get_vps_status():
     uptime_seconds = (datetime.datetime.now() - start_time).total_seconds()
     uptime_str = str(datetime.timedelta(seconds=int(uptime_seconds)))
-    os = f"{platform.system()} {platform.release()}"
+    os_name = f"{platform.system()} {platform.release()}"
     cpu_usage = psutil.cpu_percent(interval=1)
     mem = psutil.virtual_memory()
     ram_usage = mem.percent
@@ -22,7 +22,7 @@ def get_vps_status():
     free_storage = free / (1024 ** 3)  # Convert bytes to GB
 
     return f"""🖥️ <b>VPS Status</b>
-• OS: {os}
+• OS: {os_name}
 • Uptime: {uptime_str}
 • CPU: {cpu_usage:.1f}%
 • RAM: {ram_usage:.1f}%

@@ -1,11 +1,6 @@
-/**
- * Unit tests for Phase 6 Batch 3: Dynamic Feedback, Keyboard Navigation, and Focus Indicators.
- */
+import { describe, it, expect } from 'vitest';
 
-export function runA11yDynamicTests() {
-  console.log('Running Dynamic Feedback & ContextMenu Navigation tests (Phase 6 Batch 3)...');
-
-  // 1. Progressbar Semantics Calculation
+describe('Dynamic Feedback & ContextMenu Navigation (Phase 6 Batch 3)', () => {
   function calculateProgressbarAttributes(totalLoaded, totalBytes) {
     const valueNow = totalBytes > 0
       ? Math.min(100, Math.round((totalLoaded / totalBytes) * 100))
@@ -20,17 +15,19 @@ export function runA11yDynamicTests() {
     };
   }
 
-  const p1 = calculateProgressbarAttributes(500, 1000);
-  console.assert(p1["aria-valuenow"] === 50, "500 of 1000 bytes should be 50%");
-  console.assert(p1["aria-valuemin"] === 0 && p1["aria-valuemax"] === 100, "Min/Max should be 0 and 100");
+  it('calculates progressbar attributes correctly', () => {
+    const p1 = calculateProgressbarAttributes(500, 1000);
+    expect(p1["aria-valuenow"]).toBe(50);
+    expect(p1["aria-valuemin"]).toBe(0);
+    expect(p1["aria-valuemax"]).toBe(100);
 
-  const p2 = calculateProgressbarAttributes(0, 0);
-  console.assert(p2["aria-valuenow"] === 0, "0 of 0 bytes should be 0%");
+    const p2 = calculateProgressbarAttributes(0, 0);
+    expect(p2["aria-valuenow"]).toBe(0);
 
-  const p3 = calculateProgressbarAttributes(1500, 1000);
-  console.assert(p3["aria-valuenow"] === 100, "Overflow bytes should be capped at 100%");
+    const p3 = calculateProgressbarAttributes(1500, 1000);
+    expect(p3["aria-valuenow"]).toBe(100);
+  });
 
-  // 2. TransfersWidget Header Keyboard Toggle Logic
   function handleHeaderKeyToggle(eventKey, currentExpanded) {
     if (eventKey === "Enter" || eventKey === " ") {
       return { handled: true, nextExpanded: !currentExpanded };
@@ -38,16 +35,20 @@ export function runA11yDynamicTests() {
     return { handled: false, nextExpanded: currentExpanded };
   }
 
-  const toggleEnter = handleHeaderKeyToggle("Enter", false);
-  console.assert(toggleEnter.handled && toggleEnter.nextExpanded === true, "Enter key must toggle collapsed to expanded");
+  it('handles TransfersWidget header keyboard toggle logic', () => {
+    const toggleEnter = handleHeaderKeyToggle("Enter", false);
+    expect(toggleEnter.handled).toBe(true);
+    expect(toggleEnter.nextExpanded).toBe(true);
 
-  const toggleSpace = handleHeaderKeyToggle(" ", true);
-  console.assert(toggleSpace.handled && toggleSpace.nextExpanded === false, "Space key must toggle expanded to collapsed");
+    const toggleSpace = handleHeaderKeyToggle(" ", true);
+    expect(toggleSpace.handled).toBe(true);
+    expect(toggleSpace.nextExpanded).toBe(false);
 
-  const toggleOther = handleHeaderKeyToggle("Tab", false);
-  console.assert(!toggleOther.handled && toggleOther.nextExpanded === false, "Tab key must not trigger toggle");
+    const toggleOther = handleHeaderKeyToggle("Tab", false);
+    expect(toggleOther.handled).toBe(false);
+    expect(toggleOther.nextExpanded).toBe(false);
+  });
 
-  // 3. ContextMenu Arrow Navigation Logic
   function getNextMenuItemIndex(items, currentIndex, key) {
     if (!items || items.length === 0) return -1;
     const enabledIndices = items
@@ -60,14 +61,14 @@ export function runA11yDynamicTests() {
 
     if (key === "ArrowDown") {
       if (currentPos === -1 || currentPos === enabledIndices.length - 1) {
-        return enabledIndices[0]; // wrap to first enabled item
+        return enabledIndices[0];
       }
       return enabledIndices[currentPos + 1];
     }
 
     if (key === "ArrowUp") {
       if (currentPos === -1 || currentPos === 0) {
-        return enabledIndices[enabledIndices.length - 1]; // wrap to last enabled item
+        return enabledIndices[enabledIndices.length - 1];
       }
       return enabledIndices[currentPos - 1];
     }
@@ -76,28 +77,20 @@ export function runA11yDynamicTests() {
   }
 
   const sampleMenuItems = [
-    { label: "Open", disabled: false },       // index 0
-    { label: "Download", disabled: false },   // index 1
-    { label: "Paste", disabled: true },       // index 2 (disabled)
-    { label: "Delete", disabled: false },     // index 3
+    { label: "Open", disabled: false },
+    { label: "Download", disabled: false },
+    { label: "Paste", disabled: true },
+    { label: "Delete", disabled: false },
   ];
 
-  // ArrowDown from index 0 -> 1
-  console.assert(getNextMenuItemIndex(sampleMenuItems, 0, "ArrowDown") === 1, "ArrowDown from 0 should go to 1");
+  it('handles ContextMenu arrow navigation skipping disabled items and wrapping', () => {
+    expect(getNextMenuItemIndex(sampleMenuItems, 0, "ArrowDown")).toBe(1);
+    expect(getNextMenuItemIndex(sampleMenuItems, 1, "ArrowDown")).toBe(3);
+    expect(getNextMenuItemIndex(sampleMenuItems, 3, "ArrowDown")).toBe(0);
+    expect(getNextMenuItemIndex(sampleMenuItems, 0, "ArrowUp")).toBe(3);
+    expect(getNextMenuItemIndex(sampleMenuItems, 3, "ArrowUp")).toBe(1);
+  });
 
-  // ArrowDown from index 1 -> skips disabled index 2 -> 3
-  console.assert(getNextMenuItemIndex(sampleMenuItems, 1, "ArrowDown") === 3, "ArrowDown from 1 should skip disabled 2 and land on 3");
-
-  // ArrowDown from index 3 (last) wraps to 0
-  console.assert(getNextMenuItemIndex(sampleMenuItems, 3, "ArrowDown") === 0, "ArrowDown from last item should wrap to first enabled item (0)");
-
-  // ArrowUp from index 0 wraps to 3 (last enabled item)
-  console.assert(getNextMenuItemIndex(sampleMenuItems, 0, "ArrowUp") === 3, "ArrowUp from 0 should wrap to last enabled item (3)");
-
-  // ArrowUp from index 3 -> skips disabled index 2 -> 1
-  console.assert(getNextMenuItemIndex(sampleMenuItems, 3, "ArrowUp") === 1, "ArrowUp from 3 should skip disabled 2 and land on 1");
-
-  // 4. Live Region Semantics Contract
   function validateLiveRegion(elementAttrs) {
     return (
       elementAttrs.role === "region" &&
@@ -107,19 +100,8 @@ export function runA11yDynamicTests() {
     );
   }
 
-  console.assert(
-    validateLiveRegion({ role: "region", "aria-live": "polite", "aria-label": "Upload progress monitor" }),
-    "UploadProgressWidget live region contract valid"
-  );
-  console.assert(
-    validateLiveRegion({ role: "region", "aria-live": "polite", "aria-label": "Transfers monitor" }),
-    "TransfersWidget live region contract valid"
-  );
-
-  console.log('All Dynamic Feedback & ContextMenu Navigation tests passed successfully! (13/13 assertions)');
-  return true;
-}
-
-if (typeof process !== 'undefined') {
-  runA11yDynamicTests();
-}
+  it('validates live region semantics contract', () => {
+    expect(validateLiveRegion({ role: "region", "aria-live": "polite", "aria-label": "Upload progress monitor" })).toBe(true);
+    expect(validateLiveRegion({ role: "region", "aria-live": "polite", "aria-label": "Transfers monitor" })).toBe(true);
+  });
+});

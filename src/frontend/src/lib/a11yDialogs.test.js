@@ -1,11 +1,6 @@
-/**
- * Unit tests for Phase 6 Batch 2: Dialog Semantics, Focus Trapping, and Escape Dismissal.
- */
+import { describe, it, expect } from 'vitest';
 
-export function runA11yDialogTests() {
-  console.log('Running Dialog Semantics & Focus Trapping tests (Phase 6 Batch 2)...');
-
-  // 1. Focus Trapping Tab Cycling Logic
+describe('Dialog Semantics & Focus Trapping (Phase 6 Batch 2)', () => {
   function simulateFocusTrap({ focusables, currentIndex, isShiftTab }) {
     if (!focusables || focusables.length === 0) return currentIndex;
     const firstIndex = 0;
@@ -13,12 +8,12 @@ export function runA11yDialogTests() {
 
     if (isShiftTab) {
       if (currentIndex === firstIndex) {
-        return lastIndex; // wraps to end
+        return lastIndex;
       }
       return currentIndex - 1;
     } else {
       if (currentIndex === lastIndex) {
-        return firstIndex; // wraps to start
+        return firstIndex;
       }
       return currentIndex + 1;
     }
@@ -26,31 +21,13 @@ export function runA11yDialogTests() {
 
   const mockDialogElements = ['input#folderName', 'button#cancel', 'button#create'];
 
-  // Tab forward from middle
-  console.assert(
-    simulateFocusTrap({ focusables: mockDialogElements, currentIndex: 0, isShiftTab: false }) === 1,
-    "Tab from first element (index 0) must advance to next element (index 1)"
-  );
+  it('cycles focus correctly forward and backward with wrapping', () => {
+    expect(simulateFocusTrap({ focusables: mockDialogElements, currentIndex: 0, isShiftTab: false })).toBe(1);
+    expect(simulateFocusTrap({ focusables: mockDialogElements, currentIndex: 2, isShiftTab: false })).toBe(0);
+    expect(simulateFocusTrap({ focusables: mockDialogElements, currentIndex: 1, isShiftTab: true })).toBe(0);
+    expect(simulateFocusTrap({ focusables: mockDialogElements, currentIndex: 0, isShiftTab: true })).toBe(2);
+  });
 
-  // Tab forward from last element wraps to first
-  console.assert(
-    simulateFocusTrap({ focusables: mockDialogElements, currentIndex: 2, isShiftTab: false }) === 0,
-    "Tab from last element (index 2) must wrap around to first element (index 0)"
-  );
-
-  // Shift+Tab backward from middle
-  console.assert(
-    simulateFocusTrap({ focusables: mockDialogElements, currentIndex: 1, isShiftTab: true }) === 0,
-    "Shift+Tab from second element (index 1) must move back to first element (index 0)"
-  );
-
-  // Shift+Tab backward from first element wraps to last
-  console.assert(
-    simulateFocusTrap({ focusables: mockDialogElements, currentIndex: 0, isShiftTab: true }) === 2,
-    "Shift+Tab from first element (index 0) must wrap around to last element (index 2)"
-  );
-
-  // 2. Dialog Attributes Contract
   function validateDialogAttributes(attrs) {
     return (
       attrs.role === "dialog" &&
@@ -60,39 +37,38 @@ export function runA11yDialogTests() {
     );
   }
 
-  const newFolderDialogAttrs = {
-    role: "dialog",
-    "aria-modal": "true",
-    "aria-labelledby": "new-folder-dialog-title"
-  };
-  console.assert(validateDialogAttributes(newFolderDialogAttrs), "NewFolderDialog attributes must satisfy accessible dialog standard");
+  it('validates dialog attributes contract', () => {
+    const newFolderDialogAttrs = {
+      role: "dialog",
+      "aria-modal": "true",
+      "aria-labelledby": "new-folder-dialog-title"
+    };
+    expect(validateDialogAttributes(newFolderDialogAttrs)).toBe(true);
 
-  const documentReaderModalAttrs = {
-    role: "dialog",
-    "aria-modal": "true",
-    "aria-labelledby": "doc-reader-title"
-  };
-  console.assert(validateDialogAttributes(documentReaderModalAttrs), "DocumentReaderModal attributes must satisfy accessible dialog standard");
+    const documentReaderModalAttrs = {
+      role: "dialog",
+      "aria-modal": "true",
+      "aria-labelledby": "doc-reader-title"
+    };
+    expect(validateDialogAttributes(documentReaderModalAttrs)).toBe(true);
+  });
 
-  // 3. Floating Upload Button Menu Structure
   function validateUploadMenuAttributes(menuAttrs, itemAttrs) {
     const isMenuValid = menuAttrs.role === "menu" && Boolean(menuAttrs["aria-label"]);
     const areItemsValid = itemAttrs.every(attr => attr.role === "menuitem" && Boolean(attr["aria-label"]));
     return isMenuValid && areItemsValid;
   }
 
-  const uploadMenuAttrs = { role: "menu", "aria-label": "Upload options" };
-  const uploadItemAttrs = [
-    { role: "menuitem", "aria-label": "Create new folder" },
-    { role: "menuitem", "aria-label": "Upload file" },
-    { role: "menuitem", "aria-label": "Upload folder" }
-  ];
-  console.assert(
-    validateUploadMenuAttributes(uploadMenuAttrs, uploadItemAttrs),
-    "FloatingUploadButton menu and items must satisfy menu and menuitem ARIA requirements"
-  );
+  it('validates upload menu attributes', () => {
+    const uploadMenuAttrs = { role: "menu", "aria-label": "Upload options" };
+    const uploadItemAttrs = [
+      { role: "menuitem", "aria-label": "Create new folder" },
+      { role: "menuitem", "aria-label": "Upload file" },
+      { role: "menuitem", "aria-label": "Upload folder" }
+    ];
+    expect(validateUploadMenuAttributes(uploadMenuAttrs, uploadItemAttrs)).toBe(true);
+  });
 
-  // 4. Escape Key Dismissal Contract
   function handleEscapeKey({ isOpen, key }) {
     if (key === "Escape" && isOpen) {
       return { closed: true, preventDefault: true };
@@ -100,19 +76,15 @@ export function runA11yDialogTests() {
     return { closed: false, preventDefault: false };
   }
 
-  const escapeWhenOpen = handleEscapeKey({ isOpen: true, key: "Escape" });
-  console.assert(escapeWhenOpen.closed === true && escapeWhenOpen.preventDefault === true, "Escape key when open must dismiss modal/menu");
+  it('handles Escape key dismissal contract', () => {
+    const escapeWhenOpen = handleEscapeKey({ isOpen: true, key: "Escape" });
+    expect(escapeWhenOpen.closed).toBe(true);
+    expect(escapeWhenOpen.preventDefault).toBe(true);
 
-  const escapeWhenClosed = handleEscapeKey({ isOpen: false, key: "Escape" });
-  console.assert(escapeWhenClosed.closed === false, "Escape key when closed must have no effect");
+    const escapeWhenClosed = handleEscapeKey({ isOpen: false, key: "Escape" });
+    expect(escapeWhenClosed.closed).toBe(false);
 
-  const otherKeyWhenOpen = handleEscapeKey({ isOpen: true, key: "Enter" });
-  console.assert(otherKeyWhenOpen.closed === false, "Non-Escape key must not trigger dismissal");
-
-  console.log('All Dialog Semantics & Focus Trapping tests passed successfully! (9/9 assertions)');
-  return true;
-}
-
-if (typeof process !== 'undefined') {
-  runA11yDialogTests();
-}
+    const otherKeyWhenOpen = handleEscapeKey({ isOpen: true, key: "Enter" });
+    expect(otherKeyWhenOpen.closed).toBe(false);
+  });
+});

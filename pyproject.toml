@@ -1,0 +1,43 @@
+[project]
+name = "telestore"
+version = "0.1.0"
+description = "Telegram-backed cloud storage server"
+requires-python = ">=3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "cache",
+    "conversation-sharing",
+    "src/frontend",
+]
+
+[tool.ruff.lint]
+select = [
+    "E9",    # Syntax / fatal runtime errors
+    "F821",  # Undefined names
+    "F811",  # Redefinition of unused name
+    "B006",  # Mutable data structures for argument defaults
+]
+
+# TODO: Part 5 (CQ-1, CQ-2) — Enable stricter rules after codebase cleanup:
+# - "F401": Unused imports
+# - "F841": Unused variables
+# - "E722": Bare `except:` clauses
+# - "S": Security rules (flake8-bandit)
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+pythonpath = [".", "src"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]

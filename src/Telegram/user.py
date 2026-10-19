@@ -1,10 +1,8 @@
 import os, math, logging, datetime, pytz
 
 from pyrogram.errors import BadRequest, Unauthorized
-from pyrogram import Client
-from pyrogram import types
+from pyrogram import Client, filters, types
 from pyrogram.types import Message
-from pyrogram import Client, filters
 from asyncio.exceptions import TimeoutError
 
 from d4rk.Logs import setup_logger

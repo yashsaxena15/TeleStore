@@ -1,9 +1,7 @@
+import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { getStoredTheme, setTheme, applyTheme, THEMES } from './theme.js';
 
-export function runThemeTests() {
-  console.log('Running theme module tests...');
-
-  // Mock localStorage if in node/test environment
+describe('theme module', () => {
   let storage = {};
   const mockLocalStorage = {
     getItem: (k) => storage[k] || null,
@@ -15,34 +13,35 @@ export function runThemeTests() {
   const originalStorage = globalThis.localStorage;
   globalThis.localStorage = mockLocalStorage;
 
-  try {
-    // Test 1: Default theme when unset
+  beforeEach(() => {
     mockLocalStorage.clear();
-    const defaultTheme = getStoredTheme();
-    console.assert(defaultTheme === THEMES.DARK, `Default theme should be 'dark', got '${defaultTheme}'`);
+  });
 
-    // Test 2: Persist light theme
+  afterAll(() => {
+    globalThis.localStorage = originalStorage;
+  });
+
+  it('defaults theme to dark when unset', () => {
+    const defaultTheme = getStoredTheme();
+    expect(defaultTheme).toBe(THEMES.DARK);
+  });
+
+  it('persists light theme', () => {
     setTheme(THEMES.LIGHT);
     const lightTheme = getStoredTheme();
-    console.assert(lightTheme === THEMES.LIGHT, `Stored theme should be 'light', got '${lightTheme}'`);
+    expect(lightTheme).toBe(THEMES.LIGHT);
+  });
 
-    // Test 3: Persist system theme
+  it('persists system theme', () => {
     setTheme(THEMES.SYSTEM);
     const systemTheme = getStoredTheme();
-    console.assert(systemTheme === THEMES.SYSTEM, `Stored theme should be 'system', got '${systemTheme}'`);
+    expect(systemTheme).toBe(THEMES.SYSTEM);
+  });
 
-    // Test 4: Reject invalid theme value
+  it('rejects invalid theme value', () => {
+    setTheme(THEMES.SYSTEM);
     setTheme('neon-green');
     const unchangedTheme = getStoredTheme();
-    console.assert(unchangedTheme === THEMES.SYSTEM, `Invalid theme should not overwrite stored value`);
-
-    console.log('All theme module tests passed successfully!');
-    return true;
-  } finally {
-    globalThis.localStorage = originalStorage;
-  }
-}
-
-if (typeof window !== 'undefined' && window.location?.protocol === 'file:') {
-  runThemeTests();
-}
+    expect(unchangedTheme).toBe(THEMES.SYSTEM);
+  });
+});

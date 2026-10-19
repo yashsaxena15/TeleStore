@@ -1,7 +1,4 @@
-/**
- * Unit tests for Phase 6 Batch 1: Accessible Names and Screen Reader Labels.
- */
-
+import { describe, it, expect } from 'vitest';
 import {
   getAudioPlayPauseLabel,
   getAudioRepeatLabel,
@@ -15,56 +12,56 @@ import {
   getVideoFullscreenLabel
 } from './a11yLabels.js';
 
-export function runA11yLabelTests() {
-  console.log('Running Accessibility Label & Screen Reader tests (Phase 6 Batch 1)...');
+describe('Accessibility Labels (Phase 6 Batch 1)', () => {
+  it('handles audio play/pause labels', () => {
+    expect(getAudioPlayPauseLabel(true)).toBe("Pause audio");
+    expect(getAudioPlayPauseLabel(false)).toBe("Play audio");
+  });
 
-  // 1. Audio Play / Pause
-  console.assert(getAudioPlayPauseLabel(true) === "Pause audio", "Playing state should yield 'Pause audio'");
-  console.assert(getAudioPlayPauseLabel(false) === "Play audio", "Paused state should yield 'Play audio'");
+  it('handles audio repeat labels', () => {
+    expect(getAudioRepeatLabel("off")).toBe("Enable repeat");
+    expect(getAudioRepeatLabel("all")).toBe("Repeat all tracks");
+    expect(getAudioRepeatLabel("one")).toBe("Repeat current track");
+  });
 
-  // 2. Audio Repeat Modes
-  console.assert(getAudioRepeatLabel("off") === "Enable repeat", "Repeat off should suggest enabling repeat");
-  console.assert(getAudioRepeatLabel("all") === "Repeat all tracks", "Repeat all should yield 'Repeat all tracks'");
-  console.assert(getAudioRepeatLabel("one") === "Repeat current track", "Repeat one should yield 'Repeat current track'");
+  it('handles audio shuffle labels', () => {
+    expect(getAudioShuffleLabel(false)).toBe("Enable shuffle");
+    expect(getAudioShuffleLabel(true)).toBe("Disable shuffle");
+  });
 
-  // 3. Audio Shuffle
-  console.assert(getAudioShuffleLabel(false) === "Enable shuffle", "Shuffle off should suggest enabling shuffle");
-  console.assert(getAudioShuffleLabel(true) === "Disable shuffle", "Shuffle on should suggest disabling shuffle");
+  it('handles audio speed labels', () => {
+    expect(getAudioSpeedLabel(1)).toBe("Playback speed, current 1x");
+    expect(getAudioSpeedLabel(1.5)).toBe("Playback speed, current 1.5x");
+  });
 
-  // 4. Audio Playback Speed
-  console.assert(getAudioSpeedLabel(1) === "Playback speed, current 1x", "Rate 1x label mismatch");
-  console.assert(getAudioSpeedLabel(1.5) === "Playback speed, current 1.5x", "Rate 1.5x label mismatch");
+  it('handles audio mute labels', () => {
+    expect(getAudioMuteLabel(false)).toBe("Mute audio");
+    expect(getAudioMuteLabel(true)).toBe("Unmute audio");
+  });
 
-  // 5. Audio Mute
-  console.assert(getAudioMuteLabel(false) === "Mute audio", "Unmuted state should yield 'Mute audio'");
-  console.assert(getAudioMuteLabel(true) === "Unmute audio", "Muted state should yield 'Unmute audio'");
+  it('handles video control labels', () => {
+    expect(getVideoPlayPauseLabel(true)).toBe("Pause video");
+    expect(getVideoPlayPauseLabel(false)).toBe("Play video");
+    expect(getVideoFullscreenLabel(true)).toBe("Exit fullscreen");
+    expect(getVideoFullscreenLabel(false)).toBe("Enter fullscreen");
+  });
 
-  // 6. Video Controls
-  console.assert(getVideoPlayPauseLabel(true) === "Pause video", "Video playing should yield 'Pause video'");
-  console.assert(getVideoPlayPauseLabel(false) === "Play video", "Video paused should yield 'Play video'");
-  console.assert(getVideoFullscreenLabel(true) === "Exit fullscreen", "Fullscreen active should yield 'Exit fullscreen'");
-  console.assert(getVideoFullscreenLabel(false) === "Enter fullscreen", "Fullscreen inactive should yield 'Enter fullscreen'");
+  it('handles transfer widget expand labels', () => {
+    expect(getTransfersExpandLabel(true)).toBe("Collapse transfers panel");
+    expect(getTransfersExpandLabel(false)).toBe("Expand transfers panel");
+  });
 
-  // 7. Transfers Widget Header
-  console.assert(getTransfersExpandLabel(true) === "Collapse transfers panel", "Expanded widget should yield 'Collapse transfers panel'");
-  console.assert(getTransfersExpandLabel(false) === "Expand transfers panel", "Collapsed widget should yield 'Expand transfers panel'");
+  it('handles transfer widget item action labels', () => {
+    expect(getTransfersItemActionLabel("pause", "movie.mp4")).toBe("Pause transfer movie.mp4");
+    expect(getTransfersItemActionLabel("pause", "")).toBe("Pause transfer");
+    expect(getTransfersItemActionLabel("resume", "doc.pdf")).toBe("Resume transfer doc.pdf");
+    expect(getTransfersItemActionLabel("cancel", "file.zip", false)).toBe("Cancel transfer file.zip");
+    expect(getTransfersItemActionLabel("cancel", "MyFolder", true)).toBe("Cancel entire folder MyFolder");
+    expect(getTransfersItemActionLabel("cancel", "", true)).toBe("Cancel entire folder");
+  });
 
-  // 8. Transfers Widget Item Actions
-  console.assert(getTransfersItemActionLabel("pause", "movie.mp4") === "Pause transfer movie.mp4", "Pause action with name");
-  console.assert(getTransfersItemActionLabel("pause", "") === "Pause transfer", "Pause action with empty name");
-  console.assert(getTransfersItemActionLabel("resume", "doc.pdf") === "Resume transfer doc.pdf", "Resume action with name");
-  console.assert(getTransfersItemActionLabel("cancel", "file.zip", false) === "Cancel transfer file.zip", "Single item cancel");
-  console.assert(getTransfersItemActionLabel("cancel", "MyFolder", true) === "Cancel entire folder MyFolder", "Group folder cancel");
-  console.assert(getTransfersItemActionLabel("cancel", "", true) === "Cancel entire folder", "Group folder cancel without name");
-
-  // 9. Floating Upload Button
-  console.assert(getFloatingUploadTriggerLabel(false) === "Upload or create folder", "Closed menu trigger label");
-  console.assert(getFloatingUploadTriggerLabel(true) === "Close upload menu", "Open menu trigger label");
-
-  console.log('All Accessibility Label tests passed successfully! (20/20 assertions)');
-  return true;
-}
-
-if (typeof process !== 'undefined') {
-  runA11yLabelTests();
-}
+  it('handles floating upload trigger labels', () => {
+    expect(getFloatingUploadTriggerLabel(false)).toBe("Upload or create folder");
+    expect(getFloatingUploadTriggerLabel(true)).toBe("Close upload menu");
+  });
+});

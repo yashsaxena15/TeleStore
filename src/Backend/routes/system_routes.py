@@ -31,9 +31,6 @@ async def get_workloads(request: Request, user: User = Depends(require_auth)):
 @router.post("/github")
 async def github_webhook(request: Request):
     """Handle GitHub webhook for automatic updates on Linux servers"""
-    import subprocess
-    import os
-    import sys
     import hmac
     import hashlib
     from d4rk.Logs import setup_logger

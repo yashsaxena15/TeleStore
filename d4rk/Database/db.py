@@ -13,7 +13,9 @@ class Database:
     def __init__(self):
         pass
 
-    def connect(self,name: str, collections: list = [],DATABASE_URL: str =None):
+    def connect(self,name: str, collections: list = None,DATABASE_URL: str =None):
+        if collections is None:
+            collections = []
         self.database_name = name.replace(" ","")
         self._collections = collections
         self._DATABASE_URL = DATABASE_URL

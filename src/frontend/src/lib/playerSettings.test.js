@@ -1,31 +1,47 @@
+import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { getPlayerPreference, setPlayerPreference, resetPlayerPreference } from './playerSettings';
-// Simple test function to verify player settings utilities
-function runTests() {
-    console.log('Running player settings tests...');
-    // Test 1: Default player preference
-    localStorage.clear();
+
+describe('player settings', () => {
+  let storage = {};
+  const mockLocalStorage = {
+    getItem: (k) => storage[k] || null,
+    setItem: (k, v) => { storage[k] = String(v); },
+    removeItem: (k) => { delete storage[k]; },
+    clear: () => { storage = {}; },
+  };
+
+  const originalStorage = globalThis.localStorage;
+  globalThis.localStorage = mockLocalStorage;
+
+  beforeEach(() => {
+    mockLocalStorage.clear();
+  });
+
+  afterAll(() => {
+    globalThis.localStorage = originalStorage;
+  });
+
+  it('returns built-in as default player preference', () => {
     const defaultPreference = getPlayerPreference();
-    console.log('Test 1 - Default preference:', defaultPreference);
-    console.assert(defaultPreference === 'built-in', 'Default preference should be built-in');
-    // Test 2: Save and retrieve player preference
+    expect(defaultPreference).toBe('built-in');
+  });
+
+  it('saves and retrieves external player preference', () => {
     setPlayerPreference('external');
     const savedPreference = getPlayerPreference();
-    console.log('Test 2 - Saved preference:', savedPreference);
-    console.assert(savedPreference === 'external', 'Saved preference should be external');
-    // Test 3: Reset player preference
+    expect(savedPreference).toBe('external');
+  });
+
+  it('resets player preference to default', () => {
+    setPlayerPreference('external');
     resetPlayerPreference();
     const resetPreference = getPlayerPreference();
-    console.log('Test 3 - Reset preference:', resetPreference);
-    console.assert(resetPreference === 'built-in', 'Reset preference should be built-in');
-    // Test 4: Handle invalid player preference
-    localStorage.setItem('playerPreference', 'invalid-value');
+    expect(resetPreference).toBe('built-in');
+  });
+
+  it('handles invalid player preference by falling back to built-in', () => {
+    mockLocalStorage.setItem('playerPreference', 'invalid-value');
     const invalidPreference = getPlayerPreference();
-    console.log('Test 4 - Invalid preference handling:', invalidPreference);
-    console.assert(invalidPreference === 'built-in', 'Invalid preference should default to built-in');
-    console.log('All tests completed!');
-}
-// Run tests if this file is executed directly
-if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
-    runTests();
-}
-export { runTests };
+    expect(invalidPreference).toBe('built-in');
+  });
+});

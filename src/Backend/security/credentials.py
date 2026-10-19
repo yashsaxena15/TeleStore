@@ -9,7 +9,6 @@ from google.auth.transport import requests as google_requests
 from src.Config import GOOGLE_CLIENT_ID, DEFAULT_ADMIN_USERNAME, DEFAULT_ADMIN_PASSWORD
 from src.Database import database
 from pydantic import BaseModel
-from typing import Optional
 
 # Set up logging
 logger = logging.getLogger(__name__)
