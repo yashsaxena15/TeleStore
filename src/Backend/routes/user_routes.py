@@ -2,13 +2,13 @@
 
 from fastapi import APIRouter, Request, Depends, HTTPException
 from pydantic import BaseModel
-import hashlib
 import datetime
 from typing import Optional, List
 from bson import ObjectId
 
 from ..security.credentials import require_auth, User
 from src.Database import database
+from src.Utils.passwords import hash_password
 from d4rk.Logs import setup_logger
 
 logger = setup_logger("user_routes")
@@ -190,7 +190,7 @@ async def add_user(request: Request, user_request: AddUserRequest, user: User = 
         # Hash password if provided
         password_hash = None
         if user_request.password:
-            password_hash = hashlib.sha256(user_request.password.encode()).hexdigest()
+            password_hash = hash_password(user_request.password)
         
         # Save user to database
         user_id_for_db = user_request.username if user_request.username else f"google_{user_request.email}"
@@ -400,7 +400,7 @@ async def change_user_password(request: Request, user_id_param: str, password_re
         
         # Hash new password
         logger.info(f"Hashing new password for user: {target_username}")
-        new_password_hash = hashlib.sha256(password_request.new_password.encode()).hexdigest()
+        new_password_hash = hash_password(password_request.new_password)
         
         # Update password in database
         logger.info(f"Updating password in database for user: {target_username}")

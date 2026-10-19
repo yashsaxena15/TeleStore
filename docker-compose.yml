@@ -17,6 +17,7 @@ services:
       - ./src/Database:/app/src/Database
       - ./src/Config:/app/src/Config
       - ./src/Telegram:/app/src/Telegram
+      - ./src/Utils:/app/src/Utils
       - ./d4rk:/app/d4rk
       - ./cache:/app/cache
       - ./.env:/app/.env

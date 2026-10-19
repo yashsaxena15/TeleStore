@@ -1,7 +1,6 @@
 from fastapi import HTTPException, Request
 from fastapi.security import HTTPBearer
 from typing import Optional
-import hashlib
 import hmac
 import logging
 from google.oauth2 import id_token
@@ -28,7 +27,6 @@ class User(BaseModel):
 # Fallback admin, used only when the username is not in the database.
 # Both values come from .env (DEFAULT_ADMIN_PASSWORD is required by src.Config).
 USERNAME = DEFAULT_ADMIN_USERNAME
-ADMIN_PASSWORD_HASH = hashlib.sha256(DEFAULT_ADMIN_PASSWORD.encode()).hexdigest()
 
 # List of authorized admin emails (configurable via .env: AUTHORIZED_ADMIN_EMAILS)
 _raw_admin_emails = os.getenv("AUTHORIZED_ADMIN_EMAILS", "")
@@ -37,8 +35,7 @@ AUTHORIZED_ADMINS = [e.strip() for e in _raw_admin_emails.split(",") if e.strip(
 security = HTTPBearer(auto_error=False)
 
 def verify_password(password: str) -> bool:
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-    return hmac.compare_digest(password_hash, ADMIN_PASSWORD_HASH)
+    return hmac.compare_digest(password.encode("utf-8"), DEFAULT_ADMIN_PASSWORD.encode("utf-8"))
 
 def verify_credentials(username: str, password: str) -> bool:
     logger.info(f"Verifying credentials for username: '{username}'")

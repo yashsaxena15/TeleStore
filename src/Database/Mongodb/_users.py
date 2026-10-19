@@ -2,9 +2,9 @@
 
 from typing import Any, Optional, List
 from datetime import datetime
-import hashlib
 
 from d4rk.Logs import setup_logger
+from src.Utils.passwords import hash_password, verify_password, needs_rehash
 
 from pymongo.collection import Collection
 from pymongo.results import InsertOneResult
@@ -282,12 +282,15 @@ class Users(Collection):
                 logger.warning(f"Password login rejected: user {username} has no password set")
                 return False
 
-            # Hash the provided password
-            provided_hash = hashlib.sha256(password.encode()).hexdigest()
-            
-            # Compare hashes
-            is_valid = stored_hash == provided_hash
+            is_valid = verify_password(password, stored_hash)
             logger.info(f"Password verification for user {username}: {is_valid}")
+            if is_valid and needs_rehash(stored_hash):
+                # Upgrade legacy unsalted SHA-256 hashes to scrypt on successful login
+                try:
+                    self.update_one({"username": username}, {"$set": {"password_hash": hash_password(password)}})
+                    logger.info(f"Upgraded password hash to scrypt for user {username}")
+                except Exception as e:
+                    logger.error(f"Password hash upgrade failed for user {username}: {e}")
             return is_valid
         except Exception as e:
             logger.error(f"Error verifying credentials for user {username}: {e}")
@@ -312,11 +315,7 @@ class Users(Collection):
                 logger.warning(f"Current-password check rejected: user {username} has no password set")
                 return False
 
-            # Hash the provided password
-            provided_hash = hashlib.sha256(password.encode()).hexdigest()
-            
-            # Compare hashes
-            is_valid = stored_hash == provided_hash
+            is_valid = verify_password(password, stored_hash)
             logger.info(f"Current password verification for user {username}: {is_valid}")
             return is_valid
         except Exception as e:

@@ -24,7 +24,7 @@ import aiofiles
 from d4rk.Logs import setup_logger
 logger = setup_logger("web_server")
 
-from .security.credentials import require_auth, is_authenticated, require_admin, verify_credentials, verify_google_token, ADMIN_PASSWORD_HASH , User
+from .security.credentials import require_auth, is_authenticated, require_admin, verify_credentials, verify_google_token, User
 from .routes.api_routes import list_media_api, delete_media_api, update_media_api, delete_movie_quality_api, delete_tv_quality_api, delete_tv_episode_api, delete_tv_season_api
 from .routes.stream_routes import router as stream_router
 # Import the new Telegram verification router
