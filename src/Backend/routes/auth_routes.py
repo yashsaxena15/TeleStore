@@ -7,7 +7,7 @@ import secrets
 import datetime
 from typing import Optional
 
-from ..security.credentials import require_auth, is_authenticated, require_admin, verify_credentials, verify_google_token, ADMIN_PASSWORD_HASH, User
+from ..security.credentials import require_auth, is_authenticated, require_admin, verify_credentials, verify_google_token, User
 
 from src.Database import database
 from src.Config import APP_NAME
@@ -28,7 +28,6 @@ class GoogleLoginRequest(BaseModel):
 @router.post("/login")
 async def login_post_route(request: Request, login_data: LoginRequest):
     logger.info(f"Login attempt for user: {login_data.username}")
-    logger.info(f"Login data received: {login_data}")
     
     # Log the verification process
     is_valid = verify_credentials(login_data.username, login_data.password)
@@ -39,8 +38,6 @@ async def login_post_route(request: Request, login_data: LoginRequest):
         request.session["username"] = login_data.username
         request.session["auth_method"] = "local"
         logger.info(f"Login successful for user: {login_data.username}")
-        # Log session data for debugging
-        logger.info(f"Session data after login: {dict(request.session)}")
         
         # Check if user has verified their Telegram account before creating default folders
         user_data = database.Users.getUser(login_data.username)
@@ -73,9 +70,6 @@ async def login_post_route(request: Request, login_data: LoginRequest):
         }
     
     logger.warning(f"Login failed for user: {login_data.username}")
-    logger.info(f"Expected username: 'admin', Provided username: '{login_data.username}'")
-    logger.info(f"Expected password hash: {ADMIN_PASSWORD_HASH}")
-    logger.info(f"Provided password hash: {hashlib.sha256(login_data.password.encode()).hexdigest()}")
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Incorrect username or password",
@@ -131,8 +125,6 @@ async def logout_route(request: Request):
 
 @router.get("/check")
 async def check_auth(request: Request):
-    # Log session data for debugging
-    logger.info(f"Auth check request. Session data: {dict(request.session)}")
     from ..modules.utilities import _auth_tokens
     # Check if there's an auth token in headers or query param
     auth_header = request.headers.get("X-Auth-Token") or request.query_params.get("token")

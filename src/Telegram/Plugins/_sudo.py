@@ -10,6 +10,7 @@ from pyrogram.types import Message , ForceReply
 from d4rk.Logs import setup_logger
 from d4rk.Utils import CustomFilters , command 
 
+from src.Config import OWNER
 from src.Database import database
 
 
@@ -104,8 +105,11 @@ async def unauth_command(client: Client, message: Message):
     await message.reply_text("User is not authorized.")
 
 
-@Client.on_message(filters.command("cmd") & CustomFilters.authorize())
+# Remote shell: owner only, and only in the owner's private chat with the bot, so no one
+# else can send the follow-up commands this session listens for.
+@Client.on_message(filters.command("cmd") & filters.private & filters.user(OWNER or []))
 async def cmd_command(client: Client, message: Message):
+    logger.info(f"/cmd shell session opened by owner {message.from_user.id}")
     asyncio.create_task(run_shell_task(client, message))
 
 async def run_shell_task(client:Client, message: Message):

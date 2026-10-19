@@ -8,6 +8,7 @@ from typing import Optional
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from ..security.credentials import require_auth, User
@@ -62,9 +63,38 @@ def _derive_pin_key(pin: str, salt: bytes) -> bytes:
     """Derive a 256-bit encryption key from 4-digit PIN using PBKDF2."""
     return hashlib.pbkdf2_hmac("sha256", pin.encode("utf-8"), salt, 100000, 32)
 
-def _get_recovery_master_key(user_id: str) -> bytes:
+def _get_recovery_master_key(user_id: str, secret: str = None) -> bytes:
     """Derive a server-side recovery key tied to this user and system secret."""
-    return hashlib.pbkdf2_hmac("sha256", SESSION_SECRET_KEY.encode("utf-8"), user_id.encode("utf-8"), 50000, 32)
+    secret = secret or SESSION_SECRET_KEY
+    return hashlib.pbkdf2_hmac("sha256", secret.encode("utf-8"), user_id.encode("utf-8"), 50000, 32)
+
+# Vaults created before 2026-10-19 wrapped their recovery copy with this former public default
+# secret. It is accepted only to read such a copy, which is then re-wrapped with SESSION_SECRET_KEY.
+_LEGACY_RECOVERY_SECRET = "f6d2e3b9a0f43d9a2e6a56b2d3175cd9c05bbfe31d95ed2a7306b57cb1a8b6f0"
+
+def _open_recovery_envelope(config: dict, user_id: str):
+    """Return (vault_key, is_legacy) from the recovery envelope, trying the current secret first."""
+    envelope = bytes.fromhex(config["recovery_envelope"])
+    iv = bytes.fromhex(config["recovery_iv"])
+    try:
+        return AESGCM(_get_recovery_master_key(user_id)).decrypt(iv, envelope, None), False
+    except InvalidTag:
+        return AESGCM(_get_recovery_master_key(user_id, _LEGACY_RECOVERY_SECRET)).decrypt(iv, envelope, None), True
+
+def _wrap_recovery_envelope(user_id: str, vault_key: bytes) -> dict:
+    """Encrypt the vault key with the current server recovery key."""
+    iv = os.urandom(12)
+    envelope = AESGCM(_get_recovery_master_key(user_id)).encrypt(iv, vault_key, None)
+    return {"recovery_envelope": envelope.hex(), "recovery_iv": iv.hex()}
+
+def _migrate_legacy_recovery(vault_coll, config: dict, user_id: str, vault_key: bytes) -> None:
+    """If the recovery copy does not open with the current secret, re-wrap it from the PIN-unlocked vault key."""
+    try:
+        AESGCM(_get_recovery_master_key(user_id)).decrypt(
+            bytes.fromhex(config["recovery_iv"]), bytes.fromhex(config["recovery_envelope"]), None)
+    except InvalidTag:
+        vault_coll.update_one({"user_id": user_id}, {"$set": _wrap_recovery_envelope(user_id, vault_key)})
+        logger.info(f"Vault recovery copy re-wrapped with the current secret for user {user_id}")
 
 def _mask_email(email: str) -> str:
     """Mask email for privacy, e.g. ya***28@gmail.com."""
@@ -258,6 +288,13 @@ async def unlock_vault(request: Request, body: UnlockVaultModel, user: User = De
     if calculated_hash != config["pin_hash"]:
         raise HTTPException(status_code=401, detail="Incorrect 4-digit PIN.")
 
+    try:
+        vault_key = AESGCM(pin_derived_key).decrypt(
+            bytes.fromhex(config["vault_key_iv"]), bytes.fromhex(config["encrypted_vault_key"]), None)
+        _migrate_legacy_recovery(vault_coll, config, user_id, vault_key)
+    except Exception as e:
+        logger.error(f"Vault recovery migration skipped for user {user_id}: {e}")
+
     # Successful unlock
     request.session["vault_unlocked"] = True
     request.session["vault_unlocked_at"] = time.time()
@@ -324,11 +361,7 @@ async def forgot_pin_reset(request: Request, body: ForgotPinResetModel, user: Us
 
     # 2. Recover Master VaultKey from Recovery Envelope
     try:
-        rec_key = _get_recovery_master_key(user_id)
-        aes_rec = AESGCM(rec_key)
-        recovery_envelope = bytes.fromhex(config["recovery_envelope"])
-        recovery_iv = bytes.fromhex(config["recovery_iv"])
-        vault_key = aes_rec.decrypt(recovery_iv, recovery_envelope, None)
+        vault_key, recovery_is_legacy = _open_recovery_envelope(config, user_id)
     except Exception as e:
         logger.error(f"Recovery decryption failed: {e}")
         raise HTTPException(status_code=500, detail="Decryption error during key recovery.")
@@ -351,6 +384,7 @@ async def forgot_pin_reset(request: Request, body: ForgotPinResetModel, user: Us
                 "pin_hash": new_pin_hash,
                 "encrypted_vault_key": new_encrypted_vault_key.hex(),
                 "vault_key_iv": new_iv_pin.hex(),
+                **(_wrap_recovery_envelope(user_id, vault_key) if recovery_is_legacy else {}),
                 "updated_at": now
             }
         }

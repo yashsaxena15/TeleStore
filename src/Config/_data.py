@@ -28,18 +28,33 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "").strip('"\' \t\r\n')
 # Web Server Configuration
 PORT = int(os.getenv("PORT", "8000"))
 HOST = os.getenv("HOST", "0.0.0.0")
-SESSION_SECRET_KEY = os.getenv(
+def _required_secret(name, min_length=16, forbidden=()):
+    """Read a secret from the environment; refuse to start without a real value."""
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise RuntimeError(f"{name} is not set. Add it to .env (see .env.example).")
+    if len(value) < min_length or value in forbidden or value.lower().startswith("change-me"):
+        raise RuntimeError(f"{name} is too weak or still the example value. Set a real secret in .env.")
+    return value
+
+SESSION_SECRET_KEY = _required_secret(
     "SESSION_SECRET_KEY",
-    "f6d2e3b9a0f43d9a2e6a56b2d3175cd9c05bbfe31d95ed2a7306b57cb1a8b6f0"
+    min_length=32,
+    forbidden=("f6d2e3b9a0f43d9a2e6a56b2d3175cd9c05bbfe31d95ed2a7306b57cb1a8b6f0",),
 )
-WORKER_SECRET_KEY = os.getenv(
+WORKER_SECRET_KEY = _required_secret(
     "WORKER_SECRET_KEY",
-    "tele_wsec_7f9a2b8c3d4e5f601a2b3c4d5e6f7a8b"
+    min_length=24,
+    forbidden=("tele_wsec_7f9a2b8c3d4e5f601a2b3c4d5e6f7a8b",),
 )
+# Optional: when unset, the GitHub auto-update webhook is disabled.
+GITHUB_WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET", "").strip()
 
 # Admin Credentials & Authorized Emails (Configurable via .env)
 DEFAULT_ADMIN_USERNAME = os.getenv("DEFAULT_ADMIN_USERNAME", "admin")
-DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "password")
+DEFAULT_ADMIN_PASSWORD = _required_secret(
+    "DEFAULT_ADMIN_PASSWORD", min_length=12, forbidden=("password", "admin", "changeme")
+)
 
 _raw_admin_emails = os.getenv("AUTHORIZED_ADMIN_EMAILS", "")
 AUTHORIZED_ADMIN_EMAILS = [e.strip() for e in _raw_admin_emails.split(",") if e.strip()]

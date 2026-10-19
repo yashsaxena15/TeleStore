@@ -38,9 +38,21 @@ async def github_webhook(request: Request):
     import subprocess
     import os
     import sys
+    import hmac
+    import hashlib
     from d4rk.Logs import setup_logger
+    from src.Config import GITHUB_WEBHOOK_SECRET
     
     logger = setup_logger("github_webhook")
+    
+    # Only GitHub (which knows GITHUB_WEBHOOK_SECRET) may trigger an update.
+    if not GITHUB_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="Webhook disabled: GITHUB_WEBHOOK_SECRET is not set")
+    body = await request.body()
+    expected = "sha256=" + hmac.new(GITHUB_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(request.headers.get("X-Hub-Signature-256", ""), expected):
+        logger.warning("Rejected GitHub webhook call with a missing or invalid signature")
+        raise HTTPException(status_code=401, detail="Invalid signature")
     
     # Get the GitHub event type
     event_type = request.headers.get("X-GitHub-Event")

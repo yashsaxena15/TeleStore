@@ -2,11 +2,12 @@ from fastapi import HTTPException, Request
 from fastapi.security import HTTPBearer
 from typing import Optional
 import hashlib
+import hmac
 import logging
 from google.oauth2 import id_token
 import os
 from google.auth.transport import requests as google_requests
-from src.Config import GOOGLE_CLIENT_ID
+from src.Config import GOOGLE_CLIENT_ID, DEFAULT_ADMIN_USERNAME, DEFAULT_ADMIN_PASSWORD
 from src.Database import database
 from pydantic import BaseModel
 from typing import Optional
@@ -24,10 +25,10 @@ class User(BaseModel):
     telegram_last_name: Optional[str] = None
     telegram_profile_picture: Optional[str] = None
 
-# Admin credentials (configurable via .env: DEFAULT_ADMIN_USERNAME, DEFAULT_ADMIN_PASSWORD)
-USERNAME = os.getenv("DEFAULT_ADMIN_USERNAME", "admin")
-PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "password")
-ADMIN_PASSWORD_HASH = hashlib.sha256(PASSWORD.encode()).hexdigest()
+# Fallback admin, used only when the username is not in the database.
+# Both values come from .env (DEFAULT_ADMIN_PASSWORD is required by src.Config).
+USERNAME = DEFAULT_ADMIN_USERNAME
+ADMIN_PASSWORD_HASH = hashlib.sha256(DEFAULT_ADMIN_PASSWORD.encode()).hexdigest()
 
 # List of authorized admin emails (configurable via .env: AUTHORIZED_ADMIN_EMAILS)
 _raw_admin_emails = os.getenv("AUTHORIZED_ADMIN_EMAILS", "")
@@ -37,8 +38,7 @@ security = HTTPBearer(auto_error=False)
 
 def verify_password(password: str) -> bool:
     password_hash = hashlib.sha256(password.encode()).hexdigest()
-    logger.info(f"Verifying password. Expected hash: {ADMIN_PASSWORD_HASH}, Provided hash: {password_hash}")
-    return password_hash == ADMIN_PASSWORD_HASH
+    return hmac.compare_digest(password_hash, ADMIN_PASSWORD_HASH)
 
 def verify_credentials(username: str, password: str) -> bool:
     logger.info(f"Verifying credentials for username: '{username}'")
@@ -56,10 +56,8 @@ def verify_credentials(username: str, password: str) -> bool:
     
     # If not found in database, fall back to default admin credentials
     logger.info(f"User {username} not found in database, checking against default admin credentials")
-    logger.info(f"Expected username: '{USERNAME}'")
     is_username_valid = username == USERNAME
     is_password_valid = verify_password(password)
-    logger.info(f"Username valid: {is_username_valid}, Password valid: {is_password_valid}")
     return is_username_valid and is_password_valid
 
 def verify_google_token(token: str) -> Optional[dict]:
@@ -102,7 +100,6 @@ def verify_google_token(token: str) -> Optional[dict]:
 def is_authenticated(request: Request) -> bool:
     auth_status = request.session.get("authenticated", False)
     logger.info(f"Checking authentication status: {auth_status}")
-    logger.info(f"Session data: {dict(request.session)}")
     return auth_status
 
 def is_admin(request: Request) -> bool:

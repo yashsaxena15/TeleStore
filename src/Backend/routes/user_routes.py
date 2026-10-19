@@ -385,11 +385,15 @@ async def change_user_password(request: Request, user_id_param: str, password_re
             logger.warning(f"Access denied - not owner ({is_owner}) and not self ({is_self})")
             raise HTTPException(status_code=403, detail="Access denied")
         
-        # Verify current password using the new method that doesn't auto-save hash
-        logger.info(f"Verifying current password for user: {target_username}")
-        is_password_correct = database.Users.verify_current_password(target_username, password_request.current_password)
-        logger.info(f"Current password verification result: {is_password_correct}")
-        
+        # Accounts without a password yet (e.g. Telegram/Google sign-in) set their first one
+        # without a current password; the requester is already authenticated as self or owner.
+        has_password = bool(database.Users.get_password_hash(target_username))
+        if has_password:
+            is_password_correct = database.Users.verify_current_password(target_username, password_request.current_password)
+        else:
+            logger.info(f"Setting first password for user: {target_username}")
+            is_password_correct = True
+
         if not is_password_correct:
             logger.warning(f"Incorrect current password for user: {target_username}")
             raise HTTPException(status_code=400, detail="Current password is incorrect")

@@ -265,8 +265,8 @@ class Users(Collection):
             
     def verify_user_credentials(self, username: str, password: str) -> bool:
         """
-        Verify user credentials against database
-        If no password hash exists, allow login with default password and save hash
+        Verify user credentials against database.
+        Users without a stored password hash cannot log in with a password.
         """
         try:
             # Get user from database
@@ -274,29 +274,14 @@ class Users(Collection):
             if not user_data:
                 logger.info(f"User {username} not found in database")
                 return False
-            
+
             # Get stored password hash
             stored_hash = user_data.get('password_hash')
-            
-            # If no password hash exists, check if password matches default
+
             if not stored_hash:
-                logger.info(f"No password hash found for user {username}")
-                # Check if password matches default password
-                DEFAULT_PASSWORD = "password"
-                if password == DEFAULT_PASSWORD:
-                    logger.info(f"Using default password for user {username}")
-                    # Save the password hash for future logins
-                    password_hash = hashlib.sha256(password.encode()).hexdigest()
-                    self.update_one(
-                        {"username": username},
-                        {"$set": {"password_hash": password_hash}}
-                    )
-                    logger.info(f"Saved password hash for user {username}")
-                    return True
-                else:
-                    logger.info(f"Password does not match default for user {username}")
-                    return False
-            
+                logger.warning(f"Password login rejected: user {username} has no password set")
+                return False
+
             # Hash the provided password
             provided_hash = hashlib.sha256(password.encode()).hexdigest()
             
@@ -323,13 +308,10 @@ class Users(Collection):
             # Get stored password hash
             stored_hash = user_data.get('password_hash')
             
-            # If no password hash exists, check if password matches default
             if not stored_hash:
-                logger.info(f"No password hash found for user {username}")
-                # Check if password matches default password
-                DEFAULT_PASSWORD = "password"
-                return password == DEFAULT_PASSWORD
-            
+                logger.warning(f"Current-password check rejected: user {username} has no password set")
+                return False
+
             # Hash the provided password
             provided_hash = hashlib.sha256(password.encode()).hexdigest()
             
@@ -413,7 +395,7 @@ class Users(Collection):
                 return token_data
             return None
         except Exception as e:
-            logger.error(f"Failed to retrieve auth token {auth_token}: {e}")
+            logger.error(f"Failed to retrieve auth token: {e}")
             return None
 
     def remove_auth_token(self, auth_token: str) -> None:

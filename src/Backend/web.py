@@ -47,7 +47,7 @@ from .routes.webdav_routes import router as webdav_router
 # Import exception handlers
 from .routes.error_handlers import exception_handlers
 
-from src.Config import APP_NAME, OWNER
+from src.Config import APP_NAME, OWNER, SESSION_SECRET_KEY
 from src.Database import database
 from dataclasses import asdict
 
@@ -102,7 +102,7 @@ async def startup_event():
 # For localhost development, we need to handle cookies properly
 app.add_middleware(
     SessionMiddleware, 
-    secret_key=os.getenv("SESSION_SECRET_KEY", "f6d2e3b9a0f43d9a2e6a56b2d3175cd9c05bbfe31d95ed2a7306b57cb1a8b6f0"),
+    secret_key=SESSION_SECRET_KEY,
     same_site="lax",     # Use lax for better compatibility with browsers in development
     https_only=False,     # Allow non-HTTPS for localhost and IP deployments
     max_age=3600,         # 1 hour session timeout
@@ -175,10 +175,20 @@ for exc_class, handler in exception_handlers.items():
     app.add_exception_handler(exc_class, handler)
 
 # --- Add logging middleware ---
+_SENSITIVE_QUERY_KEYS = {"token", "auth_token", "access_token", "key", "password", "code"}
+
+def _redact_url(url) -> str:
+    """Hide credential-like query parameter values in logged URLs."""
+    if not url.query:
+        return str(url)
+    from urllib.parse import parse_qsl, urlencode
+    params = [(k, "***" if k.lower() in _SENSITIVE_QUERY_KEYS else v) for k, v in parse_qsl(url.query, keep_blank_values=True)]
+    return str(url.replace(query=urlencode(params)))
+
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Log all HTTP requests using your application's logger"""
-    logger.info(f"{request.method} {request.url}")
+    logger.info(f"{request.method} {_redact_url(request.url)}")
     try:
         response = await call_next(request)
         logger.info(f"Response status: {response.status_code}")
