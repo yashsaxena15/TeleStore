@@ -5,7 +5,7 @@ import { downloadManager } from "@/features/transfers/downloadManager";
 
 // The video player is split into its own chunk and loads on first play
 const MediaPlayer = lazy(() => import("./MediaPlayer").then((m) => ({ default: m.MediaPlayer })));
-const MediaPlayerContext = createContext(undefined);
+export const MediaPlayerContext = createContext(undefined);
 export const MediaPlayerProvider = ({ children }) => {
     // Video modal media
     const [currentMedia, setCurrentMedia] = useState(null);

@@ -563,6 +563,8 @@ export const FileExplorer = () => {
                     return isArchiveItem(item);
                 if (typeFilter === "document")
                     return isDocumentItem(item);
+                if (typeFilter === "other")
+                    return !isVideoItem(item) && !isPhotoItem(item) && !isAudioItem(item) && !isArchiveItem(item) && !isDocumentItem(item);
                 return true;
             });
         }
@@ -1465,17 +1467,37 @@ export const FileExplorer = () => {
     }, [currentPath, selectedFilter]);
     useEffect(() => {
         const handleCategoryChange = (e) => {
-            if (e.detail?.filter) {
+            if (e.detail?.filter || e.detail?.typeFilter || e.detail?.folderPath) {
                 setShowProfile(false);
                 setShowSettings(false);
                 setShowUserManagement(false);
                 setShowStorageAnalytics(false);
-                handleFilterChangeRef.current(e.detail.filter);
+                setShowTransfers(false);
+                navigate('/');
+                if (e.detail.folderPath) {
+                    const clean = e.detail.folderPath.replace(/^\/+/, "").split("/").filter(Boolean);
+                    const target = clean.length === 0 ? ["Home"] : (clean[0] === "Home" ? clean : ["Home", ...clean]);
+                    setCurrentPath(target);
+                    setSelectedFilter(target[0] === "Private Vault" ? "vault" : (target.length >= 2 && target[1] === "Telegram Inbox" ? "inbox" : "all"));
+                    setTypeFilter("all");
+                    setSizeFilter("all");
+                    setDateFilter("all");
+                    setSearchQuery("");
+                } else {
+                    if (e.detail.filter) {
+                        handleFilterChangeRef.current(e.detail.filter);
+                    } else {
+                        handleFilterChangeRef.current("all");
+                    }
+                    if (e.detail.typeFilter) {
+                        setTypeFilter(e.detail.typeFilter);
+                    }
+                }
             }
         };
         window.addEventListener('changeCategory', handleCategoryChange);
         return () => window.removeEventListener('changeCategory', handleCategoryChange);
-    }, []);
+    }, [navigate]);
     // Profile and Users are tabs of Settings; their old addresses still open it
     const showSettingsArea = showProfile || showSettings || showUserManagement;
     const activeView = showSettingsArea ? 'settings' :
@@ -1583,14 +1605,35 @@ export const FileExplorer = () => {
             </Suspense>
           </motion.div>) : showStorageAnalytics ? (<motion.div key="storage-analytics" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
             <Suspense fallback={<PanelLoading />}>
-              <StorageAnalyticsContent onBack={() => {
-                setShowStorageAnalytics(false);
-                navigate('/');
-            }} onOpenTrash={() => {
-                setShowStorageAnalytics(false);
-                navigate('/');
-                handleFilterChange("trash");
-            }}/>
+              <StorageAnalyticsContent
+                onBack={() => {
+                  setShowStorageAnalytics(false);
+                  navigate('/');
+                }}
+                onOpenTrash={() => {
+                  setShowStorageAnalytics(false);
+                  navigate('/');
+                  handleFilterChange("trash");
+                }}
+                onOpenCategory={(categoryKey) => {
+                  setShowStorageAnalytics(false);
+                  navigate('/');
+                  handleFilterChange("all");
+                  setTypeFilter(categoryKey);
+                }}
+                onShowInFolder={(folderPath) => {
+                  setShowStorageAnalytics(false);
+                  navigate('/');
+                  const clean = (folderPath || "/Home").replace(/^\/+/, "").split("/").filter(Boolean);
+                  const target = clean.length === 0 ? ["Home"] : (clean[0] === "Home" ? clean : ["Home", ...clean]);
+                  setCurrentPath(target);
+                  setSelectedFilter(target[0] === "Private Vault" ? "vault" : (target.length >= 2 && target[1] === "Telegram Inbox" ? "inbox" : "all"));
+                  setTypeFilter("all");
+                  setSizeFilter("all");
+                  setDateFilter("all");
+                  setSearchQuery("");
+                }}
+              />
             </Suspense>
           </motion.div>) : showTransfers ? (<motion.div key="transfers" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
             <Transfers onNewTransfer={() => setRemoteDownloadOpen(true)}/>
