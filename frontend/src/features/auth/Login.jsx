@@ -180,35 +180,35 @@ const Login = () => {
         // Refresh the page to apply the new backend URL
         window.location.reload();
     };
-    return (<div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-500 to-purple-600 p-4">
-      {!showBackendConfig ? (<Card className="w-full max-w-md shadow-2xl rounded-3xl border-0 bg-white/90 backdrop-blur-xl">
+    return (<div className="min-h-screen flex items-center justify-center bg-muted/30 p-4">
+      {!showBackendConfig ? (<Card className="w-full max-w-md shadow-2xl rounded-3xl border border-border bg-card/95 backdrop-blur-xl">
           <CardHeader className="space-y-2 text-center pt-8 pb-2">
             <div className="flex justify-center mb-1">
-              <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-lg border border-primary/20 bg-muted">
+              <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-lg border border-border bg-muted">
                 <img src="/logo.jpg" alt="TeleStore" className="w-full h-full object-cover"/>
               </div>
             </div>
-            <CardTitle className="text-3xl font-bold text-gray-900">TeleStore</CardTitle>
-            <CardDescription className="text-gray-600">
+            <CardTitle className="text-3xl font-bold text-foreground">TeleStore</CardTitle>
+            <CardDescription className="text-muted-foreground">
               Sign in to your TeleStore cloud storage
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 px-8 py-4">
-            {error && (<div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm">
+            {error && (<div className="bg-destructive/10 border border-destructive/20 text-destructive p-3 rounded-lg text-sm">
                 {error}
               </div>)}
             
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="username" className="text-gray-700">Username</Label>
-                <Input id="username" placeholder="Enter your username" value={username} onChange={(e) => setUsername(e.target.value)} className="bg-white border-gray-300 text-gray-900 placeholder-gray-500" disabled={isLoading} required/>
+                <Label htmlFor="username" className="text-foreground">Username</Label>
+                <Input id="username" placeholder="Enter your username" value={username} onChange={(e) => setUsername(e.target.value)} className="bg-background border-input text-foreground placeholder:text-muted-foreground" disabled={isLoading} required/>
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="password" className="text-gray-700">Password</Label>
+                <Label htmlFor="password" className="text-foreground">Password</Label>
                 <div className="relative">
-                  <Input id="password" type={showPassword ? "text" : "password"} placeholder="Enter your password" value={password} onChange={(e) => setPassword(e.target.value)} className="bg-white border-gray-300 text-gray-900 placeholder-gray-500 pr-10" disabled={isLoading} required/>
-                  <button type="button" className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-500" onClick={() => setShowPassword(!showPassword)}>
+                  <Input id="password" type={showPassword ? "text" : "password"} placeholder="Enter your password" value={password} onChange={(e) => setPassword(e.target.value)} className="bg-background border-input text-foreground placeholder:text-muted-foreground pr-10" disabled={isLoading} required/>
+                  <button type="button" aria-label={showPassword ? "Hide password" : "Show password"} className="absolute inset-y-0 right-0 pr-3 flex items-center text-muted-foreground hover:text-foreground" onClick={() => setShowPassword(!showPassword)}>
                     {showPassword ? (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                         <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
                         <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"/>
@@ -220,9 +220,9 @@ const Login = () => {
                 </div>
               </div>
               
-              <Button type="submit" className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-300 ease-in-out transform hover:scale-105" disabled={isLoading}>
+              <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90 font-semibold py-2 px-4 rounded-lg transition duration-200" disabled={isLoading}>
                 {isLoading ? (<span className="flex items-center justify-center">
-                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
@@ -233,32 +233,32 @@ const Login = () => {
             
             <div className="relative my-6">
               <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-300"></div>
+                <div className="w-full border-t border-border"></div>
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">Or continue with</span>
+                <span className="px-2 bg-card text-muted-foreground">Or continue with</span>
               </div>
             </div>
             
             <div className="flex flex-col space-y-3">
-              <Button variant="outline" className="w-full flex items-center justify-center space-x-2 border-gray-300 text-gray-700 hover:bg-gray-50" onClick={handleGoogleLogin} disabled={isLoading}>
+              <Button variant="outline" className="w-full flex items-center justify-center space-x-2 border-border text-foreground hover:bg-accent" onClick={handleGoogleLogin} disabled={isLoading}>
                 <FcGoogle className="h-5 w-5"/>
                 <span>Sign in with Google</span>
               </Button>
               
-              <div className="text-center text-sm text-gray-600">
-                <p>Don't have an account? Contact your administrator</p>
+              <div className="text-center text-sm text-muted-foreground">
+                <p>Don&apos;t have an account? Contact your administrator</p>
               </div>
             </div>
           </CardContent>
           <CardFooter className="pb-8 px-8">
-            <Button variant="ghost" className="w-full text-gray-600 hover:text-gray-900" onClick={() => setShowBackendConfig(true)}>
+            <Button variant="ghost" className="w-full text-muted-foreground hover:text-foreground" onClick={() => setShowBackendConfig(true)}>
               Configure Backend URL
             </Button>
           </CardFooter>
         </Card>) : (<div className="w-full max-w-md">
           <BackendUrlUpdater onErrorUpdate={setError} onSuccess={handleBackendConfigSuccess}/>
-          {error && (<div className="mt-4 bg-red-50 text-red-700 p-3 rounded-lg text-sm">
+          {error && (<div className="mt-4 bg-destructive/10 border border-destructive/20 text-destructive p-3 rounded-lg text-sm">
               {error}
             </div>)}
         </div>)}

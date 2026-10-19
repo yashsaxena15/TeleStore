@@ -131,13 +131,13 @@ export const FolderPickerModal = ({ isOpen, onClose, currentSelectedPath, onSele
               Home
             </button>
             <button type="button" onClick={() => handleRootSwitch("/Vault")} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${currentRoot === "Vault"
-            ? "bg-purple-600 text-white shadow-xs"
+            ? "bg-primary text-primary-foreground shadow-xs"
             : "bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground"}`}>
               <ShieldCheck className="w-3.5 h-3.5"/>
               Private Vault
             </button>
             <button type="button" onClick={() => handleRootSwitch("/inbox")} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${currentRoot === "inbox"
-            ? "bg-blue-600 text-white shadow-xs"
+            ? "bg-primary text-primary-foreground shadow-xs"
             : "bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground"}`}>
               <Inbox className="w-3.5 h-3.5"/>
               Telegram Inbox
@@ -148,7 +148,7 @@ export const FolderPickerModal = ({ isOpen, onClose, currentSelectedPath, onSele
         {/* Breadcrumb Navigation & Action Bar */}
         <div className="px-5 py-2.5 bg-muted/20 border-b border-border/50 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1 min-w-0 overflow-x-auto text-xs py-0.5 custom-scrollbar">
-            <Button type="button" variant="ghost" size="icon" disabled={!canGoUp} onClick={handleGoUp} className="h-7 w-7 rounded-md shrink-0 text-muted-foreground hover:text-foreground" title="Go to parent folder">
+            <Button type="button" variant="ghost" size="icon" disabled={!canGoUp} onClick={handleGoUp} className="h-7 w-7 rounded-md shrink-0 text-muted-foreground hover:text-foreground" title="Go to parent folder" aria-label="Go to parent folder">
               <ArrowLeft className="w-3.5 h-3.5"/>
             </Button>
 

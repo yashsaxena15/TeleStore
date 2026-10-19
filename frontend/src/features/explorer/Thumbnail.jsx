@@ -161,27 +161,27 @@ export const Thumbnail = ({ item, size = 'lg', thumbnailSrc: propThumbnailSrc, l
 const getDefaultFileIcon = (item) => {
     switch (item.fileType) {
         case 'photo':
-            return <ImageIcon className="w-10 h-10 text-blue-500"/>;
+            return <ImageIcon className="w-10 h-10 text-info"/>;
         case 'video':
-            return <FileVideo className="w-10 h-10 text-purple-500"/>;
+            return <FileVideo className="w-10 h-10 text-primary"/>;
         case 'audio':
         case 'voice':
-            return <FileAudio className="w-10 h-10 text-green-500"/>;
+            return <FileAudio className="w-10 h-10 text-success"/>;
         case 'document':
             if (item.extension === 'pdf') {
-                return <FileText className="w-10 h-10 text-red-500"/>;
+                return <FileText className="w-10 h-10 text-destructive"/>;
             }
             else if (['doc', 'docx'].includes(item.extension || '')) {
-                return <FileText className="w-10 h-10 text-blue-700"/>;
+                return <FileText className="w-10 h-10 text-info"/>;
             }
             else if (['xls', 'xlsx', 'xlsm', 'xlsb', 'xltx', 'csv', 'tsv', 'ods'].includes(item.extension || '')) {
-                return <FileSpreadsheet className="w-10 h-10 text-emerald-500"/>;
+                return <FileSpreadsheet className="w-10 h-10 text-success"/>;
             }
             else if (['pptx', 'ppt', 'ppsx', 'potx', 'pptm', 'potm'].includes(item.extension || '')) {
-                return <Presentation className="w-10 h-10 text-orange-500"/>;
+                return <Presentation className="w-10 h-10 text-warning"/>;
             }
             else if (['zip', 'rar', '7z'].includes(item.extension || '')) {
-                return <FileArchive className="w-10 h-10 text-yellow-500"/>;
+                return <FileArchive className="w-10 h-10 text-cloud"/>;
             }
             return <FileText className="w-10 h-10 text-muted-foreground"/>;
         default:

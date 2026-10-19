@@ -3,16 +3,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { updateApiBaseUrl, getApiBaseUrl, fetchWithTimeout } from "@/lib/api";
+import { updateApiBaseUrl, getApiBaseUrl } from "@/lib/api";
 import logger from "@/lib/logger";
+import { testBackendUrl, isValidBackendUrl } from "./connection";
+
 export const BackendUrlUpdater = ({ onErrorUpdate, onSuccess }) => {
     const [backendUrl, setBackendUrl] = useState(getApiBaseUrl());
     const [isTesting, setIsTesting] = useState(false);
     const [testResult, setTestResult] = useState(null);
+
     const handleUrlChange = (e) => {
         setBackendUrl(e.target.value);
         setTestResult(null);
     };
+
     const handleSave = () => {
         try {
             logger.info("Saving backend URL", { backendUrl });
@@ -28,51 +32,32 @@ export const BackendUrlUpdater = ({ onErrorUpdate, onSuccess }) => {
             }
         }
     };
+
     const handleTestConnection = async () => {
         if (!backendUrl) {
             setTestResult({ success: false, message: "Please enter a backend URL" });
+            return;
+        }
+        if (!isValidBackendUrl(backendUrl)) {
+            setTestResult({ success: false, message: "Enter a valid http:// or https:// address" });
             return;
         }
         setIsTesting(true);
         setTestResult(null);
         try {
             logger.info("Testing connection to backend", { backendUrl });
-            // Test connection to the backend
-            // Normalize the URL to ensure it doesn't end with a slash before appending the path
-            const normalizedUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
-            const testUrl = normalizedUrl.endsWith('/api') ? `${normalizedUrl}/health` : `${normalizedUrl}/api/health`;
-            // Try to fetch a health endpoint
-            const response = await fetchWithTimeout(testUrl, {
-                method: 'GET',
-            }, 5000); // 5 second timeout
-            if (response.ok) {
-                logger.info("Backend connection test successful");
-                setTestResult({ success: true, message: "Connection successful!" });
-            }
-            else {
-                logger.warn("Backend connection test failed", { status: response.status });
-                setTestResult({ success: false, message: `Server responded with status ${response.status}` });
-            }
+            const result = await testBackendUrl(backendUrl);
+            setTestResult({ success: result.ok, message: result.message });
         }
         catch (error) {
             logger.error("Backend connection test failed", error);
-            if (error instanceof Error) {
-                // Check if it's a timeout error from fetchWithTimeout
-                if (error.name === 'AbortError' || error.message.includes('timeout')) {
-                    setTestResult({ success: false, message: "Connection timed out" });
-                }
-                else {
-                    setTestResult({ success: false, message: `Connection failed: ${error.message}` });
-                }
-            }
-            else {
-                setTestResult({ success: false, message: "Connection failed" });
-            }
+            setTestResult({ success: false, message: "Connection failed" });
         }
         finally {
             setIsTesting(false);
         }
     };
+
     const handleReset = () => {
         logger.info("Resetting backend URL to default");
         setBackendUrl("");
@@ -82,7 +67,8 @@ export const BackendUrlUpdater = ({ onErrorUpdate, onSuccess }) => {
             onSuccess();
         }
     };
-    return (<Card className="w-full max-w-md">
+
+    return (<Card className="w-full max-w-md border-border bg-card">
       <CardHeader>
         <CardTitle>Backend Configuration</CardTitle>
         <CardDescription>
@@ -107,13 +93,13 @@ export const BackendUrlUpdater = ({ onErrorUpdate, onSuccess }) => {
           </Button>
         </div>
         
-        {testResult && (<div className={`p-2 rounded text-sm ${testResult.success
-                ? "bg-green-100 text-green-800"
-                : "bg-red-100 text-red-800"}`}>
+        {testResult && (<div className={`p-2.5 rounded-md text-xs font-medium border ${testResult.success
+                ? "bg-success/10 text-success border-success/25"
+                : "bg-destructive/10 text-destructive border-destructive/25"}`}>
             {testResult.message}
           </div>)}
         
-        <div className="text-xs text-gray-500 mt-2">
+        <div className="text-xs text-muted-foreground mt-2">
           <p>Enter the full URL to your backend server (e.g., http://localhost:8000)</p>
         </div>
       </CardContent>

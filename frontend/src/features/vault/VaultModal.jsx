@@ -100,7 +100,7 @@ export const VaultModal = ({ isOpen, onClose, onSuccess, userEmail = "" }) => {
         try {
             await api.unlockVault(pinToTest);
             toast({
-                title: "Vault Unlocked 🔓",
+                title: "Vault Unlocked",
                 description: "Welcome back to your private encrypted space.",
             });
             onSuccess();
@@ -172,7 +172,7 @@ export const VaultModal = ({ isOpen, onClose, onSuccess, userEmail = "" }) => {
         try {
             await api.verifyAndCreateVault(email, otpCode, pin);
             toast({
-                title: "Vault Created Successfully 🎉",
+                title: "Vault Created Successfully",
                 description: "Your files will now be encrypted with AES-256.",
             });
             onSuccess();
@@ -243,7 +243,7 @@ export const VaultModal = ({ isOpen, onClose, onSuccess, userEmail = "" }) => {
         try {
             await api.resetVaultPin(otpCode, pin);
             toast({
-                title: "PIN Successfully Reset 🔓",
+                title: "PIN Successfully Reset",
                 description: "Your Vault has been unlocked with your new PIN.",
             });
             onSuccess();
@@ -436,14 +436,14 @@ export const VaultModal = ({ isOpen, onClose, onSuccess, userEmail = "" }) => {
         {/* 5. FORGOT PIN STEP 1: ENTER OTP */}
         {mode === "forgot_otp" && (<form onSubmit={handleVerifyForgotOtp} className="space-y-5">
             <div className="flex flex-col items-center text-center">
-              <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mb-3">
-                <RefreshCw className="w-7 h-7 text-amber-400"/>
+              <div className="w-14 h-14 rounded-2xl bg-warning/10 border border-warning/30 flex items-center justify-center mb-3">
+                <RefreshCw className="w-7 h-7 text-warning"/>
               </div>
               <DialogTitle className="text-xl font-bold text-white">
                 Reset Vault PIN
               </DialogTitle>
               <DialogDescription className="text-slate-400 text-sm mt-1">
-                Enter the 6-digit code sent to <strong className="text-amber-400">{maskedEmail}</strong>
+                Enter the 6-digit code sent to <strong className="text-warning">{maskedEmail}</strong>
               </DialogDescription>
             </div>
 
@@ -453,14 +453,14 @@ export const VaultModal = ({ isOpen, onClose, onSuccess, userEmail = "" }) => {
               </div>)}
 
             <div className="space-y-2 text-center">
-              <Input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6} autoFocus required value={otpCode} onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="123456" className="text-center tracking-[8px] font-mono text-2xl font-bold bg-slate-800/80 border-slate-700 text-amber-400 rounded-xl py-3"/>
+              <Input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6} autoFocus required value={otpCode} onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="123456" className="text-center tracking-[8px] font-mono text-2xl font-bold bg-slate-800/80 border-slate-700 text-warning rounded-xl py-3"/>
             </div>
 
             <div className="flex gap-2">
               <Button type="button" variant="outline" onClick={() => setMode("unlock")} className="w-1/3 border-slate-700 hover:bg-slate-800 text-slate-300 rounded-xl">
                 <ArrowLeft className="w-4 h-4 mr-1"/> Back
               </Button>
-              <Button type="submit" disabled={otpCode.length !== 6} className="w-2/3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold rounded-xl">
+              <Button type="submit" disabled={otpCode.length !== 6} className="w-2/3 bg-warning hover:bg-warning/90 text-warning-foreground font-semibold rounded-xl">
                 Verify Code
               </Button>
             </div>

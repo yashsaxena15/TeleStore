@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { Play, Pause, RotateCcw, RotateCw, Volume2, Volume1, VolumeX, Settings, Maximize, Minimize, PictureInPicture2, Captions, Check, Download, X, ArrowLeft, Info, ExternalLink, Upload, Minimize2, Maximize2 } from "lucide-react";
+import { Play, Pause, RotateCcw, RotateCw, Volume2, Volume1, VolumeX, Settings, Maximize, Minimize, PictureInPicture2, Captions, Check, Download, X, ArrowLeft, Info, ExternalLink, Upload, Minimize2, Maximize2, Smartphone, Copy } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useDockPresence } from "@/components/layout/dock/useDock";
@@ -1005,7 +1005,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
           <button onClick={() => {
             setActiveMenu((prev) => (prev === "external" ? "none" : "external"));
             showControls(5000);
-        }} className={`p-2 rounded-full hover:bg-white/10 text-white/90 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[40px] min-h-[40px] flex items-center justify-center ${activeMenu === "external" ? "bg-blue-600 text-white" : ""}`} title="Open in external player (VLC / MX Player)" aria-label="Open in external player">
+        }} className={`p-2 rounded-full hover:bg-white/10 text-white/90 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[40px] min-h-[40px] flex items-center justify-center ${activeMenu === "external" ? "bg-primary text-primary-foreground" : ""}`} title="Open in external player (VLC / MX Player)" aria-label="Open in external player">
             <ExternalLink className="w-5 h-5"/>
           </button>
           <button onClick={handleDownloadAction} className="p-2 rounded-full hover:bg-white/10 text-white/90 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[40px] min-h-[40px] flex items-center justify-center" title="Download file" aria-label="Download file">
@@ -1047,11 +1047,11 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
               {/* Buffered progress bar */}
               <div className="absolute left-0 top-0 h-full bg-white/35 rounded-full transition-all duration-150" style={{ width: `${bufferedPercent}%` }}/>
               {/* Played progress bar */}
-              <div className="absolute left-0 top-0 h-full bg-blue-500 rounded-full transition-all duration-75" style={{ width: `${playedPercent}%` }}/>
+              <div className="absolute left-0 top-0 h-full bg-primary rounded-full transition-all duration-75" style={{ width: `${playedPercent}%` }}/>
             </div>
             {/* Scrubber thumb handle */}
             <div className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 bg-white rounded-full shadow-lg transition-transform pointer-events-none ${isScrubbing
-            ? "scale-125 bg-blue-400"
+            ? "scale-125 bg-primary"
             : isMobile
                 ? "scale-100"
                 : "scale-0 group-hover:scale-100"}`} style={{ left: `${playedPercent}%` }}/>
@@ -1091,7 +1091,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
               <button onClick={toggleMute} className="p-2 rounded-full hover:bg-white/10 text-white/85 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40" title={isMuted ? "Unmute (m)" : "Mute (m)"} aria-label={isMuted ? "Unmute" : "Mute"}>
                 {isMuted || volume === 0 ? (<VolumeX className="w-5 h-5"/>) : volume < 0.5 ? (<Volume1 className="w-5 h-5"/>) : (<Volume2 className="w-5 h-5"/>)}
               </button>
-              <input type="range" min="0" max="1" step="0.05" value={isMuted ? 0 : volume} onChange={(e) => handleVolumeChange(parseFloat(e.target.value))} className="w-16 sm:w-20 h-1 accent-blue-500 bg-white/20 rounded-full cursor-pointer transition-all" aria-label="Volume slider"/>
+              <input type="range" min="0" max="1" step="0.05" value={isMuted ? 0 : volume} onChange={(e) => handleVolumeChange(parseFloat(e.target.value))} className="w-16 sm:w-20 h-1 accent-primary bg-white/20 rounded-full cursor-pointer transition-all" aria-label="Volume slider"/>
             </div>
           </div>
 
@@ -1119,7 +1119,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
             {canPiP && (<button onClick={(e) => {
                 e.stopPropagation();
                 togglePiP();
-            }} className={`hidden sm:inline-flex p-2 rounded-full hover:bg-white/10 text-white/85 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation ${isPiPActive ? "bg-blue-600 text-white" : ""}`} title="Picture-in-Picture" aria-label="Picture-in-Picture">
+            }} className={`hidden sm:inline-flex p-2 rounded-full hover:bg-white/10 text-white/85 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation ${isPiPActive ? "bg-primary text-primary-foreground" : ""}`} title="Picture-in-Picture" aria-label="Picture-in-Picture">
                 <PictureInPicture2 className="w-5 h-5"/>
               </button>)}
 
@@ -1161,7 +1161,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
                 <section className="px-1" aria-label="Playback speed">
                   <h4 className="text-[11px] font-semibold uppercase tracking-wider text-white/45 mb-2">Speed</h4>
                   <div className="flex flex-wrap gap-1.5">
-                    {PLAYBACK_RATES.map((rate) => (<button key={rate} onClick={() => handlePlaybackRateChange(rate)} aria-pressed={playbackRate === rate} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${playbackRate === rate ? "bg-white text-black border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>
+                    {PLAYBACK_RATES.map((rate) => (<button key={rate} onClick={() => handlePlaybackRateChange(rate)} aria-pressed={playbackRate === rate} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${playbackRate === rate ? "bg-primary text-primary-foreground border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>
                         {rate === 1 ? "1×" : `${rate}×`}
                       </button>))}
                   </div>
@@ -1169,8 +1169,8 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
                 <section className="px-1" aria-label="Quality">
                   <h4 className="text-[11px] font-semibold uppercase tracking-wider text-white/45 mb-2">Quality</h4>
                   <div className="flex flex-wrap gap-1.5">
-                    <button onClick={() => handleQualityChange("original")} aria-pressed={currentQuality === "original"} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${currentQuality === "original" ? "bg-white text-black border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>Original</button>
-                    {availableQualities.map((q) => (<button key={q.id} onClick={() => handleQualityChange(q.id)} aria-pressed={currentQuality === q.id} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${currentQuality === q.id ? "bg-white text-black border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>
+                    <button onClick={() => handleQualityChange("original")} aria-pressed={currentQuality === "original"} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${currentQuality === "original" ? "bg-primary text-primary-foreground border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>Original</button>
+                    {availableQualities.map((q) => (<button key={q.id} onClick={() => handleQualityChange(q.id)} aria-pressed={currentQuality === q.id} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${currentQuality === q.id ? "bg-primary text-primary-foreground border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>
                         {q.id}
                       </button>))}
                   </div>
@@ -1179,7 +1179,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
                 {audioTracks.length > 1 && (<section className="px-1" aria-label="Audio track">
                     <h4 className="text-[11px] font-semibold uppercase tracking-wider text-white/45 mb-2">Audio track</h4>
                     <div className="flex flex-wrap gap-1.5">
-                      {audioTracks.map((track) => (<button key={track.index} onClick={() => handleAudioTrackChange(track.index)} aria-pressed={currentAudioTrack === track.index} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${currentAudioTrack === track.index ? "bg-white text-black border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>
+                      {audioTracks.map((track) => (<button key={track.index} onClick={() => handleAudioTrackChange(track.index)} aria-pressed={currentAudioTrack === track.index} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${currentAudioTrack === track.index ? "bg-primary text-primary-foreground border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>
                           {track.title || `Track ${track.index + 1}`}
                         </button>))}
                     </div>
@@ -1187,8 +1187,8 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
                 <section className="px-1" aria-label="Subtitles">
                   <h4 className="text-[11px] font-semibold uppercase tracking-wider text-white/45 mb-2">Subtitles</h4>
                   <div className="flex flex-wrap gap-1.5">
-                    <button onClick={() => setCurrentSubtitle("off")} aria-pressed={currentSubtitle === "off"} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${currentSubtitle === "off" ? "bg-white text-black border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>Off</button>
-                    {subtitlesList.map((sub) => (<button key={sub.id} onClick={() => setCurrentSubtitle(sub.id)} aria-pressed={currentSubtitle === sub.id} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${currentSubtitle === sub.id ? "bg-white text-black border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>
+                    <button onClick={() => setCurrentSubtitle("off")} aria-pressed={currentSubtitle === "off"} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${currentSubtitle === "off" ? "bg-primary text-primary-foreground border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>Off</button>
+                    {subtitlesList.map((sub) => (<button key={sub.id} onClick={() => setCurrentSubtitle(sub.id)} aria-pressed={currentSubtitle === sub.id} className={`h-8 px-2.5 rounded-md text-xs font-mono border transition-colors touch-manipulation ${currentSubtitle === sub.id ? "bg-primary text-primary-foreground border-transparent font-semibold" : "border-white/15 text-white/80 hover:bg-white/10"}`}>
                         {sub.label}
                       </button>))}
                     <button type="button" onClick={() => customSubtitleInputRef.current?.click()} className="h-8 px-2.5 rounded-md text-xs border border-dashed border-white/25 text-white/80 hover:bg-white/10 flex items-center gap-1.5">
@@ -1211,10 +1211,10 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
                         handlePlaybackRateChange(rate);
                         setActiveMenu("settings");
                     }} className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm transition-colors touch-manipulation ${playbackRate === rate
-                        ? "bg-blue-600/25 text-blue-400 font-medium"
+                        ? "bg-primary/25 text-primary font-medium"
                         : "hover:bg-white/10 text-white/80"}`}>
                       <span>{rate === 1 ? "1x (Normal)" : `${rate}x`}</span>
-                      {playbackRate === rate && <Check className="w-4 h-4 text-blue-400"/>}
+                      {playbackRate === rate && <Check className="w-4 h-4 text-primary"/>}
                     </button>))}
                 </div>
               </div>)}
@@ -1230,24 +1230,24 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
                 <div className="py-1 max-h-64 overflow-y-auto space-y-0.5">
                   {/* Auto (Original Source) */}
                   <button onClick={() => handleQualityChange("original")} className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm transition-colors touch-manipulation ${currentQuality === "original"
-                    ? "bg-blue-600/25 text-blue-400 font-medium"
+                    ? "bg-primary/25 text-primary font-medium"
                     : "hover:bg-white/10 text-white/80"}`}>
                     <div className="flex flex-col text-left">
                       <span>Auto (Original Source)</span>
                       <span className="text-[10px] text-white/40">Direct stream • 0% CPU</span>
                     </div>
-                    {currentQuality === "original" && <Check className="w-4 h-4 text-blue-400"/>}
+                    {currentQuality === "original" && <Check className="w-4 h-4 text-primary"/>}
                   </button>
 
                   {/* Filtered ladder where height <= native video height */}
                   {availableQualities.map((q) => (<button key={q.id} onClick={() => handleQualityChange(q.id)} className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm transition-colors touch-manipulation ${currentQuality === q.id
-                        ? "bg-blue-600/25 text-blue-400 font-medium"
+                        ? "bg-primary/25 text-primary font-medium"
                         : "hover:bg-white/10 text-white/80"}`}>
                       <div className="flex flex-col text-left">
                         <span>{q.label}</span>
                         <span className="text-[10px] text-white/40">Downscaled • Low data</span>
                       </div>
-                      {currentQuality === q.id && <Check className="w-4 h-4 text-blue-400"/>}
+                      {currentQuality === q.id && <Check className="w-4 h-4 text-primary"/>}
                     </button>))}
                 </div>
               </div>)}
@@ -1262,13 +1262,13 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
                 </div>
                 <div className="py-1 max-h-64 overflow-y-auto space-y-0.5">
                   {audioTracks.map((track) => (<button key={track.index} onClick={() => handleAudioTrackChange(track.index)} className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm transition-colors touch-manipulation ${currentAudioTrack === track.index
-                        ? "bg-blue-600/25 text-blue-400 font-medium"
+                        ? "bg-primary/25 text-primary font-medium"
                         : "hover:bg-white/10 text-white/80"}`}>
                       <div className="flex flex-col text-left">
                         <span>{track.title || `Track ${track.index + 1}`}</span>
                         <span className="text-[10px] text-white/40">{track.language} {track.codec ? `• ${track.codec.toUpperCase()}` : ''}</span>
                       </div>
-                      {currentAudioTrack === track.index && <Check className="w-4 h-4 text-blue-400"/>}
+                      {currentAudioTrack === track.index && <Check className="w-4 h-4 text-primary"/>}
                     </button>))}
                 </div>
               </div>)}
@@ -1287,10 +1287,10 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
                     setCurrentSubtitle("off");
                     setActiveMenu("none");
                 }} className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors touch-manipulation ${currentSubtitle === "off"
-                    ? "bg-blue-600/25 text-blue-400 font-medium"
+                    ? "bg-primary/25 text-primary font-medium"
                     : "hover:bg-white/10 text-white/80"}`}>
                     <span>Off</span>
-                    {currentSubtitle === "off" && <Check className="w-4 h-4 text-blue-400"/>}
+                    {currentSubtitle === "off" && <Check className="w-4 h-4 text-primary"/>}
                   </button>
 
                   {/* Available Subtitle Tracks */}
@@ -1298,10 +1298,10 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
                         setCurrentSubtitle(sub.id);
                         setActiveMenu("none");
                     }} className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors touch-manipulation ${currentSubtitle === sub.id
-                        ? "bg-blue-600/25 text-blue-400 font-medium"
+                        ? "bg-primary/25 text-primary font-medium"
                         : "hover:bg-white/10 text-white/80"}`}>
                       <span className="truncate pr-2">{sub.label}</span>
-                      {currentSubtitle === sub.id && <Check className="w-4 h-4 text-blue-400 shrink-0"/>}
+                      {currentSubtitle === sub.id && <Check className="w-4 h-4 text-primary shrink-0"/>}
                     </button>))}
 
                   {/* Custom Subtitle Upload Button */}
@@ -1328,7 +1328,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
           <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md bg-zinc-900 border border-white/10 rounded-2xl shadow-2xl p-5 text-white animate-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-3 border-b border-white/10">
               <div className="flex items-center space-x-2">
-                <Info className="w-5 h-5 text-blue-400"/>
+                <Info className="w-5 h-5 text-primary"/>
                 <h3 className="text-base font-semibold">Media Details</h3>
               </div>
               <button onClick={() => {
@@ -1364,7 +1364,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-white/50 text-xs">Streaming Mode</span>
-                <span className="text-xs text-emerald-400 font-medium">
+                <span className="text-xs text-success font-medium">
                   HTTP/1.1 Range Requests
                 </span>
               </div>
@@ -1386,7 +1386,7 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
           <div className="w-full max-w-sm bg-zinc-900 border border-white/15 rounded-2xl p-5 shadow-2xl space-y-4 pointer-events-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between pb-3 border-b border-white/10">
               <div className="flex items-center space-x-2">
-                <ExternalLink className="w-5 h-5 text-blue-400"/>
+                <ExternalLink className="w-5 h-5 text-primary"/>
                 <h3 className="font-semibold text-white text-sm sm:text-base">Open in External Player</h3>
               </div>
               <button onClick={() => setActiveMenu("none")} className="p-1 rounded-full text-white/50 hover:text-white hover:bg-white/10">
@@ -1400,21 +1400,21 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
 
             <div className="space-y-2.5">
               {/* VLC Button */}
-              <a href={`vlc://${fullMediaUrl}`} target="_blank" rel="noreferrer" className="w-full flex items-center justify-between py-2.5 px-4 rounded-xl bg-orange-600 hover:bg-orange-500 active:bg-orange-700 text-white font-medium text-xs sm:text-sm transition-colors shadow-sm cursor-pointer">
+              <a href={`vlc://${fullMediaUrl}`} target="_blank" rel="noreferrer" className="w-full flex items-center justify-between py-2.5 px-4 rounded-xl bg-card border border-border hover:bg-muted text-foreground font-medium text-xs sm:text-sm transition-colors shadow-sm cursor-pointer">
                 <div className="flex items-center gap-2.5">
-                  <span className="text-base">🟠</span>
+                  <Play className="w-4 h-4 text-warning shrink-0"/>
                   <span>VLC Media Player</span>
                 </div>
-                <ExternalLink className="w-4 h-4 opacity-80"/>
+                <ExternalLink className="w-4 h-4 text-muted-foreground"/>
               </a>
 
               {/* MX Player / External App Intent */}
-              <a href={`intent:${fullMediaUrl}#Intent;type=video/*;end`} className="w-full flex items-center justify-between py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-medium text-xs sm:text-sm transition-colors shadow-sm cursor-pointer">
+              <a href={`intent:${fullMediaUrl}#Intent;type=video/*;end`} className="w-full flex items-center justify-between py-2.5 px-4 rounded-xl bg-card border border-border hover:bg-muted text-foreground font-medium text-xs sm:text-sm transition-colors shadow-sm cursor-pointer">
                 <div className="flex items-center gap-2.5">
-                  <span className="text-base">📱</span>
+                  <Smartphone className="w-4 h-4 text-primary shrink-0"/>
                   <span>MX Player / Mobile App</span>
                 </div>
-                <ExternalLink className="w-4 h-4 opacity-80"/>
+                <ExternalLink className="w-4 h-4 text-muted-foreground"/>
               </a>
 
               {/* Copy Stream Link */}
@@ -1422,20 +1422,20 @@ export const MediaPlayer = ({ mediaUrl, fileName, fileType, startPosition, onClo
                 navigator.clipboard.writeText(fullMediaUrl);
                 toast.success("Stream link copied to clipboard!");
                 setActiveMenu("none");
-            }} className="w-full flex items-center justify-between py-2.5 px-4 rounded-xl bg-white/10 hover:bg-white/20 active:bg-white/30 text-white font-medium text-xs sm:text-sm transition-colors border border-white/15 cursor-pointer">
+            }} className="w-full flex items-center justify-between py-2.5 px-4 rounded-xl bg-card border border-border hover:bg-muted text-foreground font-medium text-xs sm:text-sm transition-colors cursor-pointer">
                 <div className="flex items-center gap-2.5">
-                  <span className="text-base">📋</span>
+                  <Copy className="w-4 h-4 text-muted-foreground shrink-0"/>
                   <span>Copy Stream URL</span>
                 </div>
-                <Check className="w-4 h-4 opacity-80"/>
+                <Check className="w-4 h-4 text-muted-foreground"/>
               </button>
             </div>
 
-            <div className="pt-2 border-t border-white/10 flex justify-end">
+            <div className="pt-2 border-t border-border flex justify-end">
               <button onClick={() => {
                 setActiveMenu("none");
                 showControls(4500);
-            }} className="px-4 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-medium text-white transition-colors">
+            }} className="px-4 py-1.5 rounded-lg bg-muted hover:bg-muted/80 text-xs font-medium text-foreground transition-colors">
                 Close
               </button>
             </div>

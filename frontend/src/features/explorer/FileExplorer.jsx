@@ -2,11 +2,9 @@ import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { useLocation, useParams, useNavigate } from "react-router-dom";
 import { isVideoItem, isPhotoItem, isAudioItem, isArchiveItem, isDocumentItem, } from "./fileTypes";
-import { ContextMenu } from "./ContextMenu";
 import { useFiles } from "@/features/explorer/hooks/useFiles";
 import { useFileOperations } from "@/features/explorer/hooks/useFileOperations";
 import { toast } from "sonner";
-import { copyStreamUrl } from "@/lib/utils";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { Dock } from "@/components/layout/dock/Dock";
@@ -135,7 +133,6 @@ export const FileExplorer = () => {
     const [newFolderDialogOpen, setNewFolderDialogOpen] = useState(false);
     const [deleteDialog, setDeleteDialog] = useState(null);
     const [renamingItem, setRenamingItem] = useState(null);
-    const [contextMenu, setContextMenu] = useState(null);
     const [folderDownloadInfo, setFolderDownloadInfo] = useState(null);
     const [showWebDAVDialog, setShowWebDAVDialog] = useState(false);
     const [showVaultModal, setShowVaultModal] = useState(false);
@@ -239,123 +236,6 @@ export const FileExplorer = () => {
             refetch();
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh once on mount
-    }, []);
-    // Check current route and show appropriate content on mount
-    useEffect(() => {
-        if (location.pathname === '/profile') {
-            setShowProfile(true);
-            setShowSettings(false);
-            setShowUserManagement(false);
-            setShowStorageAnalytics(false);
-        }
-        else if (location.pathname === '/settings') {
-            setShowSettings(true);
-            setShowProfile(false);
-            setShowUserManagement(false);
-            setShowStorageAnalytics(false);
-        }
-        else if (location.pathname === '/users') {
-            setShowUserManagement(true);
-            setShowProfile(false);
-            setShowSettings(false);
-            setShowStorageAnalytics(false);
-        }
-        else if (location.pathname === '/storage') {
-            setShowStorageAnalytics(true);
-            setShowProfile(false);
-            setShowSettings(false);
-            setShowUserManagement(false);
-        }
-        else {
-            setShowProfile(false);
-            setShowSettings(false);
-            setShowUserManagement(false);
-            setShowStorageAnalytics(false);
-        }
-    }, [location.pathname]);
-    // Listen for showProfile event
-    useEffect(() => {
-        const handleShowProfile = () => {
-            setShowProfile(true);
-            setShowSettings(false);
-            setShowUserManagement(false);
-            setShowStorageAnalytics(false);
-        };
-        window.addEventListener('showProfile', handleShowProfile);
-        return () => {
-            window.removeEventListener('showProfile', handleShowProfile);
-        };
-    }, []);
-    // Listen for showSettings event
-    useEffect(() => {
-        const handleShowSettings = () => {
-            setShowSettings(true);
-            setShowProfile(false);
-            setShowUserManagement(false);
-            setShowStorageAnalytics(false);
-        };
-        window.addEventListener('showSettings', handleShowSettings);
-        return () => {
-            window.removeEventListener('showSettings', handleShowSettings);
-        };
-    }, []);
-    // Listen for showUsers event
-    useEffect(() => {
-        const handleShowUsers = () => {
-            setShowUserManagement(true);
-            setShowProfile(false);
-            setShowSettings(false);
-            setShowStorageAnalytics(false);
-        };
-        window.addEventListener('showUsers', handleShowUsers);
-        return () => {
-            window.removeEventListener('showUsers', handleShowUsers);
-        };
-    }, []);
-    // Listen for showStorageAnalytics event
-    useEffect(() => {
-        const handleShowStorageAnalytics = () => {
-            setShowStorageAnalytics(true);
-            setShowProfile(false);
-            setShowSettings(false);
-            setShowUserManagement(false);
-        };
-        window.addEventListener('showStorageAnalytics', handleShowStorageAnalytics);
-        return () => {
-            window.removeEventListener('showStorageAnalytics', handleShowStorageAnalytics);
-        };
-    }, []);
-    // Listen for showTransfers and showDownloads events
-    useEffect(() => {
-        const handleShowTransfers = () => {
-            setShowTransfers(true);
-            setShowProfile(false);
-            setShowSettings(false);
-            setShowUserManagement(false);
-            setShowStorageAnalytics(false);
-        };
-        window.addEventListener('showTransfers', handleShowTransfers);
-        window.addEventListener('showDownloads', handleShowTransfers);
-        return () => {
-            window.removeEventListener('showTransfers', handleShowTransfers);
-            window.removeEventListener('showDownloads', handleShowTransfers);
-        };
-    }, []);
-    // Listen for showFiles event (when closing profile/settings/user management/storage/transfers)
-    useEffect(() => {
-        const handleShowFiles = () => {
-            setShowProfile(false);
-            setShowSettings(false);
-            setShowUserManagement(false);
-            setShowStorageAnalytics(false);
-            setShowTransfers(false);
-            // Reset currentPath to Home when returning to file view
-            setCurrentPath(["Home"]);
-        };
-        window.addEventListener('showFiles', handleShowFiles);
-        return () => {
-            window.removeEventListener('showFiles', handleShowFiles);
-        };
     }, []);
     // Current folder name (last part of currentPath)
     const currentFolder = currentPath[currentPath.length - 1] || "Home";
@@ -813,7 +693,7 @@ export const FileExplorer = () => {
                             .map((it) => it.path || it.file_path || it.name)
                             .filter(Boolean);
                         const res = await api.transferTelegramToCloud(cloudAccountId, fileIds, folderPaths, targetFolderId, clipboard.operation === "cut" ? "cut" : "copy");
-                        toast.success(res.message || `Queued ${tgItems.length} item(s) for transfer to Google Drive ☁️. Track in Transfers.`);
+                        toast.success(res.message || `Queued ${tgItems.length} item(s) for transfer to Google Drive. Track in Transfers.`);
                         clearClipboard();
                         refetch();
                         return;
@@ -835,7 +715,7 @@ export const FileExplorer = () => {
                         try {
                             const res = await api.transferCloudInternal(cloudAccountId, cloudFileIds, targetFolderId, op);
                             toast.dismiss(toastId);
-                            toast.success(res.message || `Successfully ${op === "cut" ? "moved" : "copied"} ${cloudFileIds.length} item(s) in Google Drive! ☁️`);
+                            toast.success(res.message || `Successfully ${op === "cut" ? "moved" : "copied"} ${cloudFileIds.length} item(s) in Google Drive!`);
                             clearClipboard();
                             refetch();
                         }
@@ -888,7 +768,7 @@ export const FileExplorer = () => {
         finally {
             setIsVaultUnlocked(false);
             handleFilterChange("all");
-            toast.success("Vault Locked 🔒");
+            toast.success("Vault Locked");
         }
     };
     const handleMoveToVault = async (item) => {
@@ -896,7 +776,7 @@ export const FileExplorer = () => {
             return;
         try {
             await api.moveIntoVault(item.id);
-            toast.success(`Moved "${item.name}" to Private Vault 🔒`);
+            toast.success(`Moved "${item.name}" to Private Vault`);
             refetch();
         }
         catch (err) {
@@ -908,7 +788,7 @@ export const FileExplorer = () => {
             return;
         try {
             await api.moveOutOfVault(item.id);
-            toast.success(`Moved "${item.name}" to Home 📂`);
+            toast.success(`Moved "${item.name}" to Home`);
             refetch();
         }
         catch (err) {
@@ -1136,7 +1016,7 @@ export const FileExplorer = () => {
                 try {
                     await api.transferCloudInternal(cloudAccountId, [fileId], targetId, "cut");
                     toast.dismiss(toastId);
-                    toast.success(`Moved "${item.name}" to "${targetFolder.name}" ☁️`);
+                    toast.success(`Moved "${item.name}" to "${targetFolder.name}"`);
                     refetch();
                 }
                 catch (err) {
@@ -1707,22 +1587,5 @@ export const FileExplorer = () => {
       <VaultModal isOpen={showVaultModal} onClose={() => setShowVaultModal(false)} onSuccess={handleVaultUnlocked} userEmail={userEmail}/>
 
       <RemoteDownloadDialog isOpen={remoteDownloadOpen} onClose={() => setRemoteDownloadOpen(false)} defaultPath={currentApiPath}/>
-
-      {contextMenu && (<ContextMenu x={contextMenu.x} y={contextMenu.y} itemType={contextMenu.itemType} itemName={contextMenu.itemName} isVideo={contextMenu.item ? isVideoItem(contextMenu.item) : false} onCopyStreamUrl={() => {
-                if (contextMenu.item) {
-                    copyStreamUrl(contextMenu.item.name);
-                }
-            }} onOpen={() => {
-                if (contextMenu.item && contextMenu.item.type === "folder") {
-                    handleNavigate(contextMenu.item.name, contextMenu.item);
-                }
-            }} onCopy={() => contextMenu.item && handleCopy(contextMenu.item)} onCut={() => contextMenu.item && handleCut(contextMenu.item)} onPaste={hasClipboard && !isClipboardPasted() ? handlePaste : undefined} onDelete={() => contextMenu.item && handleDelete(contextMenu.item, contextMenu.index || 0)} onRename={() => contextMenu.item && handleRename(contextMenu.item, contextMenu.index || 0)} onNewFolder={() => setNewFolderDialogOpen(true)} onClose={() => setContextMenu(null)} isClipboardPasted={isClipboardPasted()} // Pass the clipboard pasted status
-         hasClipboard={hasClipboard} // Pass the clipboard status function
-         isStarred={contextMenu.item?.starred} onToggleStar={() => contextMenu.item && handleToggleStar(contextMenu.item)} isTrashMode={isTrashMode} onRestore={() => contextMenu.item && handleRestoreItem(contextMenu.item)} disableDelete={
-            // Disable delete for specific default folders in Home
-            currentPath.length === 1 &&
-                currentPath[0] === "Home" &&
-                contextMenu.item &&
-                ["Images", "Documents", "Audio", "Voice Messages", "Videos"].includes(contextMenu.item.name)}/>)}
     </div>);
 };

@@ -6,6 +6,16 @@ import { toast } from "sonner";
 import { useTransferManager } from "@/features/transfers/useTransferManager";
 import { useCloudAccounts, useIsOwner, useUserProfile, displayName } from "@/hooks/useShellData";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { NewMenu } from "./NewMenu";
 import { LIBRARY } from "./shellActions";
 
@@ -69,9 +79,12 @@ export const Sidebar = ({ selectedFilter, activeView = "files", onNavigateView, 
     const { totalActiveCount } = useTransferManager();
     const collapsed = isCollapsed;
 
-    const handleDisconnectAccount = async (acc) => {
-        if (!window.confirm(`Disconnect "${acc.account_name}"? Files stay in Google Drive.`))
-            return;
+    const [disconnectingAccount, setDisconnectingAccount] = useState(null);
+
+    const handleConfirmDisconnect = async () => {
+        const acc = disconnectingAccount;
+        if (!acc) return;
+        setDisconnectingAccount(null);
         try {
             await api.disconnectCloudAccount(acc.id);
             toast.success("Account disconnected.");
@@ -139,7 +152,7 @@ export const Sidebar = ({ selectedFilter, activeView = "files", onNavigateView, 
         <SectionLabel collapsed={collapsed} action={<button onClick={() => onAction("connect-drive")} className="text-[11px] text-primary hover:underline font-medium" aria-label="Connect cloud drive">+ Connect</button>}>
           Cloud drives
         </SectionLabel>
-        {cloudAccounts.map((acc) => (<CloudAccountRow key={acc.id} acc={acc} collapsed={collapsed} isSelected={activeView === "files" && selectedFilter.startsWith(`cloud:${acc.id}`)} onSelect={() => onNavigateView("files", `cloud:${acc.id}:root`)} onDisconnect={() => handleDisconnectAccount(acc)}/>))}
+        {cloudAccounts.map((acc) => (<CloudAccountRow key={acc.id} acc={acc} collapsed={collapsed} isSelected={activeView === "files" && selectedFilter.startsWith(`cloud:${acc.id}`)} onSelect={() => onNavigateView("files", `cloud:${acc.id}:root`)} onDisconnect={() => setDisconnectingAccount(acc)}/>))}
         {cloudAccounts.length === 0 && !collapsed && (<button onClick={() => onAction("connect-drive")} className="w-full mt-0.5 text-xs text-muted-foreground hover:text-foreground border border-dashed border-border rounded-md py-2 flex items-center justify-center gap-1.5 hover:bg-sidebar-accent/40">
             <Cloud className="w-3.5 h-3.5"/>Connect Google Drive
           </button>)}
@@ -178,6 +191,21 @@ export const Sidebar = ({ selectedFilter, activeView = "files", onNavigateView, 
           <AccountMenuItems onNavigateView={onNavigateView} onAction={onAction} isOwner={isOwner} profile={profile}/>
         </DropdownMenu>
       </div>
+
+      <AlertDialog open={Boolean(disconnectingAccount)} onOpenChange={(o) => !o && setDisconnectingAccount(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Disconnect {disconnectingAccount?.account_name}?</AlertDialogTitle>
+            <AlertDialogDescription>TeleStore stops showing this Drive. Nothing is deleted from Google Drive, and you can connect it again later.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDisconnect} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Disconnect account
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </aside>);
 };
 

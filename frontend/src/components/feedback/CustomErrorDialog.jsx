@@ -7,17 +7,17 @@ const CustomErrorDialog = ({ isOpen, onClose, title, message, errorType, onRetry
     const getErrorIcon = () => {
         switch (errorType) {
             case 'upload':
-                return <AlertTriangle className="h-6 w-6 text-red-500"/>;
+                return <AlertTriangle className="h-6 w-6 text-destructive"/>;
             case 'download':
-                return <AlertTriangle className="h-6 w-6 text-red-500"/>;
+                return <AlertTriangle className="h-6 w-6 text-destructive"/>;
             case 'network':
-                return <Wifi className="h-6 w-6 text-orange-500"/>;
+                return <Wifi className="h-6 w-6 text-warning"/>;
             case 'server':
-                return <Server className="h-6 w-6 text-purple-500"/>;
+                return <Server className="h-6 w-6 text-primary"/>;
             case 'auth':
-                return <User className="h-6 w-6 text-blue-500"/>;
+                return <User className="h-6 w-6 text-info"/>;
             default:
-                return <AlertTriangle className="h-6 w-6 text-gray-500"/>;
+                return <AlertTriangle className="h-6 w-6 text-muted-foreground"/>;
         }
     };
     const getErrorTitle = () => {

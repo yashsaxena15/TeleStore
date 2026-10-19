@@ -1035,21 +1035,30 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
         const deleteEndpoint = isTrashMode ? `${apiUrl}/files/delete` : `${apiUrl}/files/trash`;
         for (const item of validItemsToDelete) {
             try {
-                const response = await fetchWithTimeout(deleteEndpoint, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    credentials: "include",
-                    body: JSON.stringify({
-                        file_id: item.id,
-                    }),
-                }, 5000);
-                if (response.ok) {
+                if (isCloudMode || item.is_cloud) {
+                    const accId = cloudAccountId || item.cloud_account_id;
+                    const fileId = item.cloud_file_id || item.id;
+                    const isAlreadyTrashed = cloudFolderId === "trash" || Boolean(item.is_trashed);
+                    await api.deleteCloudFile(accId, fileId, isAlreadyTrashed);
                     successCount++;
                 }
                 else {
-                    failCount++;
+                    const response = await fetchWithTimeout(deleteEndpoint, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        credentials: "include",
+                        body: JSON.stringify({
+                            file_id: item.id,
+                        }),
+                    }, 5000);
+                    if (response.ok) {
+                        successCount++;
+                    }
+                    else {
+                        failCount++;
+                    }
                 }
             }
             catch (e) {
@@ -1061,9 +1070,11 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
         setSelectedItems(new Set());
         setLastSelectedIndex(null);
         if (successCount > 0) {
-            toast.success(isTrashMode
-                ? `Permanently deleted ${successCount} item${successCount > 1 ? 's' : ''}`
-                : `Moved ${successCount} item${successCount > 1 ? 's' : ''} to Trash`);
+            const isCloudDelete = isCloudMode || validItemsToDelete.some(it => it.is_cloud);
+            const isPermanent = isTrashMode || cloudFolderId === "trash";
+            toast.success(isPermanent
+                ? `Permanently deleted ${successCount} item${successCount > 1 ? 's' : ''}${isCloudDelete ? ' from Google Drive' : ''}`
+                : `Moved ${successCount} item${successCount > 1 ? 's' : ''} to ${isCloudDelete ? 'Google Drive ' : ''}Trash`);
             if (onRefresh) {
                 onRefresh();
             }
@@ -1319,7 +1330,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                     return;
                 }
                 let uploadedCount = 0;
-                toast.info(`Uploading ${filesToUpload.length} file(s) to Google Drive ☁️...`);
+                toast.info(`Uploading ${filesToUpload.length} file(s) to Google Drive...`);
                 for (const file of filesToUpload) {
                     try {
                         await api.uploadToCloud(cloudAccountId, file, cloudFolderId || "root");
@@ -1330,7 +1341,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                     }
                 }
                 if (uploadedCount > 0) {
-                    toast.success(`Successfully uploaded ${uploadedCount} file(s) to Google Drive ☁️`);
+                    toast.success(`Successfully uploaded ${uploadedCount} file(s) to Google Drive`);
                     if (onRefresh)
                         onRefresh();
                     if (onFileUploaded)

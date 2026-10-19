@@ -58,7 +58,7 @@ export const IndexChatDialog = ({ open, onOpenChange }) => {
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Bot className="h-6 w-6 text-blue-500"/>
+            <Bot className="h-6 w-6 text-primary"/>
             Add me to your Index chat
           </DialogTitle>
           <DialogDescription className="pt-2">
@@ -73,7 +73,7 @@ export const IndexChatDialog = ({ open, onOpenChange }) => {
           </Button>
           <Button onClick={handleOk} disabled={isLoading || !botUsername} className="flex items-center gap-2">
             {isLoading ? (<>
-                <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-solid border-white border-r-transparent align-[-0.125em]"></div>
+                <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-solid border-primary-foreground border-r-transparent align-[-0.125em]"></div>
                 Loading...
               </>) : (<>
                 <Check className="h-4 w-4"/>
