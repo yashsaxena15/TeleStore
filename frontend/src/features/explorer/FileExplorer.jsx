@@ -1616,7 +1616,7 @@ export const FileExplorer = () => {
             }}/>
             </Suspense>
           </motion.div>) : showTransfers ? (<motion.div key="transfers" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
-            <Transfers />
+            <Transfers onNewTransfer={() => setRemoteDownloadOpen(true)}/>
           </motion.div>) : (<div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             <TopBar currentPath={currentPath} searchQuery={searchQuery} viewMode={viewMode} onSearchChange={setSearchQuery} onViewModeChange={setViewMode} onBreadcrumbClick={handleBreadcrumbClick} sortField={sortField} sortOrder={sortOrder} foldersFirst={foldersFirst} onSortChange={(field, order) => {
                 setSortField(field);

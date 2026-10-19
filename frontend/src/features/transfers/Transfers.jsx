@@ -1,39 +1,149 @@
 import { useState } from "react";
-import { PageHeader } from "@/components/layout/PageHeader";
 import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { ArrowUpDown, ArrowUpCircle, ArrowDownCircle, CloudDownload, Pause, Play, X, RotateCcw, Trash2, FolderOpen, AlertCircle, Clock, Folder, Magnet, FolderArchive, ChevronDown, ChevronUp, FileText } from "lucide-react";
-import { useTransferManager } from "./useTransferManager";
-import { formatBytes } from "@/lib/utils";
 import { invoke } from "@tauri-apps/api/core";
-import { groupRemoteTransfers } from "./transferGrouping";
-export const Transfers = () => {
+import { ArrowUpDown, ArrowUp, ArrowDown, CloudDownload, Pause, Play, X, RotateCcw, Trash2, FolderOpen, Folder, Magnet, FolderArchive, ChevronRight, FileText, Plus, MoreHorizontal, Loader2 } from "lucide-react";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { cn, formatBytes } from "@/lib/utils";
+import { useTransferManager } from "./useTransferManager";
+import { buildTransferItems, countByFilter, matchesFilter, TRANSFER_FILTERS, TRANSFERRING_STATUSES, formatEta, kindLabel, statusInfo, rowActions } from "./transferRows";
+
+const TONE_CHIP = {
+    primary: "bg-primary/15 text-primary",
+    success: "bg-success/15 text-success",
+    warning: "bg-warning/15 text-warning",
+    info: "bg-info/15 text-info",
+    cloud: "bg-cloud/15 text-cloud",
+    destructive: "bg-destructive/15 text-destructive",
+    muted: "bg-muted text-muted-foreground",
+};
+const TONE_TEXT = { primary: "text-primary", success: "text-success", warning: "text-warning", info: "text-info", cloud: "text-cloud", destructive: "text-destructive", muted: "text-muted-foreground" };
+const TONE_BAR = { primary: "[&>div]:bg-primary", success: "[&>div]:bg-success", warning: "[&>div]:bg-warning", info: "[&>div]:bg-info", cloud: "[&>div]:bg-cloud", destructive: "[&>div]:bg-destructive", muted: "[&>div]:bg-muted-foreground" };
+const QUOTA_HELP = "Google Drive limits how much can be downloaded per day. The remaining files wait here and resume automatically when the 24-hour limit resets; Resume now tries again right away.";
+const SCAN_HELP = "Listing the files in this Google Drive folder. Downloads start as files are found.";
+// Desktop columns shared by the header, rows and folder sub-rows so they line up
+const COLS = "md:grid-cols-[32px_minmax(0,1fr)_200px_110px_150px]";
+const formatSpeed = (bps) => (bps > 0 ? `${formatBytes(bps)}/s` : "");
+
+const iconFor = (item) => {
+    if (item.isGroup) return FolderArchive;
+    if (item.type === "remote") return item.source_type === "magnet" || item.source_type === "torrent_file" ? Magnet : CloudDownload;
+    return item.type === "upload" ? ArrowUp : ArrowDown;
+};
+const kindTone = (item) => (item.type === "remote" ? "cloud" : item.type === "upload" ? "primary" : "success");
+
+const IconButton = ({ label, onClick, className, children }) => (<Button variant="ghost" size="icon" className={cn("h-8 w-8 text-muted-foreground hover:text-foreground", className)} onClick={onClick} title={label} aria-label={label}>
+    {children}
+  </Button>);
+
+// One file inside an expanded folder or multi-part leech
+const SubRow = ({ sub, onRetry, onCancel }) => {
+    const st = statusInfo(sub);
+    const canCancel = ["downloading", "uploading_tg", "queued", "paused_quota"].includes(sub.status);
+    return (<div role="row" className={`grid grid-cols-[32px_minmax(0,1fr)_auto] ${COLS} gap-3 items-center px-3 py-1.5 text-xs bg-muted/20`}>
+      <span aria-hidden="true"/>
+      <div role="cell" className="min-w-0 flex items-center gap-2">
+        <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0"/>
+        <span className="truncate" title={sub.filename}>{sub.filename}</span>
+        <span className={cn("shrink-0 px-1.5 py-px rounded text-[9.5px] font-semibold", TONE_CHIP[st.tone])}>{st.label}</span>
+      </div>
+      <div role="cell" className="hidden md:flex items-center gap-2">
+        <Progress value={sub.progress} className={cn("h-1 flex-1", TONE_BAR[st.tone === "muted" ? "muted" : st.tone === "success" ? "success" : "cloud"])}/>
+        <span className="font-mono text-[10.5px] text-muted-foreground w-9 text-right">{Math.round(sub.progress || 0)}%</span>
+      </div>
+      <div role="cell" className="hidden md:block font-mono text-[10.5px] text-muted-foreground truncate" title={sub.phase}>{sub.filesize > 0 ? formatBytes(sub.filesize) : ""}</div>
+      <div role="cell" className="flex justify-end">
+        {sub.status === "failed" && <IconButton label={`Retry ${sub.filename}`} onClick={() => onRetry(sub.id)} className="h-7 w-7 text-primary"><RotateCcw className="w-3.5 h-3.5"/></IconButton>}
+        {canCancel && <IconButton label={`Cancel ${sub.filename}`} onClick={() => onCancel(sub.id)} className="h-7 w-7 hover:text-destructive"><X className="w-3.5 h-3.5"/></IconButton>}
+      </div>
+    </div>);
+};
+
+const TransferRow = ({ item, expanded, onToggle, actions, openInFolder }) => {
+    const Icon = iconFor(item);
+    const st = statusInfo(item);
+    const can = rowActions(item);
+    const isUpload = item.type === "upload";
+    const isRemote = item.type === "remote";
+    const isGroup = Boolean(item.isGroup);
+    const transferring = TRANSFERRING_STATUSES.includes(item.status);
+    const quota = st.tone === "warning" && st.label === "Quota pause";
+    const scanning = st.label === "Scanning";
+    const tone = ["warning", "info", "destructive", "success"].includes(st.tone) && !(st.tone === "warning" && item.status === "paused" && !isRemote) ? st.tone : kindTone(item);
+    const done = item.bytesUploaded || item.downloaded || 0;
+    const total = item.filesize || item.size || 0;
+    const sizeText = `${formatBytes(done)}${total > 0 ? ` of ${formatBytes(total)}` : ""}`;
+    const speedText = transferring ? [formatSpeed(item.speed), formatEta(item.eta) && `${formatEta(item.eta)} left`].filter(Boolean).join(" · ") : "";
+    const detail = item.error || item.error_message || item.phase || (isRemote && item.destination_path ? `To ${item.destination_path}` : "");
+    const detailTone = item.error || item.error_message ? "destructive" : quota ? "warning" : scanning ? "info" : "muted";
+    const cancel = () => (isGroup ? actions.cancelRemoteGroup(item.group_id) : isRemote ? actions.cancelRemoteTransfer(item.id) : isUpload ? actions.cancelUpload(item.id) : actions.cancelDownload(item.id));
+    const retry = () => (isRemote ? (isGroup ? actions.resumeRemoteGroup(item.group_id) : actions.retryRemoteTransfer(item.id)) : isUpload ? actions.retryUpload(item.id) : actions.retryDownload(item));
+    return (<div className={cn(expanded && "bg-muted/10")}>
+      <div role="row" className={`grid grid-cols-[32px_minmax(0,1fr)_auto] ${COLS} gap-3 items-center px-3 py-2.5 hover:bg-muted/40 transition-colors`}>
+        <span role="cell" className={cn("w-8 h-8 rounded-md grid place-items-center", TONE_CHIP[tone], scanning && "animate-pulse")}>
+          <Icon className="w-4 h-4"/>
+        </span>
+        <div role="cell" className="min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0">
+            {isGroup ? (<button type="button" onClick={onToggle} aria-expanded={expanded} className="min-w-0 flex items-center gap-1 text-sm font-medium hover:underline text-left" title={expanded ? "Hide files" : `Show ${item.items.length} files`}>
+                <ChevronRight className={cn("w-3.5 h-3.5 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-90")}/>
+                <span className="truncate">{item.filename}</span>
+              </button>) : (<span className="text-sm font-medium truncate" title={item.filename}>{item.filename}</span>)}
+            <span className={cn("shrink-0 px-1.5 py-px rounded text-[9.5px] font-semibold", TONE_CHIP[st.tone])}>{st.label}</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground min-w-0 mt-0.5">
+            <span className="shrink-0">{kindLabel(item)}</span>
+            {isGroup && <span className="shrink-0 font-mono">· {item.completedCount}/{item.totalCount}</span>}
+            {isRemote && item.peer_count > 0 && <span className="shrink-0 font-mono">· {item.peer_count} peers</span>}
+            {detail && (<span className={cn("truncate", TONE_TEXT[detailTone])} title={quota ? QUOTA_HELP : scanning ? SCAN_HELP : detail}>
+                · {scanning && <Loader2 className="inline w-3 h-3 mr-0.5 -mt-px animate-spin"/>}{detail}
+              </span>)}
+          </div>
+          {/* Phone: progress under the name */}
+          <div className="md:hidden flex items-center gap-2 mt-1.5">
+            <Progress value={item.progress} className={cn("h-1 flex-1", TONE_BAR[tone])}/>
+            <span className="font-mono text-[10px] text-muted-foreground shrink-0">{Math.round(item.progress || 0)}%{speedText ? ` · ${formatSpeed(item.speed)}` : ""}</span>
+          </div>
+        </div>
+        <div role="cell" className="hidden md:block min-w-0">
+          <Progress value={item.progress} className={cn("h-1.5", TONE_BAR[tone])}/>
+          <div className="mt-1 font-mono text-[10.5px] text-muted-foreground truncate" title={sizeText}>{Math.round(item.progress || 0)}% · {sizeText}</div>
+        </div>
+        <div role="cell" className="hidden md:block font-mono text-[11px] text-muted-foreground truncate">{speedText || (total > 0 ? formatBytes(total) : "")}</div>
+        <div role="cell" className="flex items-center justify-end gap-0.5">
+          {can.resumeRemaining && (<Button variant="outline" size="sm" className="h-8 px-2 text-xs gap-1 text-warning border-warning/40 hover:bg-warning/10 hover:text-warning" onClick={() => actions.resumeRemoteGroup(isGroup ? item.group_id : item.id)} title={quota ? QUOTA_HELP : "Resume or retry the remaining files"}>
+              {quota ? <Play className="w-3.5 h-3.5 fill-current"/> : <RotateCcw className="w-3.5 h-3.5"/>}
+              <span className="hidden sm:inline">{quota ? "Resume now" : "Resume rest"}</span>
+            </Button>)}
+          {can.pause && <IconButton label={`Pause ${item.filename}`} onClick={() => (isUpload ? actions.pauseUpload(item.id) : actions.pauseDownload(item.id))}><Pause className="w-4 h-4"/></IconButton>}
+          {can.resume && <IconButton label={`Resume ${item.filename}`} onClick={() => (isUpload ? actions.resumeUpload(item.id) : actions.resumeDownload(item.id))} className="text-primary"><Play className="w-4 h-4"/></IconButton>}
+          {can.retry && !can.resumeRemaining && <IconButton label={`Retry ${item.filename}`} onClick={retry} className="text-primary"><RotateCcw className="w-4 h-4"/></IconButton>}
+          {can.showInFolder && <IconButton label="Show in folder" onClick={() => openInFolder(item.savePath)} className="text-success"><FolderOpen className="w-4 h-4"/></IconButton>}
+          {can.cancel && <IconButton label={isGroup ? `Cancel all files in ${item.filename}` : `Cancel ${item.filename}`} onClick={cancel} className="hover:text-destructive"><X className="w-4 h-4"/></IconButton>}
+        </div>
+      </div>
+      {isGroup && expanded && (<div role="rowgroup" aria-label={`Files in ${item.filename}`} className="border-t border-border/60 divide-y divide-border/40">
+          {item.items.map((sub) => <SubRow key={sub.id} sub={sub} onRetry={actions.retryRemoteTransfer} onCancel={actions.cancelRemoteTransfer}/>)}
+        </div>)}
+    </div>);
+};
+
+export const Transfers = ({ onNewTransfer }) => {
     const navigate = useNavigate();
-    const { uploads, downloads, remoteTransfers, stats, pauseUpload, resumeUpload, cancelUpload, retryUpload, pauseDownload, resumeDownload, cancelDownload, retryDownload, cancelRemoteTransfer, cancelRemoteGroup, resumeRemoteGroup, retryRemoteTransfer, pauseAll, resumeAll, cancelAll, clearCompleted } = useTransferManager();
-    const [activeTab, setActiveTab] = useState("all");
-    const [expandedGroups, setExpandedGroups] = useState({});
-    const toggleGroup = (groupId) => {
-        setExpandedGroups(prev => ({ ...prev, [groupId]: !prev[groupId] }));
-    };
-    const formatSpeed = (bytesPerSec) => {
-        if (!bytesPerSec || bytesPerSec <= 0)
-            return "";
-        return `${formatBytes(bytesPerSec)}/s`;
-    };
-    const formatEta = (seconds) => {
-        if (!seconds || !isFinite(seconds) || seconds <= 0)
-            return "";
-        if (seconds > 3600)
-            return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-        if (seconds > 60)
-            return `${Math.floor(seconds / 60)}m ${Math.floor(seconds % 60)}s`;
-        return `${Math.round(seconds)}s`;
-    };
-    const openDownloadedFile = async (path) => {
-        if (!path)
-            return;
+    const manager = useTransferManager();
+    const { uploads, downloads, remoteTransfers, stats, pauseAll, resumeAll, cancelAll, clearCompleted } = manager;
+    const [filter, setFilter] = useState("all");
+    const [expanded, setExpanded] = useState({});
+    const [confirmCancelAll, setConfirmCancelAll] = useState(false);
+    const items = buildTransferItems(uploads, downloads, remoteTransfers);
+    const counts = countByFilter(items);
+    const visible = items.filter((i) => matchesFilter(i, filter));
+    const canCancelAny = stats.totalActive > 0 || stats.pausedCount > 0;
+    const openInFolder = async (path) => {
+        if (!path) return;
         try {
             await invoke("open_file_in_folder", { path });
         }
@@ -41,331 +151,75 @@ export const Transfers = () => {
             console.error("Failed to open file folder:", error);
         }
     };
-    // Group remote transfers by group_id
-    const { groupedRemoteItems, singleRemoteItems } = groupRemoteTransfers(remoteTransfers);
-    // Build unified item list
-    const transferItems = [
-        ...groupedRemoteItems,
-        ...singleRemoteItems,
-        ...uploads.map(u => ({ ...u, type: "upload" })),
-        ...downloads.map(d => ({
-            ...d,
-            type: "download",
-            filesize: d.size || 0,
-            bytesUploaded: d.downloaded || 0,
-            file: null
-        }))
-    ];
-    // Sort: active/paused items first, then completed/failed by start time
-    transferItems.sort((a, b) => {
-        const aActive = a.status === "uploading" || a.status === "downloading" || a.status === "uploading_tg" || a.status === "queued" || a.status === "paused" || a.status === "paused_quota" || a.status === "discovering";
-        const bActive = b.status === "uploading" || b.status === "downloading" || b.status === "uploading_tg" || b.status === "queued" || b.status === "paused" || b.status === "paused_quota" || b.status === "discovering";
-        if (aActive && !bActive)
-            return -1;
-        if (!aActive && bActive)
-            return 1;
-        const aTime = a.startTime ? new Date(a.startTime).getTime() : 0;
-        const bTime = b.startTime ? new Date(b.startTime).getTime() : 0;
-        return bTime - aTime;
-    });
-    const filteredItems = transferItems.filter(item => {
-        if (activeTab === "uploads")
-            return item.type === "upload";
-        if (activeTab === "downloads")
-            return item.type === "download";
-        if (activeTab === "remote")
-            return item.type === "remote";
-        if (activeTab === "completed")
-            return item.status === "completed";
-        return true;
-    });
-    const hasActiveTransfers = stats.totalActive > 0;
-    const hasPausedTransfers = stats.pausedCount > 0;
     return (<div className="flex-1 flex flex-col overflow-hidden bg-background">
       <PageHeader icon={ArrowUpDown} title="Transfers" subtitle={stats.totalActive > 0 ? `${stats.totalActive} active · uploads, downloads and cloud leeches` : "Uploads, downloads and cloud leeches"} actions={<>
-          <Button variant="outline" size="sm" onClick={pauseAll} disabled={!hasActiveTransfers} className="gap-1.5" title="Pause all ongoing transfers">
-            <Pause className="w-3.5 h-3.5"/>
-            Pause all
-          </Button>
-          <Button variant="outline" size="sm" onClick={resumeAll} disabled={!hasPausedTransfers} className="gap-1.5" title="Resume all paused transfers">
-            <Play className="w-3.5 h-3.5"/>
-            Resume all
-          </Button>
-          <Button variant="outline" size="sm" onClick={cancelAll} disabled={!hasActiveTransfers && !hasPausedTransfers} className="gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10" title="Cancel all active and paused transfers">
-            <X className="w-3.5 h-3.5"/>
-            Cancel all
-          </Button>
-        </>}/>
-      <div className="flex-1 overflow-auto py-6 px-4 sm:px-6">
-        <div className="max-w-5xl mx-auto">
-          {/* Filter Tabs Card */}
-          <Card className="bg-white/90 dark:bg-gray-800/90 border border-border shadow-sm rounded-xl mb-6">
-            <div className="p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-                <Button variant={activeTab === "all" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("all")} className="rounded-lg text-xs sm:text-sm">
-                  All ({transferItems.length})
-                </Button>
-                <Button variant={activeTab === "remote" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("remote")} className="rounded-lg text-xs sm:text-sm flex items-center gap-1.5 text-purple-600 dark:text-purple-400">
-                  <CloudDownload className="w-3.5 h-3.5"/>
-                  Cloud Leech ({groupedRemoteItems.length + singleRemoteItems.length})
-                </Button>
-                <Button variant={activeTab === "uploads" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("uploads")} className="rounded-lg text-xs sm:text-sm flex items-center gap-1.5">
-                  <ArrowUpCircle className="w-3.5 h-3.5 text-blue-500"/>
-                  Uploads ({uploads.length})
-                </Button>
-                <Button variant={activeTab === "downloads" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("downloads")} className="rounded-lg text-xs sm:text-sm flex items-center gap-1.5">
-                  <ArrowDownCircle className="w-3.5 h-3.5 text-emerald-500"/>
-                  Downloads ({downloads.length})
-                </Button>
-                <Button variant={activeTab === "completed" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("completed")} className="rounded-lg text-xs sm:text-sm">
-                  Completed ({stats.completedUploads + stats.completedDownloads + stats.completedRemote})
-                </Button>
-              </div>
-
-              <Button variant="ghost" size="sm" onClick={clearCompleted} className="text-xs text-muted-foreground hover:text-foreground shrink-0 self-end sm:self-auto">
-                <Trash2 className="w-3.5 h-3.5 mr-1"/>
-                Clear Completed
+          {onNewTransfer && (<Button size="sm" onClick={onNewTransfer} className="gap-1.5">
+              <Plus className="w-4 h-4"/>New transfer
+            </Button>)}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" className="h-9 w-9" aria-label="Bulk actions" title="Bulk actions">
+                <MoreHorizontal className="w-4 h-4"/>
               </Button>
-            </div>
-          </Card>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[190px]">
+              <DropdownMenuItem disabled={stats.totalActive === 0} onSelect={pauseAll} className="gap-2"><Pause className="w-4 h-4"/>Pause all</DropdownMenuItem>
+              <DropdownMenuItem disabled={stats.pausedCount === 0} onSelect={resumeAll} className="gap-2"><Play className="w-4 h-4"/>Resume all</DropdownMenuItem>
+              <DropdownMenuItem disabled={counts.completed === 0 && counts.failed === 0} onSelect={clearCompleted} className="gap-2"><Trash2 className="w-4 h-4"/>Clear finished</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem disabled={!canCancelAny} onSelect={() => setConfirmCancelAll(true)} className="gap-2 text-destructive focus:text-destructive"><X className="w-4 h-4"/>Cancel all…</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>}/>
+      <div className="flex-1 overflow-auto px-3 sm:px-6 py-4">
+        <div className="max-w-5xl mx-auto flex flex-col gap-3">
+          <div role="group" aria-label="Filter transfers" className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
+            {TRANSFER_FILTERS.map((f) => (<button key={f.id} type="button" onClick={() => setFilter(f.id)} aria-pressed={filter === f.id} className={cn("h-7 shrink-0 inline-flex items-center gap-1.5 px-2.5 rounded-md border text-xs whitespace-nowrap transition-colors", filter === f.id ? "bg-foreground text-background border-transparent" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted", f.id === "failed" && counts.failed > 0 && filter !== f.id && "text-destructive")}>
+                {f.label}<span className="font-mono text-[10px] opacity-70">{counts[f.id]}</span>
+              </button>))}
+            <span className="flex-1"/>
+            {(counts.completed > 0 || counts.failed > 0) && (<button type="button" onClick={clearCompleted} className="h-7 shrink-0 inline-flex items-center gap-1.5 px-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted" title="Remove completed, failed and cancelled transfers from the list">
+                <Trash2 className="w-3.5 h-3.5"/><span className="hidden sm:inline">Clear finished</span>
+              </button>)}
+          </div>
 
-          {/* Transfers List */}
-          {filteredItems.length === 0 ? (<Card className="bg-white/80 dark:bg-gray-800/80 border border-border p-12 text-center rounded-xl">
-              <ArrowUpDown className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-50"/>
-              <h3 className="text-base font-semibold text-foreground">No transfers found</h3>
-              <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
-                {activeTab === "all"
-                ? "When you initiate cloud downloads, uploads, or downloads, they will show up here live."
-                : `No ${activeTab} items at this moment.`}
-              </p>
-              <div className="mt-5">
-                <Button size="sm" onClick={() => navigate("/")}>
-                  Go to Files
-                </Button>
+          {visible.length === 0 ? (<div className="rounded-lg border border-dashed border-border py-14 px-6 text-center">
+              <ArrowUpDown className="w-8 h-8 text-muted-foreground/60 mx-auto mb-3"/>
+              <h3 className="text-sm font-semibold">{filter === "all" ? "No transfers yet" : `No ${TRANSFER_FILTERS.find((f) => f.id === filter).label.toLowerCase()} transfers`}</h3>
+              <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">Uploads, downloads and cloud leeches show up here while they run.</p>
+              <div className="mt-4 flex justify-center gap-2">
+                {onNewTransfer && <Button size="sm" onClick={onNewTransfer} className="gap-1.5"><Plus className="w-4 h-4"/>New transfer</Button>}
+                <Button size="sm" variant="outline" onClick={() => navigate("/")} className="gap-1.5"><Folder className="w-4 h-4"/>Go to Files</Button>
               </div>
-            </Card>) : (<div className="flex flex-col gap-3">
-              {filteredItems.map(item => {
-                const isGroup = Boolean(item.isGroup);
-                const isRemote = item.type === "remote";
-                const isUpload = item.type === "upload";
-                const isTransferring = item.status === "uploading" || item.status === "downloading" || item.status === "uploading_tg";
-                const isPaused = item.status === "paused";
-                const isPausedQuota = item.status === "paused_quota" || Boolean(item.isPausedQuota);
-                const isDiscovering = item.status === "discovering" || Boolean(item.isDiscovering);
-                const isCompleted = item.status === "completed";
-                const isFailed = item.status === "failed";
-                const isQueued = item.status === "queued";
-                const transferredBytes = item.bytesUploaded || (item.downloaded || 0);
-                const totalBytes = item.filesize || (item.size || 0);
-                const speedText = formatSpeed(item.speed);
-                const etaText = formatEta(item.eta);
-                return (<Card key={`${item.type}_${item.id}`} className="bg-white dark:bg-gray-800 border border-border/80 shadow-xs hover:shadow-md transition-all rounded-xl overflow-hidden">
-                    <div className="p-4 flex flex-col gap-3">
-                      {/* Top row: Icon, Name, Badges, Actions */}
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <div className={`p-2 rounded-lg shrink-0 ${isPausedQuota ? "bg-amber-100 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400"
-                        : isDiscovering ? "bg-indigo-100 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 animate-pulse"
-                            : isRemote ? "bg-purple-100 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400"
-                                : isUpload ? "bg-blue-100 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400"
-                                    : "bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400"}`}>
-                            {isGroup ? (<FolderArchive className="w-5 h-5"/>) : isRemote ? (item.source_type === "magnet" || item.source_type === "torrent_file" ? (<Magnet className="w-5 h-5"/>) : (<CloudDownload className="w-5 h-5"/>)) : isUpload ? (<ArrowUpCircle className="w-5 h-5"/>) : (<ArrowDownCircle className="w-5 h-5"/>)}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-semibold text-sm text-foreground truncate max-w-xs sm:max-w-md">
-                                {item.filename}
-                              </span>
-                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium uppercase tracking-wider ${isRemote ? "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300"
-                        : isUpload ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
-                            : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"}`}>
-                                {isGroup
-                        ? item.group_type === "torrent"
-                            ? "Torrent Leech"
-                            : item.group_type === "file"
-                                ? "Multi-Node Leech ⚡"
-                                : "Folder Leech"
-                        : isRemote
-                            ? item.source_type === "magnet"
-                                ? "Magnet Leech"
-                                : item.source_type === "torrent_file"
-                                    ? "Torrent Leech"
-                                    : "Cloud Leech"
-                            : isUpload ? "Upload" : "Download"}
-                              </span>
-                              {/* Group file/part counter badge */}
-                              {isGroup && (<span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300 border border-indigo-500/20">
-                                  {item.completedCount}/{item.totalCount} {item.group_type === "file" ? "parts" : "files"}
-                                </span>)}
-                              {/* Peer Count Badge */}
-                              {isRemote && item.peer_count > 0 && (<span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 flex items-center gap-1 border border-amber-500/20">
-                                  ⚡ {item.peer_count} peers
-                                </span>)}
-                              {/* Status Badge */}
-                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${isCompleted ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" :
-                        isPausedQuota ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-500/30 animate-pulse font-semibold" :
-                            isDiscovering ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-500/30 animate-pulse font-semibold" :
-                                isPaused ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" :
-                                    isFailed ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" :
-                                        isQueued ? "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" :
-                                            "bg-primary/10 text-primary"}`}>
-                                {isPausedQuota ? "QUOTA LIMIT (24H)" : isDiscovering ? "DISCOVERING FILES..." : item.status.toUpperCase()}
-                              </span>
-                            </div>
-
-                            {/* Phase or Destination info */}
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 flex-wrap">
-                              {isRemote && item.phase && (<span className={`font-medium ${isPausedQuota ? "text-amber-600 dark:text-amber-400 font-semibold" :
-                            isDiscovering ? "text-indigo-600 dark:text-indigo-400 font-semibold" :
-                                isPaused ? "text-amber-600 dark:text-amber-400" :
-                                    "text-purple-600 dark:text-purple-400"}`}>
-                                  {item.phase}
-                                </span>)}
-                              {isRemote && item.destination_path && (<span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                                  <Folder className="w-3 h-3"/> {item.destination_path}
-                                </span>)}
-                            </div>
-
-                            {/* Secondary stats */}
-                            <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1 flex-wrap">
-                              <span>
-                                {formatBytes(transferredBytes)}
-                                {totalBytes > 0 ? ` / ${formatBytes(totalBytes)}` : ""}
-                              </span>
-                              {isTransferring && speedText && (<span className="font-medium text-foreground">{speedText}</span>)}
-                              {isTransferring && etaText && (<span className="flex items-center gap-1">
-                                  <Clock className="w-3 h-3"/> ETA: {etaText}
-                                </span>)}
-                              {item.error && (<span className="text-red-500 font-medium">{item.error}</span>)}
-                              {isRemote && item.error_message && (<span className="text-red-500 font-medium">{item.error_message}</span>)}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Action buttons */}
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {isGroup && (<Button variant="outline" size="sm" className="h-8 px-2.5 text-xs flex items-center gap-1.5 text-muted-foreground hover:text-foreground font-medium" onClick={() => toggleGroup(item.group_id)}>
-                              {expandedGroups[item.group_id] ? (<>Hide Files <ChevronUp className="w-3.5 h-3.5"/></>) : (<>Show Files ({item.items.length}) <ChevronDown className="w-3.5 h-3.5"/></>)}
-                            </Button>)}
-
-                          {(isPausedQuota || (isGroup && (item.items?.some(i => i.status === 'paused_quota' || i.status === 'failed') || (isQueued && item.completedCount > 0)))) && (<Button variant="outline" size="sm" className="h-8 px-2.5 text-xs flex items-center gap-1.5 text-amber-700 border-amber-400 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-600 font-medium shadow-xs" title={isPausedQuota ? "Bypass 24h wait and attempt transfer immediately" : "Resume or retry remaining files"} onClick={() => {
-                            if (isGroup) {
-                                resumeRemoteGroup(item.group_id);
-                            }
-                            else {
-                                resumeRemoteGroup(item.id);
-                            }
-                        }}>
-                              {isPausedQuota ? (<><Play className="w-3.5 h-3.5 fill-current"/> Resume Now</>) : (<><RotateCcw className="w-3.5 h-3.5"/> Resume Remaining</>)}
-                            </Button>)}
-
-                          {!isRemote && isTransferring && (<Button variant="outline" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" title="Pause" onClick={() => isUpload ? pauseUpload(item.id) : pauseDownload(item.id)}>
-                              <Pause className="w-4 h-4"/>
-                            </Button>)}
-
-                          {!isRemote && isPaused && (<Button variant="outline" size="icon" className="h-8 w-8 text-primary hover:text-primary/80" title="Resume" onClick={() => isUpload ? resumeUpload(item.id) : resumeDownload(item.id)}>
-                              <Play className="w-4 h-4"/>
-                            </Button>)}
-
-                          {(isTransferring || isPaused || isQueued || isPausedQuota || isDiscovering) && (<Button variant="outline" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30" title={isGroup ? "Cancel entire folder" : "Cancel"} onClick={() => {
-                            if (isGroup) {
-                                cancelRemoteGroup(item.group_id);
-                            }
-                            else if (isRemote) {
-                                cancelRemoteTransfer(item.id);
-                            }
-                            else if (isUpload) {
-                                cancelUpload(item.id);
-                            }
-                            else {
-                                cancelDownload(item.id);
-                            }
-                        }}>
-                              <X className="w-4 h-4"/>
-                            </Button>)}
-
-                          {isFailed && !isRemote && (<Button variant="outline" size="icon" className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30" title="Retry" onClick={() => isUpload ? retryUpload(item.id) : retryDownload(item)}>
-                              <RotateCcw className="w-4 h-4"/>
-                            </Button>)}
-
-                          {isFailed && isRemote && (<Button variant="outline" size="icon" className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30" title="Retry transfer" onClick={() => isGroup ? resumeRemoteGroup(item.group_id) : retryRemoteTransfer(item.id)}>
-                              <RotateCcw className="w-4 h-4"/>
-                            </Button>)}
-
-                          {isCompleted && !isUpload && !isRemote && item.savePath && (<Button variant="outline" size="icon" className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30" title="Show in folder" onClick={() => openDownloadedFile(item.savePath)}>
-                              <FolderOpen className="w-4 h-4"/>
-                            </Button>)}
-                        </div>
-                      </div>
-
-                      {/* Quota Limit Banner */}
-                      {isPausedQuota && (<div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2">
-                          <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5"/>
-                          <div className="flex-1">
-                            <span className="font-semibold">Google Drive Quota Hit: </span>
-                            Google has temporarily rate-limited downloads. Remaining files are safely paused in queue and will automatically resume once the 24h cooldown expires. Or click <strong>Resume Now</strong> above to retry anytime.
-                          </div>
-                        </div>)}
-
-                      {/* Folder Discovery Banner */}
-                      {isDiscovering && (<div className="bg-indigo-500/10 border border-indigo-500/30 rounded-lg p-2.5 text-xs text-indigo-800 dark:text-indigo-200 flex items-center gap-2">
-                          <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin shrink-0"/>
-                          <div className="flex-1">
-                            <span className="font-semibold">Analyzing Google Drive Folder: </span>
-                            Crawling files and folder structure in the background. Downloads will start as files are resolved.
-                          </div>
-                        </div>)}
-
-                      {/* Progress Bar */}
-                      <Progress value={item.progress} className={`h-1.5 w-full ${isRemote ? "[&>div]:bg-purple-500" :
-                        isPaused ? "[&>div]:bg-amber-500" :
-                            isCompleted ? "[&>div]:bg-emerald-500" :
-                                isFailed ? "[&>div]:bg-red-500" : ""}`}/>
-
-                      {/* Collapsible files list inside group */}
-                      {isGroup && expandedGroups[item.group_id] && (<div className="mt-3 pt-3 border-t border-border/60 flex flex-col gap-2 bg-muted/20 dark:bg-gray-900/30 -mx-4 -mb-4 p-4 rounded-b-xl">
-                          <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 flex items-center justify-between">
-                            <span>Files in this folder ({item.items.length})</span>
-                            <span>{item.completedCount} / {item.totalCount} Completed</span>
-                          </div>
-                          {item.items.map((sub) => (<div key={sub.id} className="flex flex-col gap-1 text-xs py-2 px-2.5 rounded-lg bg-card/60 border border-border/40">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="font-medium truncate max-w-xs sm:max-w-md text-foreground flex items-center gap-1.5" title={sub.filename}>
-                                  <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0"/>
-                                  {sub.filename}
-                                </span>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${sub.status === 'completed' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' :
-                                sub.status === 'paused_quota' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-500/20' :
-                                    sub.status === 'discovering' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300' :
-                                        sub.status === 'downloading' || sub.status === 'uploading_tg' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' :
-                                            sub.status === 'cancelled' ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' :
-                                                'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
-                                    {sub.status === 'paused_quota' ? 'PAUSED (QUOTA)' : sub.status.toUpperCase()}
-                                  </span>
-                                  {sub.status === 'failed' && (<Button variant="ghost" size="icon" className="h-6 w-6 text-blue-500 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30" onClick={() => retryRemoteTransfer(sub.id)} title="Retry this file">
-                                      <RotateCcw className="w-3 h-3"/>
-                                    </Button>)}
-                                  {(sub.status === 'downloading' || sub.status === 'uploading_tg' || sub.status === 'queued' || sub.status === 'paused_quota') && (<Button variant="ghost" size="icon" className="h-6 w-6 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30" onClick={() => cancelRemoteTransfer(sub.id)} title="Cancel this file">
-                                      <X className="w-3 h-3"/>
-                                    </Button>)}
-                                </div>
-                              </div>
-                              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                                <span className="truncate max-w-[250px]">{sub.phase || (sub.filesize > 0 ? formatBytes(sub.filesize) : '')}</span>
-                                <span className="font-mono">{sub.progress}%</span>
-                              </div>
-                              <Progress value={sub.progress} className={`h-1 w-full ${sub.status === 'completed' ? '[&>div]:bg-emerald-500' :
-                                sub.status === 'cancelled' ? '[&>div]:bg-gray-400' :
-                                    '[&>div]:bg-purple-500'}`}/>
-                            </div>))}
-                        </div>)}
-                    </div>
-                  </Card>);
-            })}
+            </div>) : (<div role="table" aria-label="Transfers" className="rounded-lg border border-border bg-card overflow-hidden">
+              <div role="row" className={`hidden md:grid ${COLS} gap-3 px-3 h-8 items-center border-b border-border text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground`}>
+                <span role="columnheader"/>
+                <span role="columnheader">Name</span>
+                <span role="columnheader">Progress</span>
+                <span role="columnheader">Speed</span>
+                <span role="columnheader" className="sr-only">Actions</span>
+              </div>
+              <div className="divide-y divide-border">
+                {visible.map((item) => (<TransferRow key={`${item.type}_${item.id}`} item={item} expanded={Boolean(expanded[item.group_id])} onToggle={() => setExpanded((prev) => ({ ...prev, [item.group_id]: !prev[item.group_id] }))} actions={manager} openInFolder={openInFolder}/>))}
+              </div>
             </div>)}
         </div>
       </div>
+
+      <AlertDialog open={confirmCancelAll} onOpenChange={setConfirmCancelAll}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel all transfers?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Every running, queued and paused upload, download and cloud leech stops. Files already finished stay where they are.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep them</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { cancelAll(); setConfirmCancelAll(false); }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Cancel all</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>);
 };
 export default Transfers;
