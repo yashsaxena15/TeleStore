@@ -150,6 +150,10 @@ export default {
   		}
   	}
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [
+    require("tailwindcss-animate"),
+    // touch: devices without hover (phones, tablets) — controls that appear on hover stay visible there
+    ({ addVariant }) => addVariant("touch", "@media (hover: none)"),
+  ],
 };
 

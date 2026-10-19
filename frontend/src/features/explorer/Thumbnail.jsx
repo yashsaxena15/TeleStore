@@ -64,7 +64,9 @@ export const Thumbnail = ({ item, size = 'lg', thumbnailSrc: propThumbnailSrc, l
     const sizeClasses = {
         sm: 'w-5 h-5',
         md: 'w-10 h-10',
-        lg: 'w-20 h-20'
+        lg: 'w-20 h-20',
+        // Fills its box (grid tiles, details preview); real thumbnails crop to cover it
+        fill: 'w-full h-full'
     };
     const currentSizeClass = sizeClasses[size];
     const [thumbnailError, setThumbnailError] = useState(false);
@@ -148,7 +150,7 @@ export const Thumbnail = ({ item, size = 'lg', thumbnailSrc: propThumbnailSrc, l
       {thumbnailLoading && (<div className="absolute inset-0 flex items-center justify-center">
           {getDefaultFileIcon(item)}
         </div>)}
-      {thumbnailSrc && (<img src={thumbnailSrc} alt={item.name} className={`max-w-full max-h-full object-contain rounded-lg transition-all duration-300 ${thumbnailLoading ? 'opacity-0' : 'opacity-100'} hover:scale-105 hover:shadow-lg`} onLoad={() => {
+      {thumbnailSrc && (<img src={thumbnailSrc} alt={item.name} className={`${size === 'fill' ? 'w-full h-full object-cover' : 'max-w-full max-h-full object-contain rounded-lg hover:scale-105 hover:shadow-lg'} transition-all duration-300 ${thumbnailLoading ? 'opacity-0' : 'opacity-100'}`} onLoad={() => {
                 setThumbnailLoading(false);
             }} onError={() => {
                 setThumbnailError(true);
