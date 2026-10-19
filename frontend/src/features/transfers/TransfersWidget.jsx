@@ -100,6 +100,7 @@ export const TransfersWidget = () => {
                 const isTransferring = item.status === "uploading" || item.status === "downloading" || item.status === "uploading_tg";
                 const isPaused = item.status === "paused";
                 const isPausedQuota = item.status === "paused_quota" || Boolean(item.isPausedQuota);
+                const isQueued = item.status === "queued";
                 const isDiscovering = item.status === "discovering" || Boolean(item.isDiscovering);
                 const transferred = item.bytesUploaded || (item.downloaded || 0);
                 const total = item.filesize || (item.size || 0);
