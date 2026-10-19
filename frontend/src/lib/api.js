@@ -165,6 +165,20 @@ export const fetchWithTimeout = async (url, options = {}, timeout = 30000) => {
         throw error;
     }
 };
+// JSON request to a vault endpoint; throws with the server's message on failure
+async function vaultPost(path, body, fallbackMessage, method = 'POST') {
+    const response = await fetchWithTimeout(`${getApiBaseUrl()}${path}`, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || fallbackMessage);
+    }
+    return response.json();
+}
 export const api = {
     async fetchFiles(path = '/', page, pageSize, sortBy, sortOrder) {
         const baseUrl = getApiBaseUrl();
@@ -965,6 +979,18 @@ export const api = {
             throw new Error(err.detail || 'Failed to reset PIN');
         }
         return response.json();
+    },
+    async changeVaultPin(current_pin, new_pin) {
+        return vaultPost('/vault/change-pin', { current_pin, new_pin }, 'Failed to change PIN');
+    },
+    async updateVaultSettings(settings) {
+        return vaultPost('/vault/settings', settings, 'Failed to save vault settings', 'PUT');
+    },
+    async requestRecoveryEmailOtp(email, pin) {
+        return vaultPost('/vault/recovery-email/request-otp', { email, pin }, 'Failed to send verification code');
+    },
+    async confirmRecoveryEmail(email, pin, otp_code) {
+        return vaultPost('/vault/recovery-email/confirm', { email, pin, otp_code }, 'Failed to change recovery email');
     },
     async moveIntoVault(fileId, targetPath = '/Vault') {
         const response = await fetchWithTimeout(`${getApiBaseUrl()}/vault/move-in`, {
