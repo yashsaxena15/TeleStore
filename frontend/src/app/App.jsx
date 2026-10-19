@@ -5,7 +5,7 @@ import { Toaster } from "@/components/ui/sonner";
 import Login from "@/features/auth/Login";
 import NotFound from "@/app/pages/NotFound";
 import Index from "@/app/pages/Index";
-import { NavigationSidebar } from "@/components/layout/NavigationSidebar";
+import { ErrorBoundary } from "@/components/feedback/ErrorBoundary";
 import { TransfersWidget } from "@/features/transfers/TransfersWidget";
 import logger from "@/lib/logger";
 // Import the new backend connection hook
@@ -67,12 +67,13 @@ const App = () => {
       <ErrorProvider>
         <MediaPlayerProvider>
           <BrowserRouter>
-            <div className="flex h-screen bg-background select-none overflow-hidden">
-              <NavigationSidebar />
+            <div className="flex h-[100dvh] bg-background select-none overflow-hidden">
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
                 <AppRoutes />
                 <Toaster />
-                <TransfersWidget />
+                <ErrorBoundary name="Transfers widget" fallback="silent">
+                  <TransfersWidget />
+                </ErrorBoundary>
               </div>
             </div>
           </BrowserRouter>

@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { UserRound } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { X } from "lucide-react";
 import { getApiBaseUrl, fetchWithTimeout } from "@/lib/api";
 import logger from "@/lib/logger";
 import { openUrl } from "@/lib/tauri-fs";
@@ -131,21 +132,10 @@ export const ProfileContent = ({ onBack }) => {
         </div>
       </div>);
     }
-    return (<div className="flex-1 overflow-auto bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 py-8 px-4 sm:px-6">
+    return (<div className="flex-1 flex flex-col min-h-0 bg-background">
+      <PageHeader icon={UserRound} title="Profile" subtitle="Your account and Telegram connection"/>
+      <div className="flex-1 overflow-auto py-8 px-4 sm:px-6 min-h-0">
       <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">User Profile</h1>
-          <button onClick={() => {
-            // Close the profile page and navigate back to file explorer
-            onBack();
-            // Update the browser history to reflect we're back on the main page
-            window.history.pushState({ path: ["Home"] }, '', '/');
-            // Dispatch event to show file explorer
-            window.dispatchEvent(new CustomEvent('showFiles'));
-        }} className="rounded-full p-2 hover:bg-gray-200 dark:hover:bg-gray-700">
-            <X className="h-5 w-5 text-gray-900 dark:text-white"/>
-          </button>
-        </div>
         
         <Card className="mb-8 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg rounded-xl">
           <CardHeader className="border-b border-gray-200 dark:border-gray-700">
@@ -246,5 +236,6 @@ export const ProfileContent = ({ onBack }) => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </div>
     </div>);
 };
