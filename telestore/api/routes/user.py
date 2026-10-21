@@ -5,7 +5,7 @@ from pydantic import BaseModel
 import datetime
 from typing import Optional, List
 
-from telestore.security.credentials import require_auth, User
+from telestore.security.credentials import account_flags, is_owner_account, require_auth, User
 from telestore.db import database
 from telestore.utils.passwords import hash_password
 from telestore.security.attempt_limiter import TooManyAttempts, password_limiter, wait_message
@@ -39,7 +39,14 @@ class UserResponse(BaseModel):
     email: Optional[str] = None
     telegram_user_id: Optional[int] = None
     telegram_username: Optional[str] = None
-    permissions: UserPermission
+    # Owner controls: turned-off accounts can't sign in; can_upload covers uploads, leeches,
+    # transfers into Telegram and archives. Missing values mean allowed.
+    active: bool = True
+    can_upload: bool = True
+    is_owner: bool = False
+    # Setup: uploads need a verified Telegram account and an index chat
+    has_telegram: bool = False
+    has_index_chat: bool = False
     created_at: str
     last_active: Optional[str] = None
     user_type: Optional[str] = None  # "local" or "google"
@@ -51,11 +58,36 @@ class AddUserRequest(BaseModel):
     username: Optional[str] = None
     email: Optional[str] = None
     password: Optional[str] = None
-    permissions: UserPermission
+    can_upload: bool = True
+    permissions: Optional[UserPermission] = None  # old clients; no longer used
 
 class UpdateUserRequest(BaseModel):
     email: Optional[str] = None
-    permissions: UserPermission
+    active: Optional[bool] = None
+    can_upload: Optional[bool] = None
+    permissions: Optional[UserPermission] = None  # old clients; no longer used
+
+
+def _user_response(doc: dict, id_value: str, user_type: str, **overrides) -> "UserResponse":
+    username = doc.get("username", "")
+    active, can_upload = account_flags(username, doc)
+    fields = dict(
+        id=id_value,
+        username=username,
+        email=doc.get("email"),
+        telegram_user_id=doc.get("telegram_user_id"),
+        telegram_username=doc.get("telegram_username"),
+        active=active,
+        can_upload=can_upload,
+        is_owner=is_owner_account(username, doc),
+        has_telegram=bool(doc.get("telegram_user_id")),
+        has_index_chat=doc.get("index_chat_id") is not None,
+        created_at=str(doc.get("created_at") or datetime.datetime.now().strftime("%Y-%m-%d")),
+        last_active=doc.get("last_active"),
+        user_type=user_type,
+    )
+    fields.update(overrides)
+    return UserResponse(**fields)
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
@@ -99,39 +131,12 @@ async def get_users(request: Request, user: User = Depends(require_auth)):
             if user_doc.get("username") == "admin":
                 continue
                 
-            # Get user permissions
-            user_permissions = user_doc.get("permissions", {})
-            
             # Determine user type
             user_type = "local" if (user_doc.get("username") and not user_doc.get("username").startswith("google_")) else "google"
-            
-            # Add user to the list
-            users.append(UserResponse(
-                id=str(user_doc.get("_id")),
-                username=user_doc.get("username", ""),
-                email=user_doc.get("email"),
-                telegram_user_id=user_doc.get("telegram_user_id"),
-                telegram_username=user_doc.get("telegram_username"),
-                permissions=UserPermission(
-                    read=user_permissions.get("read", True),
-                    write=user_permissions.get("write", False)
-                ),
-                created_at=user_doc.get("created_at", datetime.datetime.now().strftime("%Y-%m-%d")),
-                user_type=user_type
-            ))        
+            users.append(_user_response(user_doc, str(user_doc.get("_id")), user_type))
         # Add admin user with full details
-        admin_user = database.Users.getUser("admin")
-        users.insert(0, UserResponse(
-            id="1",
-            username="admin",
-            email=admin_user.get("email") if admin_user else "admin@example.com",
-            telegram_user_id=admin_user.get("telegram_user_id") if admin_user else None,
-            telegram_username=admin_user.get("telegram_username") if admin_user else None,
-            permissions=UserPermission(read=True, write=True),
-            created_at=admin_user.get("created_at", "2023-01-01") if admin_user else "2023-01-01",
-            last_active=admin_user.get("last_active", "2023-12-01") if admin_user else "2023-12-01",
-            user_type="local"
-        ))        
+        admin_user = database.Users.getUser("admin") or {}
+        users.insert(0, _user_response({**admin_user, "username": "admin"}, "1", "local"))
         return UsersResponse(users=users)
     except HTTPException:
         raise
@@ -139,6 +144,7 @@ async def get_users(request: Request, user: User = Depends(require_auth)):
         logger.error(f"Error fetching users: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("", response_model=UserResponse)
 @router.post("/", response_model=UserResponse)
 async def add_user(request: Request, user_request: AddUserRequest, user: User = Depends(require_auth)):
     """
@@ -194,32 +200,20 @@ async def add_user(request: Request, user_request: AddUserRequest, user: User = 
         
         # Save user to database
         user_id_for_db = user_request.username if user_request.username else f"google_{user_request.email}"
+        # SaveUser skips usernames it saved earlier in this process (e.g. a user deleted and added again)
+        database.Users.user_cache.discard(user_id_for_db)
         save_result = database.Users.SaveUser(
             username=user_id_for_db,
             password_hash=password_hash,
             email=user_request.email
         )
         
-        # Save permissions
-        permissions_dict = {
-            "read": user_request.permissions.read,
-            "write": user_request.permissions.write
-        }
-        database.Users.update_permissions(user_id_for_db, permissions_dict)
-        
-        # Determine user type
+        database.Users.update_user_by_identifier(user_id_for_db, {"active": True, "can_upload": user_request.can_upload})
+
         user_type = "local" if user_request.username else "google"
-        
-        # Create response
-        new_user = UserResponse(
-            id=str(save_result.inserted_id) if save_result else "unknown",
-            username=user_request.username or "",
-            email=user_request.email,
-            permissions=user_request.permissions,
-            created_at=datetime.datetime.now().strftime("%Y-%m-%d"),
-            user_type=user_type
-        )
-        
+        new_doc = database.Users.getUser(user_id_for_db) or {"username": user_id_for_db, "email": user_request.email}
+        new_user = _user_response(new_doc, str(save_result.inserted_id) if save_result else "unknown", user_type,
+                                  username=user_request.username or "", active=True, can_upload=user_request.can_upload)
         return new_user
     except HTTPException:
         raise
@@ -251,45 +245,24 @@ async def update_user(request: Request, user_id_param: str, user_request: Update
         if not current_user:
             raise HTTPException(status_code=404, detail="User not found")
         
-        # Prepare update data
+        if is_owner_account(current_user.get("username"), current_user) and (user_request.active is False or user_request.can_upload is False):
+            raise HTTPException(status_code=400, detail="The owner account can't be turned off or limited.")
+
         update_data = {}
-        
-        # Update user email in database
         if user_request.email:
             update_data["email"] = user_request.email
-        
-        # Update user in database
+        if user_request.active is not None:
+            update_data["active"] = user_request.active
+        if user_request.can_upload is not None:
+            update_data["can_upload"] = user_request.can_upload
         if update_data:
             success = database.Users.update_user_by_identifier(user_id_param, update_data)
             if not success:
                 raise HTTPException(status_code=500, detail="Failed to update user")
-        
-        # Update user permissions in database
-        permissions_dict = {
-            "read": user_request.permissions.read,
-            "write": user_request.permissions.write
-        }
-        database.Users.update_permissions(current_user.get("username"), permissions_dict)
-        
-        # Get updated user data
-        updated_user_data = database.Users.get_user_by_identifier(user_id_param)
-        
-        # Determine user type based on whether username exists
-        user_type = "local" if (updated_user_data and updated_user_data.get("username") and not updated_user_data.get("username").startswith("google_")) else "google"
-        
-        updated_user = UserResponse(
-            id=user_id_param,
-            username=updated_user_data.get("username", "Unknown") if updated_user_data else "Unknown",
-            email=user_request.email or (updated_user_data.get("email") if updated_user_data else None),
-            permissions=UserPermission(
-                read=user_request.permissions.read,
-                write=user_request.permissions.write
-            ),
-            created_at=updated_user_data.get("created_at", datetime.datetime.now().strftime("%Y-%m-%d")) if updated_user_data else datetime.datetime.now().strftime("%Y-%m-%d"),
-            last_active=updated_user_data.get("last_active") if updated_user_data else None,
-            user_type=user_type
-        )
-        
+
+        updated = database.Users.get_user_by_identifier(user_id_param) or current_user
+        user_type = "local" if (updated.get("username") and not updated.get("username").startswith("google_")) else "google"
+        updated_user = _user_response(updated, user_id_param, user_type)
         return updated_user
     except HTTPException:
         raise

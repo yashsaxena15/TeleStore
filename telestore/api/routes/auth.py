@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request, HTTPException, status
 from pydantic import BaseModel
 import secrets
 
-from telestore.security.credentials import check_login, verify_google_token
+from telestore.security.credentials import ACCOUNT_DISABLED, account_flags, check_login, verify_google_token
 from telestore.security.attempt_limiter import TooManyAttempts, wait_message
 
 from telestore.db import database
@@ -37,6 +37,9 @@ async def login_post_route(request: Request, login_data: LoginRequest):
         )
     logger.info(f"Credentials verification result: {is_valid}")
     
+    if is_valid and not account_flags(login_data.username, database.Users.getUser(login_data.username))[0]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNT_DISABLED)
+
     if is_valid:
         request.session["authenticated"] = True
         request.session["username"] = login_data.username
@@ -74,6 +77,8 @@ async def login_post_route(request: Request, login_data: LoginRequest):
 @router.post("/google")
 async def google_login_route(request: Request, login_data: GoogleLoginRequest):
     user_info = verify_google_token(login_data.token)
+    if user_info and not account_flags(user_info["name"], database.Users.getUser(user_info["name"]))[0]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNT_DISABLED)
     if user_info:
         request.session["authenticated"] = True
         request.session["user_email"] = user_info["email"]

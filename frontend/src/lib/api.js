@@ -198,13 +198,17 @@ const withToken = (url) => {
     return token ? `${url}?token=${enc(token)}` : url;
 };
 
-const mapUser = (user) => ({
+export const mapUser = (user) => ({
     id: user.id,
     username: user.username,
     email: user.email,
     telegramUserId: user.telegram_user_id,
     telegramUsername: user.telegram_username,
-    permissions: user.permissions,
+    active: user.active !== false,
+    canUpload: user.can_upload !== false,
+    isOwner: Boolean(user.is_owner),
+    hasTelegram: Boolean(user.has_telegram),
+    hasIndexChat: Boolean(user.has_index_chat),
     createdAt: user.created_at,
     lastActive: user.last_active,
     userType: user.user_type,
