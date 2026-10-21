@@ -76,6 +76,8 @@ export const MediaPlayer = ({
     const lastTapZoneRef = useRef("center");
     const retryCountRef = useRef(0);
     const userPausedRef = useRef(false);
+    // Autoplay happens once per stream; later "canplay" events (after buffering or a seek) must not restart a paused video
+    const autoplayedRef = useRef(false);
     // Playback states
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
@@ -326,7 +328,8 @@ export const MediaPlayer = ({
         setHasPlaybackError(false);
         if (modeSwitchRef.current) {
             resumeAfterModeSwitch();
-        } else if (shouldAutoplayOnBufferReady(userPausedRef.current, mediaElementRef.current?.paused ?? false, true)) {
+        } else if (!autoplayedRef.current && shouldAutoplayOnBufferReady(userPausedRef.current, mediaElementRef.current?.paused ?? false, true)) {
+            autoplayedRef.current = true;
             mediaElementRef.current?.play().then(() => {
                 setIsPlaying(true);
             }).catch((err) => {
@@ -355,14 +358,20 @@ export const MediaPlayer = ({
     // Autoplay when stream URL changes and media element buffer is ready
     useEffect(() => {
         userPausedRef.current = false;
+        autoplayedRef.current = false;
         const el = mediaElementRef.current;
         if (el && shouldAutoplayOnBufferReady(userPausedRef.current, el.paused, el.readyState)) {
+            autoplayedRef.current = true;
             el.play().then(() => setIsPlaying(true)).catch(() => { });
         }
     }, [activeStreamUrl]);
     // Starting audio pauses the video (one thing plays at a time)
     useEffect(() => {
-        const pause = () => mediaElementRef.current?.pause();
+        const pause = () => {
+            // Counts as the user pausing, so buffering can't start the video again under the audio
+            userPausedRef.current = true;
+            mediaElementRef.current?.pause();
+        };
         window.addEventListener("telestore:pause-video", pause);
         return () => window.removeEventListener("telestore:pause-video", pause);
     }, []);
