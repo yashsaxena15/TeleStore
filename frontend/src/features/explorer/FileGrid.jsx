@@ -1627,12 +1627,12 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
                     return;
                 }
                 // If we get here, we couldn't process any files
-                alert('Unable to process the dropped files. Please try dragging files directly from your file manager.');
+                toast.error("Unable to process the dropped files. Please try dragging files directly from your file manager.");
                 return;
             }
         }
         catch (error) {
-            alert('Failed to handle file drop. Please try again.');
+            toast.error("Failed to handle file drop. Please try again.");
         }
     };
     // Process items with modern FileSystemHandle API
@@ -1843,7 +1843,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
         catch (error) {
             // Clear drag state on error
             setDraggedItem(null);
-            alert('Failed to move item. Please try again.');
+            toast.error("Failed to move item. Please try again.");
         }
     };
     const getFileIcon = (item) => {

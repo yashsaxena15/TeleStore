@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { getApiBaseUrl, fetchWithTimeout } from "@/lib/api";
@@ -37,7 +38,7 @@ export const TelegramVerificationDialog = ({ open, onOpenChange, onVerificationC
         }
         catch (error) {
             logger.error("Failed to generate Telegram verification link", error);
-            alert("Failed to generate verification link. Please try again.");
+            toast.error("Failed to generate verification link. Please try again.");
         }
         finally {
             setIsGeneratingLink(false);

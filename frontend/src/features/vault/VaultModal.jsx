@@ -257,24 +257,24 @@ export const VaultModal = ({ isOpen, onClose, onSuccess, userEmail = "" }) => {
         }
     };
     return (<Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-md bg-slate-900/95 backdrop-blur-xl border border-slate-700/80 text-white rounded-2xl shadow-2xl p-6 sm:p-8">
+      <DialogContent className="max-w-md bg-card backdrop-blur-xl border border-border text-foreground rounded-2xl shadow-2xl p-6 sm:p-8">
         
         {/* LOADING STATE */}
         {mode === "loading" && (<div className="flex flex-col items-center justify-center py-12 space-y-4">
-            <Loader2 className="w-10 h-10 text-cyan-400 animate-spin"/>
-            <p className="text-slate-400 text-sm">Checking Vault status...</p>
+            <Loader2 className="w-10 h-10 text-primary animate-spin"/>
+            <p className="text-muted-foreground text-sm">Checking Vault status...</p>
           </div>)}
 
         {/* 1. UNLOCK KEYPAD VIEW */}
         {mode === "unlock" && (<div className={`space-y-6 text-center ${shake ? "animate-shake" : ""}`}>
             <div className="flex flex-col items-center">
-              <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center mb-3">
-                <Lock className="w-7 h-7 text-cyan-400"/>
+              <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/30 flex items-center justify-center mb-3">
+                <Lock className="w-7 h-7 text-primary"/>
               </div>
-              <DialogTitle className="text-2xl font-bold text-white tracking-tight">
+              <DialogTitle className="text-2xl font-bold text-foreground tracking-tight">
                 Private Vault
               </DialogTitle>
-              <DialogDescription className="text-slate-400 text-sm mt-1">
+              <DialogDescription className="text-muted-foreground text-sm mt-1">
                 Enter your 4-digit PIN to access encrypted files
               </DialogDescription>
             </div>
@@ -284,36 +284,36 @@ export const VaultModal = ({ isOpen, onClose, onSuccess, userEmail = "" }) => {
               {[0, 1, 2, 3].map((index) => {
                 const filled = unlockPin.length > index;
                 return (<div key={index} className={`w-4 h-4 rounded-full transition-all duration-200 ${filled
-                        ? "bg-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.7)] scale-110"
-                        : "border-2 border-slate-600 bg-slate-800/80"}`}/>);
+                        ? "bg-primary shadow-[0_0_12px_rgba(34,211,238,0.7)] scale-110"
+                        : "border-2 border-border bg-muted"}`}/>);
             })}
             </div>
 
             {/* ERROR MESSAGE */}
-            {errorMsg && (<div className="flex items-center justify-center gap-2 text-rose-400 text-xs font-medium bg-rose-500/10 border border-rose-500/20 py-2 px-3 rounded-lg">
+            {errorMsg && (<div className="flex items-center justify-center gap-2 text-destructive text-xs font-medium bg-destructive/10 border border-destructive/20 py-2 px-3 rounded-lg">
                 <AlertCircle className="w-4 h-4 shrink-0"/>
                 <span>{errorMsg}</span>
               </div>)}
 
             {/* NUMERICAL KEYPAD */}
             <div className="grid grid-cols-3 gap-3 max-w-[260px] mx-auto pt-2">
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (<button key={num} type="button" onClick={() => handlePinDigit(num.toString())} disabled={loading} className="h-14 rounded-xl bg-slate-800/60 hover:bg-slate-700/80 active:scale-95 transition-all text-xl font-semibold text-slate-100 flex items-center justify-center border border-slate-700/50 shadow-sm">
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (<button key={num} type="button" onClick={() => handlePinDigit(num.toString())} disabled={loading} className="h-14 rounded-xl bg-muted/60 hover:bg-muted/80 active:scale-95 transition-all text-xl font-semibold text-foreground flex items-center justify-center border border-border shadow-sm">
                   {num}
                 </button>))}
-              <button type="button" onClick={() => setUnlockPin("")} disabled={loading || unlockPin.length === 0} className="h-14 rounded-xl hover:bg-slate-800/40 text-xs font-medium text-slate-400 hover:text-slate-200 flex items-center justify-center transition-all">
+              <button type="button" onClick={() => setUnlockPin("")} disabled={loading || unlockPin.length === 0} className="h-14 rounded-xl hover:bg-muted/40 text-xs font-medium text-muted-foreground hover:text-foreground flex items-center justify-center transition-all">
                 Clear
               </button>
-              <button type="button" onClick={() => handlePinDigit("0")} disabled={loading} className="h-14 rounded-xl bg-slate-800/60 hover:bg-slate-700/80 active:scale-95 transition-all text-xl font-semibold text-slate-100 flex items-center justify-center border border-slate-700/50 shadow-sm">
+              <button type="button" onClick={() => handlePinDigit("0")} disabled={loading} className="h-14 rounded-xl bg-muted/60 hover:bg-muted/80 active:scale-95 transition-all text-xl font-semibold text-foreground flex items-center justify-center border border-border shadow-sm">
                 0
               </button>
-              <button type="button" onClick={handlePinBackspace} disabled={loading || unlockPin.length === 0} className="h-14 rounded-xl hover:bg-slate-800/60 text-slate-400 hover:text-slate-200 flex items-center justify-center transition-all">
+              <button type="button" onClick={handlePinBackspace} disabled={loading || unlockPin.length === 0} className="h-14 rounded-xl hover:bg-muted/60 text-muted-foreground hover:text-foreground flex items-center justify-center transition-all">
                 <Delete className="w-5 h-5"/>
               </button>
             </div>
 
             {/* FORGOT PIN ACTION */}
             <div className="pt-2">
-              <button type="button" onClick={handleRequestForgotPin} disabled={loading} className="text-xs text-cyan-400 hover:text-cyan-300 hover:underline transition-all">
+              <button type="button" onClick={handleRequestForgotPin} disabled={loading} className="text-xs text-primary hover:text-primary/80 hover:underline transition-all">
                 Forgot PIN? Reset via Email OTP
               </button>
             </div>
@@ -322,36 +322,36 @@ export const VaultModal = ({ isOpen, onClose, onSuccess, userEmail = "" }) => {
         {/* 2. SETUP STEP 1: ENTER RECOVERY EMAIL */}
         {mode === "setup_email" && (<form onSubmit={handleRequestSetupOtp} className="space-y-5">
             <div className="flex flex-col items-center text-center">
-              <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center mb-3">
-                <ShieldCheck className="w-7 h-7 text-cyan-400"/>
+              <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/30 flex items-center justify-center mb-3">
+                <ShieldCheck className="w-7 h-7 text-primary"/>
               </div>
-              <DialogTitle className="text-xl font-bold text-white">
+              <DialogTitle className="text-xl font-bold text-foreground">
                 Set Up Private Vault
               </DialogTitle>
-              <DialogDescription className="text-slate-400 text-sm mt-1">
+              <DialogDescription className="text-muted-foreground text-sm mt-1">
                 Zero-knowledge encrypted cloud storage. Please enter your recovery email to get started.
               </DialogDescription>
             </div>
 
-            {errorMsg && (<div className="text-rose-400 text-xs bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-lg flex items-center gap-2">
+            {errorMsg && (<div className="text-destructive text-xs bg-destructive/10 border border-destructive/20 p-2.5 rounded-lg flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0"/>
                 <span>{errorMsg}</span>
               </div>)}
 
             <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-300">
+              <label className="text-xs font-semibold text-foreground/80">
                 Recovery Email Address
               </label>
               <div className="relative">
-                <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"/>
-                <Input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" className="pl-9 bg-slate-800/80 border-slate-700 text-white placeholder:text-slate-500 rounded-xl"/>
+                <Mail className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2"/>
+                <Input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" className="pl-9 bg-muted border-border text-foreground placeholder:text-muted-foreground rounded-xl"/>
               </div>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-[11px] text-muted-foreground">
                 If you ever forget your PIN, a one-time code will be dispatched to this verified address.
               </p>
             </div>
 
-            <Button type="submit" disabled={loading || !email} className="w-full bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-semibold py-2.5 rounded-xl transition-all shadow-lg shadow-cyan-500/20">
+            <Button type="submit" disabled={loading || !email} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-2.5 rounded-xl transition-all shadow-lg shadow-primary/20">
               {loading ? (<>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin"/> Sending Code...
                 </>) : ("Send Verification Code")}
@@ -361,31 +361,31 @@ export const VaultModal = ({ isOpen, onClose, onSuccess, userEmail = "" }) => {
         {/* 3. SETUP STEP 2: VERIFY EMAIL OTP */}
         {mode === "setup_otp" && (<form onSubmit={handleVerifySetupOtp} className="space-y-5">
             <div className="flex flex-col items-center text-center">
-              <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center mb-3">
-                <Mail className="w-7 h-7 text-cyan-400"/>
+              <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/30 flex items-center justify-center mb-3">
+                <Mail className="w-7 h-7 text-primary"/>
               </div>
-              <DialogTitle className="text-xl font-bold text-white">
+              <DialogTitle className="text-xl font-bold text-foreground">
                 Verify Your Email
               </DialogTitle>
-              <DialogDescription className="text-slate-400 text-sm mt-1">
-                Enter the 6-digit code sent to <strong className="text-cyan-400">{email}</strong>
+              <DialogDescription className="text-muted-foreground text-sm mt-1">
+                Enter the 6-digit code sent to <strong className="text-primary">{email}</strong>
               </DialogDescription>
             </div>
 
-            {errorMsg && (<div className="text-rose-400 text-xs bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-lg flex items-center gap-2">
+            {errorMsg && (<div className="text-destructive text-xs bg-destructive/10 border border-destructive/20 p-2.5 rounded-lg flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0"/>
                 <span>{errorMsg}</span>
               </div>)}
 
             <div className="space-y-2 text-center">
-              <Input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6} autoFocus required value={otpCode} onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="123456" className="text-center tracking-[8px] font-mono text-2xl font-bold bg-slate-800/80 border-slate-700 text-cyan-400 rounded-xl py-3"/>
+              <Input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6} autoFocus required value={otpCode} onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="123456" className="text-center tracking-[8px] font-mono text-2xl font-bold bg-muted border-border text-primary rounded-xl py-3"/>
             </div>
 
             <div className="flex gap-2">
-              <Button type="button" variant="outline" onClick={() => setMode("setup_email")} className="w-1/3 border-slate-700 hover:bg-slate-800 text-slate-300 rounded-xl">
+              <Button type="button" variant="outline" onClick={() => setMode("setup_email")} className="w-1/3 border-border hover:bg-muted text-foreground/80 rounded-xl">
                 <ArrowLeft className="w-4 h-4 mr-1"/> Back
               </Button>
-              <Button type="submit" disabled={otpCode.length !== 6} className="w-2/3 bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-semibold rounded-xl">
+              <Button type="submit" disabled={otpCode.length !== 6} className="w-2/3 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-xl">
                 Continue
               </Button>
             </div>
@@ -394,39 +394,39 @@ export const VaultModal = ({ isOpen, onClose, onSuccess, userEmail = "" }) => {
         {/* 4. SETUP STEP 3: SET 4-DIGIT PIN */}
         {mode === "setup_pin" && (<form onSubmit={handleCompleteSetup} className="space-y-5">
             <div className="flex flex-col items-center text-center">
-              <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center mb-3">
-                <KeyRound className="w-7 h-7 text-cyan-400"/>
+              <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/30 flex items-center justify-center mb-3">
+                <KeyRound className="w-7 h-7 text-primary"/>
               </div>
-              <DialogTitle className="text-xl font-bold text-white">
+              <DialogTitle className="text-xl font-bold text-foreground">
                 Set Your 4-Digit PIN
               </DialogTitle>
-              <DialogDescription className="text-slate-400 text-sm mt-1">
+              <DialogDescription className="text-muted-foreground text-sm mt-1">
                 You will use this PIN every time you unlock your Vault.
               </DialogDescription>
             </div>
 
-            {errorMsg && (<div className="text-rose-400 text-xs bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-lg flex items-center gap-2">
+            {errorMsg && (<div className="text-destructive text-xs bg-destructive/10 border border-destructive/20 p-2.5 rounded-lg flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0"/>
                 <span>{errorMsg}</span>
               </div>)}
 
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                <label className="text-xs font-semibold text-foreground/80 block mb-1.5">
                   Enter 4-Digit PIN
                 </label>
-                <Input type="password" inputMode="numeric" maxLength={4} required value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="••••" className="text-center font-mono tracking-[12px] text-xl bg-slate-800/80 border-slate-700 text-white rounded-xl"/>
+                <Input type="password" inputMode="numeric" maxLength={4} required value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="••••" className="text-center font-mono tracking-[12px] text-xl bg-muted border-border text-foreground rounded-xl"/>
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                <label className="text-xs font-semibold text-foreground/80 block mb-1.5">
                   Confirm 4-Digit PIN
                 </label>
-                <Input type="password" inputMode="numeric" maxLength={4} required value={confirmPin} onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="••••" className="text-center font-mono tracking-[12px] text-xl bg-slate-800/80 border-slate-700 text-white rounded-xl"/>
+                <Input type="password" inputMode="numeric" maxLength={4} required value={confirmPin} onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="••••" className="text-center font-mono tracking-[12px] text-xl bg-muted border-border text-foreground rounded-xl"/>
               </div>
             </div>
 
-            <Button type="submit" disabled={loading || pin.length !== 4 || confirmPin.length !== 4} className="w-full bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-semibold py-2.5 rounded-xl shadow-lg shadow-cyan-500/20">
+            <Button type="submit" disabled={loading || pin.length !== 4 || confirmPin.length !== 4} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-2.5 rounded-xl shadow-lg shadow-primary/20">
               {loading ? (<>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin"/> Creating Encrypted Vault...
                 </>) : ("Finish & Open Vault")}
@@ -439,25 +439,25 @@ export const VaultModal = ({ isOpen, onClose, onSuccess, userEmail = "" }) => {
               <div className="w-14 h-14 rounded-2xl bg-warning/10 border border-warning/30 flex items-center justify-center mb-3">
                 <RefreshCw className="w-7 h-7 text-warning"/>
               </div>
-              <DialogTitle className="text-xl font-bold text-white">
+              <DialogTitle className="text-xl font-bold text-foreground">
                 Reset Vault PIN
               </DialogTitle>
-              <DialogDescription className="text-slate-400 text-sm mt-1">
+              <DialogDescription className="text-muted-foreground text-sm mt-1">
                 Enter the 6-digit code sent to <strong className="text-warning">{maskedEmail}</strong>
               </DialogDescription>
             </div>
 
-            {errorMsg && (<div className="text-rose-400 text-xs bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-lg flex items-center gap-2">
+            {errorMsg && (<div className="text-destructive text-xs bg-destructive/10 border border-destructive/20 p-2.5 rounded-lg flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0"/>
                 <span>{errorMsg}</span>
               </div>)}
 
             <div className="space-y-2 text-center">
-              <Input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6} autoFocus required value={otpCode} onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="123456" className="text-center tracking-[8px] font-mono text-2xl font-bold bg-slate-800/80 border-slate-700 text-warning rounded-xl py-3"/>
+              <Input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6} autoFocus required value={otpCode} onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="123456" className="text-center tracking-[8px] font-mono text-2xl font-bold bg-muted border-border text-warning rounded-xl py-3"/>
             </div>
 
             <div className="flex gap-2">
-              <Button type="button" variant="outline" onClick={() => setMode("unlock")} className="w-1/3 border-slate-700 hover:bg-slate-800 text-slate-300 rounded-xl">
+              <Button type="button" variant="outline" onClick={() => setMode("unlock")} className="w-1/3 border-border hover:bg-muted text-foreground/80 rounded-xl">
                 <ArrowLeft className="w-4 h-4 mr-1"/> Back
               </Button>
               <Button type="submit" disabled={otpCode.length !== 6} className="w-2/3 bg-warning hover:bg-warning/90 text-warning-foreground font-semibold rounded-xl">
@@ -469,39 +469,39 @@ export const VaultModal = ({ isOpen, onClose, onSuccess, userEmail = "" }) => {
         {/* 6. FORGOT PIN STEP 2: ENTER NEW PIN */}
         {mode === "forgot_new_pin" && (<form onSubmit={handleCompleteResetPin} className="space-y-5">
             <div className="flex flex-col items-center text-center">
-              <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center mb-3">
-                <KeyRound className="w-7 h-7 text-cyan-400"/>
+              <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/30 flex items-center justify-center mb-3">
+                <KeyRound className="w-7 h-7 text-primary"/>
               </div>
-              <DialogTitle className="text-xl font-bold text-white">
+              <DialogTitle className="text-xl font-bold text-foreground">
                 Enter New 4-Digit PIN
               </DialogTitle>
-              <DialogDescription className="text-slate-400 text-sm mt-1">
+              <DialogDescription className="text-muted-foreground text-sm mt-1">
                 Your existing files will remain 100% safe and intact.
               </DialogDescription>
             </div>
 
-            {errorMsg && (<div className="text-rose-400 text-xs bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-lg flex items-center gap-2">
+            {errorMsg && (<div className="text-destructive text-xs bg-destructive/10 border border-destructive/20 p-2.5 rounded-lg flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0"/>
                 <span>{errorMsg}</span>
               </div>)}
 
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                <label className="text-xs font-semibold text-foreground/80 block mb-1.5">
                   New 4-Digit PIN
                 </label>
-                <Input type="password" inputMode="numeric" maxLength={4} required value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="••••" className="text-center font-mono tracking-[12px] text-xl bg-slate-800/80 border-slate-700 text-white rounded-xl"/>
+                <Input type="password" inputMode="numeric" maxLength={4} required value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="••••" className="text-center font-mono tracking-[12px] text-xl bg-muted border-border text-foreground rounded-xl"/>
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                <label className="text-xs font-semibold text-foreground/80 block mb-1.5">
                   Confirm New PIN
                 </label>
-                <Input type="password" inputMode="numeric" maxLength={4} required value={confirmPin} onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="••••" className="text-center font-mono tracking-[12px] text-xl bg-slate-800/80 border-slate-700 text-white rounded-xl"/>
+                <Input type="password" inputMode="numeric" maxLength={4} required value={confirmPin} onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="••••" className="text-center font-mono tracking-[12px] text-xl bg-muted border-border text-foreground rounded-xl"/>
               </div>
             </div>
 
-            <Button type="submit" disabled={loading || pin.length !== 4 || confirmPin.length !== 4} className="w-full bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-semibold py-2.5 rounded-xl shadow-lg shadow-cyan-500/20">
+            <Button type="submit" disabled={loading || pin.length !== 4 || confirmPin.length !== 4} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-2.5 rounded-xl shadow-lg shadow-primary/20">
               {loading ? (<>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin"/> Updating PIN...
                 </>) : ("Save New PIN & Unlock")}

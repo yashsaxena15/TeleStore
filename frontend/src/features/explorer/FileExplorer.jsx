@@ -39,6 +39,8 @@ import { settingsUrl } from "@/features/settings/settingsTabs";
 const SettingsContent = lazy(() => import("@/features/settings/SettingsContent").then((m) => ({ default: m.SettingsContent })));
 const StorageAnalyticsContent = lazy(() => import("@/features/storage/StorageAnalyticsContent").then((m) => ({ default: m.StorageAnalyticsContent })));
 const PanelLoading = () => (<div className="flex flex-1 items-center justify-center p-10 text-sm text-muted-foreground">Loading…</div>);
+// Addresses that open a page instead of a folder
+const APP_PAGE_PATHS = new Set(["/settings", "/profile", "/users", "/storage", "/transfers", "/downloads", "/login"]);
 export const FileExplorer = () => {
     const location = useLocation();
     const navigate = useNavigate(); // Add navigate hook
@@ -46,8 +48,8 @@ export const FileExplorer = () => {
     const { showError } = useError(); // Use the error context
     // Initialize currentPath from URL or localStorage or default to ["Home"]
     const [currentPath, setCurrentPath] = useState(() => {
-        // First check if we have a path in the URL
-        if (location.pathname && location.pathname !== "/") {
+        // First check if we have a path in the URL (app pages like /settings are not folders)
+        if (location.pathname && location.pathname !== "/" && !APP_PAGE_PATHS.has(location.pathname)) {
             // Split the path and filter out empty segments
             const pathSegments = location.pathname.split('/').filter(segment => segment.length > 0);
             if (pathSegments.length > 0) {
@@ -192,7 +194,7 @@ export const FileExplorer = () => {
             if (event.state && event.state.path) {
                 setCurrentPath(event.state.path);
             }
-            else {
+            else if (!APP_PAGE_PATHS.has(window.location.pathname)) {
                 // Parse the path from the URL
                 const pathSegments = window.location.pathname.split('/').filter(segment => segment.length > 0);
                 if (pathSegments.length === 0) {

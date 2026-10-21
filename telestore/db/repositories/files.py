@@ -665,7 +665,10 @@ class Files(Collection):
 
             total_files += 1
             total_bytes += f_size
-            active_files.append(item)
+            # Vault files count toward totals but are never listed by name outside the vault
+            f_path = str(item.get("file_path") or "")
+            if not (item.get("is_vault") or f_path == "/Vault" or f_path.startswith("/Vault/")):
+                active_files.append(item)
 
             if f_type == "video" or ext in video_exts:
                 categories["video"]["count"] += 1

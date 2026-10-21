@@ -407,7 +407,7 @@ export const StorageAnalyticsContent = ({
                               <span className="font-medium text-xs text-foreground truncate">{cat.label}</span>
                             </div>
                           </TableCell>
-                          <TableCell className="py-2.5 px-3 sm:px-4 text-xs font-mono font-medium text-foreground text-right">
+                          <TableCell className="py-2.5 px-3 sm:px-4 text-xs font-mono font-medium text-foreground text-right whitespace-nowrap">
                             {formatBytes(cat.bytes)}
                           </TableCell>
                           <TableCell className="py-2.5 px-3 sm:px-4 text-xs text-muted-foreground text-right">
@@ -528,7 +528,7 @@ export const StorageAnalyticsContent = ({
                       </Badge>
                     </CardTitle>
                     <CardDescription className="text-xs">
-                      Persistent 25 GB local SSD chunk cache enabling instant playback start and lag-free 10s seeking for WebDAV &amp; web streaming.
+                      Persistent {cacheStats?.max_size_formatted || "25 GB"} local SSD chunk cache enabling instant playback start and lag-free 10s seeking for WebDAV &amp; web streaming.
                     </CardDescription>
                   </div>
 

@@ -91,26 +91,20 @@ export const MediaPlayerProvider = ({ children }) => {
     };
 
     const playNextVideo = useCallback(() => {
-        setCurrentVideoIndex((prevIdx) => {
-            const nextIdx = getNextVideoIndex(prevIdx, videoPlaylist.length);
-            if (nextIdx !== null && videoPlaylist[nextIdx]) {
-                setCurrentMedia(videoPlaylist[nextIdx]);
-                return nextIdx;
-            }
-            return prevIdx;
-        });
-    }, [videoPlaylist]);
+        const nextIdx = getNextVideoIndex(currentVideoIndex, videoPlaylist.length);
+        if (nextIdx !== null && videoPlaylist[nextIdx]) {
+            setCurrentVideoIndex(nextIdx);
+            setCurrentMedia(videoPlaylist[nextIdx]);
+        }
+    }, [currentVideoIndex, videoPlaylist]);
 
     const playPrevVideo = useCallback(() => {
-        setCurrentVideoIndex((prevIdx) => {
-            const prevTargetIdx = getPrevVideoIndex(prevIdx);
-            if (prevTargetIdx !== null && videoPlaylist[prevTargetIdx]) {
-                setCurrentMedia(videoPlaylist[prevTargetIdx]);
-                return prevTargetIdx;
-            }
-            return prevIdx;
-        });
-    }, [videoPlaylist]);
+        const prevIdx = getPrevVideoIndex(currentVideoIndex);
+        if (prevIdx !== null && videoPlaylist[prevIdx]) {
+            setCurrentVideoIndex(prevIdx);
+            setCurrentMedia(videoPlaylist[prevIdx]);
+        }
+    }, [currentVideoIndex, videoPlaylist]);
 
     const playVideoAtIndex = useCallback((idx) => {
         if (idx >= 0 && idx < videoPlaylist.length && videoPlaylist[idx]) {

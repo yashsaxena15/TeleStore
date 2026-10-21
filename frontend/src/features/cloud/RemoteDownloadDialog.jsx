@@ -136,7 +136,7 @@ export const RemoteDownloadDialog = ({ isOpen, onClose, defaultPath = "/Home", }
         }} className={`flex items-center justify-center gap-2 py-1.5 px-3 rounded-md transition-all ${mode === "torrent"
             ? "bg-background text-foreground shadow-sm"
             : "text-muted-foreground hover:text-foreground"}`}>
-                <FileUp className="w-3.5 h-3.5 text-purple-500"/>
+                <FileUp className="w-3.5 h-3.5 text-cloud"/>
                 <span>.torrent File</span>
               </button>
             </div>
@@ -147,7 +147,7 @@ export const RemoteDownloadDialog = ({ isOpen, onClose, defaultPath = "/Home", }
                   <Label htmlFor="remote-url" className="text-xs font-semibold">
                     Google Drive, Direct Link, or Magnet URL
                   </Label>
-                  {isMagnetLink && (<span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-600 dark:text-purple-400 font-semibold flex items-center gap-1 border border-purple-500/20">
+                  {isMagnetLink && (<span className="text-[10px] px-1.5 py-0.5 rounded bg-cloud/15 text-cloud font-semibold flex items-center gap-1 border border-cloud/20">
                       <Magnet className="w-2.5 h-2.5"/> Magnet Detected
                     </span>)}
                 </div>
@@ -178,9 +178,9 @@ export const RemoteDownloadDialog = ({ isOpen, onClose, defaultPath = "/Home", }
                         All files and folders in the torrent will be downloaded and saved to your Telegram drive.
                       </p>
                     </div>
-                  </div>) : (<div className="flex items-center justify-between p-3 rounded-lg border border-purple-500/30 bg-purple-500/10">
+                  </div>) : (<div className="flex items-center justify-between p-3 rounded-lg border border-cloud/30 bg-cloud/10">
                     <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      <div className="p-2 rounded-lg bg-purple-500/20 text-purple-500 shrink-0">
+                      <div className="p-2 rounded-lg bg-cloud/20 text-cloud shrink-0">
                         <FileText className="w-4 h-4"/>
                       </div>
                       <div className="min-w-0 flex-1">
