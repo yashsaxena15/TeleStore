@@ -1,0 +1,95 @@
+// The right-click / ⋯ menu for an item or for empty space in the file grid.
+import { toast } from "sonner";
+import { api, fetchWithTimeout, getApiBaseUrl } from "@/lib/api";
+import { copyStreamUrl } from "@/lib/utils";
+import { trackArchiveTask } from "@/features/archives/archiveTracker";
+import { ContextMenu } from "../ContextMenu";
+import { isVideoItem } from "../fileTypes";
+import { getItemKey, isItemStarred } from "../lib/fileCardHelpers";
+
+export const GridContextMenu = ({ cloudAccountId, cloudFolderId, contextMenu, currentApiPath, currentPath, handleItemOpen, hasClipboard, isClipboardPasted, isCloudMode, isRestrictedEmptyArea, isTrashMode, isVaultMode, items, onCopy, onCut, onDelete, onDownload, onMoveToHome, onMoveToVault, onNewFolder, onPaste, onRefresh, onRename, onRestoreItem, onToggleStar, openDetails, selectedItems, setArchiveInspect, setCompressDialog, setContextMenu, triggerDirectoryUpload, triggerFileUpload }) => {
+    const cmExt = (contextMenu.item?.extension || contextMenu.item?.name?.split('.').pop() || '').toLowerCase();
+    const isArchiveItem = ['zip', 'tar', 'gz', 'bz2', 'xz', 'rar', '7z'].includes(cmExt);
+    const isVideo = contextMenu.item ? isVideoItem(contextMenu.item) : false;
+    const selectedCount = selectedItems.size > 0 ? selectedItems.size : 1;
+    return (<ContextMenu x={contextMenu.x} y={contextMenu.y} itemType={contextMenu.itemType} itemName={contextMenu.itemName} isVideo={isVideo} onCopyStreamUrl={() => {
+            if (!contextMenu.item)
+                return;
+            if (isCloudMode) {
+                const streamUrl = api.getCloudStreamUrl(cloudAccountId || contextMenu.item.cloud_account_id, contextMenu.item.cloud_file_id || contextMenu.item.id);
+                navigator.clipboard.writeText(streamUrl);
+                toast.success("Cloud streaming URL copied to clipboard");
+            }
+            else {
+                copyStreamUrl(contextMenu.item.name);
+            }
+        }} onOpen={() => contextMenu.item && handleItemOpen(contextMenu.item)} onCopy={() => {
+            if (!contextMenu.item)
+                return;
+            const itemKey = getItemKey(contextMenu.item);
+            if (selectedItems.size > 1 && selectedItems.has(itemKey)) {
+                const multi = items.filter(it => selectedItems.has(getItemKey(it)));
+                onCopy(multi);
+            }
+            else {
+                onCopy(contextMenu.item);
+            }
+        }} onCut={() => {
+            if (!contextMenu.item)
+                return;
+            const itemKey = getItemKey(contextMenu.item);
+            if (selectedItems.size > 1 && selectedItems.has(itemKey)) {
+                const multi = items.filter(it => selectedItems.has(getItemKey(it)));
+                onCut(multi);
+            }
+            else {
+                onCut(contextMenu.item);
+            }
+        }} onPaste={onPaste} onDelete={() => contextMenu.item && onDelete(contextMenu.item, contextMenu.index)} onRename={() => contextMenu.item && onRename(contextMenu.item, contextMenu.index)} onNewFolder={onNewFolder} onDownload={() => contextMenu.item && onDownload(contextMenu.item)} onUploadFiles={triggerFileUpload} // Use the trigger function
+     onUploadFolder={triggerDirectoryUpload} // Use the trigger function
+     onClose={() => setContextMenu(null)} hasClipboard={hasClipboard} isClipboardPasted={isClipboardPasted} disableDelete={
+        // Disable delete for specific virtual folders in Home
+        Boolean(currentPath && currentPath.length === 1 &&
+            currentPath[0] === "Home" &&
+            ["Images", "Documents", "Audio", "Voice Messages", "Videos"].includes(contextMenu.itemName))} onProperties={() => contextMenu.item && openDetails(contextMenu.item)} isArchive={isArchiveItem} selectedCount={selectedCount} isVaultMode={isVaultMode} onMoveToVault={() => contextMenu.item && onMoveToVault?.(contextMenu.item)} onMoveToHome={() => contextMenu.item && onMoveToHome?.(contextMenu.item)} onInspectArchive={() => {
+            if (contextMenu.item) {
+                setArchiveInspect({
+                    fileId: getItemKey(contextMenu.item),
+                    fileName: contextMenu.item.name,
+                });
+            }
+        }} onExtractArchive={async () => {
+            if (contextMenu.item) {
+                const targetItem = contextMenu.item;
+                try {
+                    const baseUrl = getApiBaseUrl();
+                    const res = await fetchWithTimeout(`${baseUrl ? baseUrl : ""}/api/archive/extract`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            file_id: getItemKey(targetItem),
+                            target_path: currentApiPath || (currentPath ? `/${currentPath.join('/')}` : "/Home")
+                        })
+                    }, 15000);
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        throw new Error(err.detail || `Extraction request failed (${res.status})`);
+                    }
+                    const data = await res.json();
+                    if (data.task_id) {
+                        trackArchiveTask(data.task_id, "extract", targetItem.name, onRefresh);
+                    }
+                    else {
+                        toast.success(`Extracted directly into Telegram cloud!`);
+                        if (onRefresh)
+                            onRefresh();
+                    }
+                }
+                catch (e) {
+                    toast.error(e.message || "Cloud extraction failed");
+                }
+            }
+        }} onCompress={() => {
+            setCompressDialog(true);
+        }} isStarred={isItemStarred(contextMenu.item)} onToggleStar={() => contextMenu.item && onToggleStar?.(contextMenu.item)} isTrashMode={isTrashMode || cloudFolderId === "trash" || Boolean(contextMenu.item?.is_trashed)} onRestore={() => contextMenu.item && onRestoreItem?.(contextMenu.item)} isCloudMode={isCloudMode} isVirtualFolder={Boolean(contextMenu.item?.is_virtual)} isRestrictedEmptyArea={isRestrictedEmptyArea} onRefresh={onRefresh}/>);
+};

@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
-import { useQueryClient, useQuery } from "@tanstack/react-query";
-import { useLocation, useParams, useNavigate } from "react-router-dom";
-import { isVideoItem, isPhotoItem, isAudioItem, isArchiveItem, isDocumentItem, } from "./fileTypes";
+import { useQuery } from "@tanstack/react-query";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useFiles } from "@/features/explorer/hooks/useFiles";
 import { useFileOperations } from "@/features/explorer/hooks/useFileOperations";
 import { toast } from "sonner";
@@ -10,58 +9,53 @@ import { MobileNav } from "@/components/layout/MobileNav";
 import { Dock } from "@/components/layout/dock/Dock";
 import { CommandPalette } from "@/components/layout/CommandPalette";
 import { ErrorBoundary } from "@/components/feedback/ErrorBoundary";
-import { ConnectCloudModal } from "@/features/cloud/ConnectCloudModal";
 import authService from "@/features/auth/authService";
 import { TopBar } from "@/components/layout/TopBar";
 import { FileGrid } from "./FileGrid";
 import { FilePagination } from "./FilePagination";
 import { DeleteDialog } from "@/features/explorer/dialogs/DeleteDialog";
 import { NewFolderDialog } from "@/features/explorer/dialogs/NewFolderDialog";
-import Transfers from "@/features/transfers/Transfers";
-import { getApiBaseUrl, fetchWithTimeout, api } from "@/lib/api";
+import { api } from "@/lib/api";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, } from "@/components/ui/alert-dialog";
 import logger from "@/lib/logger";
 import { SectionStatus } from "./SectionStatus";
-import { getSection, planMove } from "./lib/explorerItems";
-import { isItemStarred } from "./lib/fileCardHelpers";
-import { isSystemProtectedFolder } from "./lib/fileKeyboardNavigation";
+import { getSection } from "./lib/explorerItems";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { downloadManager } from "@/features/transfers/downloadManager";
-import { motion } from "framer-motion";
-import { useError } from "@/contexts/ErrorHandlerContext"; // Import the error context
-import { FolderDownloadDialog } from "@/features/explorer/dialogs/FolderDownloadDialog";
-import { WebDAVMountDialog } from "@/features/cloud/WebDAVMountDialog";
-import { VaultModal } from "@/features/vault/VaultModal";
-import { RemoteDownloadDialog } from "@/features/cloud/RemoteDownloadDialog";
 import { settingsUrl } from "@/features/settings/settingsTabs";
+import { pathFromUrl, segmentsFromFilePath, viewFromPathname } from "./lib/explorerRoutes";
+import { countByType, filterAndSortItems, mapCloudItems } from "./lib/itemFilters";
+import { createClipboardActions } from "./actions/clipboardActions";
+import { createBatchActions } from "./actions/batchActions";
+import { useVaultSession } from "./hooks/useVaultSession";
+import { createItemActions } from "./actions/itemActions";
+import { useExplorerHistory } from "./hooks/useExplorerHistory";
+
+// Pages fade in (same feel as before, without a motion library)
+const PAGE_CLASS = "flex-1 flex flex-col h-full min-h-0 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300";
 
 // Page panels are split into their own chunks and load when first shown
+// Pages and dialogs that are not needed on first load arrive when they are opened
+const Transfers = lazy(() => import("@/features/transfers/Transfers"));
+const ConnectCloudModal = lazy(() => import("@/features/cloud/ConnectCloudModal").then((m) => ({ default: m.ConnectCloudModal })));
+const FolderDownloadDialog = lazy(() => import("@/features/explorer/dialogs/FolderDownloadDialog").then((m) => ({ default: m.FolderDownloadDialog })));
+const WebDAVMountDialog = lazy(() => import("@/features/cloud/WebDAVMountDialog").then((m) => ({ default: m.WebDAVMountDialog })));
+const VaultModal = lazy(() => import("@/features/vault/VaultModal").then((m) => ({ default: m.VaultModal })));
+const RemoteDownloadDialog = lazy(() => import("@/features/cloud/RemoteDownloadDialog").then((m) => ({ default: m.RemoteDownloadDialog })));
+// Mounts a lazy dialog only while it is open
+const WhenOpen = ({ open, children }) => (open ? <Suspense fallback={null}>{children}</Suspense> : null);
 const SettingsContent = lazy(() => import("@/features/settings/SettingsContent").then((m) => ({ default: m.SettingsContent })));
 const StorageAnalyticsContent = lazy(() => import("@/features/storage/StorageAnalyticsContent").then((m) => ({ default: m.StorageAnalyticsContent })));
 const PanelLoading = () => (<div className="flex flex-1 items-center justify-center p-10 text-sm text-muted-foreground">Loading…</div>);
-// Addresses that open a page instead of a folder
-const APP_PAGE_PATHS = new Set(["/settings", "/profile", "/users", "/storage", "/transfers", "/downloads", "/login"]);
 export const FileExplorer = () => {
     const location = useLocation();
     const navigate = useNavigate(); // Add navigate hook
-    const { path } = useParams();
-    const { showError } = useError(); // Use the error context
     // Initialize currentPath from URL or localStorage or default to ["Home"]
     const [currentPath, setCurrentPath] = useState(() => {
-        // First check if we have a path in the URL (app pages like /settings are not folders)
-        if (location.pathname && location.pathname !== "/" && !APP_PAGE_PATHS.has(location.pathname)) {
-            // Split the path and filter out empty segments
-            const pathSegments = location.pathname.split('/').filter(segment => segment.length > 0);
-            if (pathSegments.length > 0) {
-                // Decode each segment to handle URL encoding (e.g., %20 for spaces)
-                const decodedSegments = pathSegments.map(segment => decodeURIComponent(segment));
-                // If the first segment is not "Home", add it
-                if (decodedSegments[0] !== "Home") {
-                    return ["Home", ...decodedSegments];
-                }
-                return decodedSegments;
-            }
-        }
+        // A folder address wins (a saved history entry first); page addresses like /settings are not folders
+        if (location.state?.explorer?.path)
+            return location.state.explorer.path;
+        if (location.pathname !== "/" && viewFromPathname(location.pathname) === "files")
+            return pathFromUrl(location.pathname);
         // Fallback to localStorage or default
         const savedPath = localStorage.getItem('fileExplorerPath');
         if (savedPath) {
@@ -77,11 +71,6 @@ export const FileExplorer = () => {
         }
         return ["Home"];
     });
-    const [showProfile, setShowProfile] = useState(() => window.location.pathname === '/profile');
-    const [showSettings, setShowSettings] = useState(() => window.location.pathname === '/settings');
-    const [showUserManagement, setShowUserManagement] = useState(() => window.location.pathname === '/users');
-    const [showStorageAnalytics, setShowStorageAnalytics] = useState(() => window.location.pathname === '/storage');
-    const [showTransfers, setShowTransfers] = useState(() => window.location.pathname === '/transfers' || window.location.pathname === '/downloads');
     const isMobile = useIsMobile();
     // Details pane: remembered on desktop; on phones it is a sheet opened per item
     const [detailsPinned, setDetailsPinned] = useState(() => {
@@ -138,29 +127,17 @@ export const FileExplorer = () => {
     const [folderDownloadInfo, setFolderDownloadInfo] = useState(null);
     const [showWebDAVDialog, setShowWebDAVDialog] = useState(false);
     const [showVaultModal, setShowVaultModal] = useState(false);
-    const [isVaultUnlocked, setIsVaultUnlocked] = useState(false);
-    const [vaultAutoLockMinutes, setVaultAutoLockMinutes] = useState(15);
     const [userEmail, setUserEmail] = useState("");
     const [username, setUsername] = useState("");
     const [remoteDownloadOpen, setRemoteDownloadOpen] = useState(false);
-    const queryClient = useQueryClient();
-    // Check initial Vault status and user profile
+    // The signed-in user's email (vault setup) and username (WebDAV details)
     useEffect(() => {
-        const loadVaultStatus = () => api.getVaultStatus().then(st => {
-            setIsVaultUnlocked(st.is_unlocked);
-            if (st.auto_lock_minutes)
-                setVaultAutoLockMinutes(st.auto_lock_minutes);
-        }).catch(() => { });
-        loadVaultStatus();
         api.fetchUserProfile().then(p => {
             if (p && p.email)
                 setUserEmail(p.email);
             if (p && p.username)
                 setUsername(p.username);
         }).catch(() => { });
-        // Settings › Vault announces locks, PIN changes and a new auto-lock time
-        window.addEventListener("vaultStateChanged", loadVaultStatus);
-        return () => window.removeEventListener("vaultStateChanged", loadVaultStatus);
     }, []);
     // Listen for showWebDAVMount custom events
     useEffect(() => {
@@ -172,60 +149,6 @@ export const FileExplorer = () => {
     useEffect(() => {
         localStorage.setItem('fileExplorerPath', JSON.stringify(currentPath));
     }, [currentPath]);
-    // Update browser history when currentPath changes
-    useEffect(() => {
-        if (selectedFilter.startsWith("cloud:"))
-            return;
-        // Update the browser history with the new path
-        const pathString = currentPath.length === 1 && currentPath[0] === "Home"
-            ? "/"
-            : "/" + currentPath.slice(1).map(segment => encodeURIComponent(segment)).join('/');
-        // Use replaceState for the initial load to avoid creating extra history entries
-        if (window.history.state === null) {
-            window.history.replaceState({ path: currentPath }, '', pathString);
-        }
-        else {
-            window.history.pushState({ path: currentPath }, '', pathString);
-        }
-    }, [currentPath, selectedFilter]);
-    // Handle browser back/forward buttons
-    useEffect(() => {
-        const handlePopState = (event) => {
-            if (event.state && event.state.path) {
-                setCurrentPath(event.state.path);
-            }
-            else if (!APP_PAGE_PATHS.has(window.location.pathname)) {
-                // Parse the path from the URL
-                const pathSegments = window.location.pathname.split('/').filter(segment => segment.length > 0);
-                if (pathSegments.length === 0) {
-                    setCurrentPath(["Home"]);
-                }
-                else {
-                    // Decode each segment to handle URL encoding (e.g., %20 for spaces)
-                    const decodedSegments = pathSegments.map(segment => decodeURIComponent(segment));
-                    setCurrentPath(decodedSegments);
-                }
-            }
-            // Also check if we should show profile, settings, user management, storage analytics, or downloads based on the new location
-            const p = window.location.pathname;
-            setShowProfile(p === '/profile');
-            setShowSettings(p === '/settings');
-            setShowUserManagement(p === '/users');
-            setShowStorageAnalytics(p === '/storage');
-            setShowTransfers(p === '/transfers' || p === '/downloads');
-        };
-        window.addEventListener('popstate', handlePopState);
-        return () => window.removeEventListener('popstate', handlePopState);
-    }, []);
-    // Sync view states whenever location.pathname changes
-    useEffect(() => {
-        const p = location.pathname;
-        setShowProfile(p === '/profile');
-        setShowSettings(p === '/settings');
-        setShowUserManagement(p === '/users');
-        setShowStorageAnalytics(p === '/storage');
-        setShowTransfers(p === '/transfers' || p === '/downloads');
-    }, [location.pathname]);
     // Log when the component mounts
     useEffect(() => {
         logger.info("FileExplorer component mounted", { currentPath, location: window.location.pathname });
@@ -249,11 +172,13 @@ export const FileExplorer = () => {
     const [cloudBreadcrumbs, setCloudBreadcrumbs] = useState([
         { id: "root", name: "Google Drive" }
     ]);
+    const { view, showFiles } = useExplorerHistory({ currentPath, selectedFilter, cloudBreadcrumbs, setCurrentPath, setSelectedFilter, setCloudBreadcrumbs });
     const isTrashMode = selectedFilter === "trash" || currentFolder === "Trash";
     const isEffectiveTrashMode = isTrashMode || (isCloudMode && cloudFolderId === "trash");
     const isStarredMode = selectedFilter === "starred" || currentFolder === "Starred";
     const isInboxMode = selectedFilter === "inbox" || currentFolder === "Telegram Inbox";
     const isVaultMode = selectedFilter === "vault" || currentFolder === "Private Vault" || currentPath[0] === "Private Vault" || currentPath[0] === "Vault";
+    const { isVaultUnlocked, setIsVaultUnlocked, autoLockMinutes: vaultAutoLockMinutes } = useVaultSession({ isVaultMode, onAutoLocked: () => handleFilterChangeRef.current?.("all") });
     // Helper to ensure clean API path even if a virtual segment exists in currentPath
     const getCleanPath = (segments) => {
         // If segments contain "Starred" but we are not at root Starred view, strip "Starred"
@@ -318,28 +243,7 @@ export const FileExplorer = () => {
         }
     }, [isCloudMode, cloudAccountId, cloudFolderId, cloudQuery.data?.account_name]);
     const cloudItems = useMemo(() => {
-        if (!isCloudMode || !cloudQuery.data?.items)
-            return [];
-        const accName = cloudQuery.data.account_name || "Google Drive";
-        return cloudQuery.data.items.map((ci) => ({
-            id: ci.id,
-            name: ci.name,
-            type: ci.type,
-            size: ci.size,
-            modified: ci.modified,
-            file_path: `/Cloud/${accName}`,
-            mime_type: ci.mimeType,
-            thumbnail_url: ci.thumbnailLink,
-            is_cloud: true,
-            cloud_account_id: cloudAccountId,
-            cloud_file_id: ci.id,
-            webViewLink: ci.webViewLink,
-            webContentLink: ci.webContentLink,
-            is_virtual: ci.is_virtual,
-            is_starred: ci.starred,
-            starred: ci.starred,
-            is_trashed: ci.trashed,
-        }));
+        return isCloudMode ? mapCloudItems(cloudQuery.data, cloudAccountId) : [];
     }, [isCloudMode, cloudQuery.data, cloudAccountId]);
     const effectivePagination = useMemo(() => {
         if (isCloudMode) {
@@ -385,153 +289,11 @@ export const FileExplorer = () => {
     }, [isCloudMode, cloudItems, files, currentFolder, selectedFilter]);
     // Compute category counts for quick filter chips
     const typeCounts = useMemo(() => {
-        const counts = {
-            all: baseItems.length,
-            folder: 0,
-            video: 0,
-            document: 0,
-            photo: 0,
-            audio: 0,
-            archive: 0,
-        };
-        for (const item of baseItems) {
-            if (!item)
-                continue;
-            if (item.type === "folder") {
-                counts.folder += 1;
-            }
-            else if (isVideoItem(item)) {
-                counts.video += 1;
-            }
-            else if (isPhotoItem(item)) {
-                counts.photo += 1;
-            }
-            else if (isAudioItem(item)) {
-                counts.audio += 1;
-            }
-            else if (isArchiveItem(item)) {
-                counts.archive += 1;
-            }
-            else if (isDocumentItem(item)) {
-                counts.document += 1;
-            }
-        }
-        return counts;
+        return countByType(baseItems);
     }, [baseItems]);
     // Filtered and sorted items
     const filteredItems = useMemo(() => {
-        let result = [...baseItems];
-        // 1. Search filter
-        if (searchQuery && searchQuery.trim()) {
-            const q = searchQuery.toLowerCase().trim();
-            result = result.filter((item) => (item?.name || "").toLowerCase().includes(q));
-        }
-        // 2. Type filter
-        if (typeFilter !== "all") {
-            result = result.filter((item) => {
-                if (!item)
-                    return false;
-                if (typeFilter === "folder")
-                    return item.type === "folder";
-                if (item.type === "folder")
-                    return false;
-                if (typeFilter === "video")
-                    return isVideoItem(item);
-                if (typeFilter === "photo")
-                    return isPhotoItem(item);
-                if (typeFilter === "audio")
-                    return isAudioItem(item);
-                if (typeFilter === "archive")
-                    return isArchiveItem(item);
-                if (typeFilter === "document")
-                    return isDocumentItem(item);
-                if (typeFilter === "other")
-                    return !isVideoItem(item) && !isPhotoItem(item) && !isAudioItem(item) && !isArchiveItem(item) && !isDocumentItem(item);
-                return true;
-            });
-        }
-        // 3. Size filter
-        if (sizeFilter !== "all") {
-            result = result.filter((item) => {
-                if (!item)
-                    return false;
-                if (item.type === "folder")
-                    return true;
-                const size = typeof item.size === "number" ? item.size : 0;
-                if (sizeFilter === "small")
-                    return size < 10 * 1024 * 1024;
-                if (sizeFilter === "medium")
-                    return size >= 10 * 1024 * 1024 && size < 100 * 1024 * 1024;
-                if (sizeFilter === "large")
-                    return size >= 100 * 1024 * 1024 && size < 1024 * 1024 * 1024;
-                if (sizeFilter === "huge")
-                    return size >= 1024 * 1024 * 1024;
-                return true;
-            });
-        }
-        // 4. Date filter
-        if (dateFilter !== "all") {
-            const now = Date.now();
-            const oneDay = 24 * 60 * 60 * 1000;
-            result = result.filter((item) => {
-                if (!item)
-                    return false;
-                const dateStr = item.trashed_at || item.modified;
-                if (!dateStr)
-                    return true;
-                const time = new Date(dateStr).getTime();
-                if (isNaN(time))
-                    return true;
-                const diff = now - time;
-                if (dateFilter === "today")
-                    return diff <= oneDay;
-                if (dateFilter === "week")
-                    return diff <= 7 * oneDay;
-                if (dateFilter === "month")
-                    return diff <= 30 * oneDay;
-                return true;
-            });
-        }
-        // 5. Sorting
-        result.sort((a, b) => {
-            if (!a || !b)
-                return 0;
-            if (foldersFirst && a.type !== b.type) {
-                return a.type === "folder" ? -1 : 1;
-            }
-            let comparison = 0;
-            if (sortField === "name") {
-                const nameA = a.name || "";
-                const nameB = b.name || "";
-                comparison = nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: "base" });
-            }
-            else if (sortField === "size") {
-                const sizeA = typeof a.size === "number" ? a.size : 0;
-                const sizeB = typeof b.size === "number" ? b.size : 0;
-                comparison = sizeA - sizeB;
-            }
-            else if (sortField === "date") {
-                const getDateScore = (item) => {
-                    if (item.trashed_at) {
-                        const t = new Date(item.trashed_at).getTime();
-                        if (!isNaN(t))
-                            return t;
-                    }
-                    if (item.modified) {
-                        const t = new Date(item.modified).getTime();
-                        if (!isNaN(t))
-                            return t;
-                    }
-                    if (typeof item.message_id === "number") {
-                        return item.message_id;
-                    }
-                    return 0;
-                };
-                comparison = getDateScore(a) - getDateScore(b);
-            }
-            return sortOrder === "asc" ? comparison : -comparison;
-        });
-        return result;
+        return filterAndSortItems(baseItems, { searchQuery, typeFilter, sizeFilter, dateFilter, sortField, sortOrder, foldersFirst });
     }, [baseItems, searchQuery, typeFilter, sizeFilter, dateFilter, sortField, sortOrder, foldersFirst]);
     const getFolderPathSegments = (folder) => {
         const parent = (folder.file_path || "/Home").trim();
@@ -626,137 +388,7 @@ export const FileExplorer = () => {
             setCurrentPath(currentPath.slice(0, index + 1));
         }
     };
-    const handleCopy = (itemsToCopy) => {
-        const itemsList = Array.isArray(itemsToCopy) ? itemsToCopy : [itemsToCopy];
-        if (itemsList.length === 0)
-            return;
-        const firstItem = itemsList[0];
-        const sourcePath = isInboxMode
-            ? "/Telegram Inbox"
-            : (firstItem.file_path || currentApiPath || (currentPath.length > 1 ? `/${currentPath.join('/')}` : "/Home"));
-        copyItem(itemsList, sourcePath);
-        if (itemsList.length === 1) {
-            toast.success(`Copied "${itemsList[0].name}"`);
-        }
-        else {
-            toast.success(`Copied ${itemsList.length} items`);
-        }
-    };
-    const handleCut = (itemsToCut) => {
-        const itemsList = Array.isArray(itemsToCut) ? itemsToCut : [itemsToCut];
-        if (itemsList.length === 0)
-            return;
-        const firstItem = itemsList[0];
-        const sourcePath = isInboxMode
-            ? "/Telegram Inbox"
-            : (firstItem.file_path || currentApiPath || (currentPath.length > 1 ? `/${currentPath.join('/')}` : "/Home"));
-        cutItem(itemsList, sourcePath);
-        if (itemsList.length === 1) {
-            toast.success(`Cut "${itemsList[0].name}"`);
-        }
-        else {
-            toast.success(`Cut ${itemsList.length} items`);
-        }
-    };
-    const handlePaste = async () => {
-        try {
-            if (isInboxMode || currentFolder === "Telegram Inbox" || currentApiPath === "/inbox") {
-                toast.error("Cannot paste items into Telegram Inbox. Inbox is reserved for incoming messages.");
-                return;
-            }
-            if (currentFolder === "Starred" || currentApiPath === "/starred") {
-                toast.error("Cannot paste items into Starred.");
-                return;
-            }
-            if (isEffectiveTrashMode || currentFolder === "Trash" || currentApiPath === "/trash") {
-                toast.error("Cannot paste items into Trash.");
-                return;
-            }
-            if (isCloudMode) {
-                if (!cloudAccountId) {
-                    toast.error("No cloud account selected.");
-                    return;
-                }
-                if (clipboard?.items && clipboard.items.length > 0) {
-                    // Check if items are from Telegram (not is_cloud)
-                    const tgItems = clipboard.items.filter((it) => !it.is_cloud);
-                    if (tgItems.length > 0) {
-                        if (!cloudFolderId || ["root", "google_drive", "trash", "starred", "shared_with_me"].includes(cloudFolderId)) {
-                            toast.error("Cannot transfer files to root level or virtual sections. Please navigate inside My Drive first.");
-                            return;
-                        }
-                        const targetFolderId = cloudFolderId;
-                        const fileIds = tgItems
-                            .filter((it) => it.type !== "folder" && !it.is_folder)
-                            .map((it) => it.id || it.file_unique_id)
-                            .filter(Boolean);
-                        const folderPaths = tgItems
-                            .filter((it) => it.type === "folder" || it.is_folder)
-                            .map((it) => it.path || it.file_path || it.name)
-                            .filter(Boolean);
-                        const res = await api.transferTelegramToCloud(cloudAccountId, fileIds, folderPaths, targetFolderId, clipboard.operation === "cut" ? "cut" : "copy");
-                        toast.success(res.message || `Queued ${tgItems.length} item(s) for transfer to Google Drive. Track in Transfers.`);
-                        clearClipboard();
-                        refetch();
-                        return;
-                    }
-                    else {
-                        // Internal Google Drive Copy / Cut (Move)
-                        const targetFolderId = cloudFolderId || "root";
-                        if (!cloudFolderId || ["root", "google_drive", "trash", "starred", "shared_with_me"].includes(targetFolderId)) {
-                            toast.error("Cannot paste items into Google Drive root, Starred, Trash, or Shared with me. Please open a folder in My Drive.");
-                            return;
-                        }
-                        const cloudFileIds = clipboard.items.map((it) => it.cloud_file_id || it.id).filter(Boolean);
-                        if (cloudFileIds.length === 0) {
-                            toast.error("No valid cloud items found in clipboard.");
-                            return;
-                        }
-                        const op = clipboard.operation === "cut" ? "cut" : "copy";
-                        const toastId = toast.loading(`${op === "cut" ? "Moving" : "Copying"} ${cloudFileIds.length} item(s) in Google Drive...`);
-                        try {
-                            const res = await api.transferCloudInternal(cloudAccountId, cloudFileIds, targetFolderId, op);
-                            toast.dismiss(toastId);
-                            toast.success(res.message || `Successfully ${op === "cut" ? "moved" : "copied"} ${cloudFileIds.length} item(s) in Google Drive!`);
-                            clearClipboard();
-                            refetch();
-                        }
-                        catch (err) {
-                            toast.dismiss(toastId);
-                            toast.error(err.message || `Failed to ${op} items in Google Drive`);
-                        }
-                        return;
-                    }
-                }
-                toast.info("Clipboard is empty.");
-                return;
-            }
-            if (clipboard?.items && clipboard.items.some((it) => it.is_cloud)) {
-                const targetPath = currentApiPath || (currentPath.length > 1 ? `/${currentPath.join('/')}` : "/Home");
-                const cloudItemsToTransfer = clipboard.items.filter((it) => it.is_cloud);
-                for (const item of cloudItemsToTransfer) {
-                    const cloudAccId = item.cloud_account_id || cloudAccountId;
-                    const cloudFileId = item.cloud_file_id || item.id;
-                    if (cloudAccId && cloudFileId) {
-                        await api.transferCloudToTelegram(cloudAccId, cloudFileId, targetPath, clipboard.operation === "cut" ? "cut" : "copy");
-                    }
-                }
-                toast.success(`Queued ${cloudItemsToTransfer.length} cloud item(s) to ${targetPath}. Track progress in Transfers.`);
-                clearClipboard();
-                refetch();
-                return;
-            }
-            // Construct the target path using current location
-            const targetPath = currentApiPath || (currentPath.length > 1 ? `/${currentPath.join('/')}` : "/Home");
-            await pasteItem(targetPath);
-            toast.success("Operation completed successfully");
-            // Refresh current location after paste
-            refetch();
-        }
-        catch (error) {
-            toast.error(error.message || "Failed to complete operation");
-        }
-    };
+    const { handleCopy, handleCut, handlePaste } = createClipboardActions({ isInboxMode, isEffectiveTrashMode, isCloudMode, currentApiPath, currentPath, currentFolder, cloudAccountId, cloudFolderId, refetch, clipboard, copyItem, cutItem, clearClipboard, pasteItem });
     const handleVaultUnlocked = () => {
         setIsVaultUnlocked(true);
         setSelectedFilter("vault");
@@ -800,22 +432,6 @@ export const FileExplorer = () => {
     // Long-lived listeners below call the latest handleFilterChange through this ref,
     // so they never use values (e.g. cloud accounts) captured on an earlier render.
     const handleFilterChangeRef = useRef(null);
-    useEffect(() => {
-        if (!isVaultUnlocked)
-            return;
-        const interval = setInterval(() => {
-            api.getVaultStatus().then(st => {
-                if (!st.is_unlocked && isVaultUnlocked) {
-                    setIsVaultUnlocked(false);
-                    if (isVaultMode) {
-                        handleFilterChangeRef.current("all");
-                        toast.info(`Vault locked after ${vaultAutoLockMinutes} minutes without activity.`);
-                    }
-                }
-            }).catch(() => { });
-        }, 45000);
-        return () => clearInterval(interval);
-    }, [isVaultUnlocked, isVaultMode, vaultAutoLockMinutes]);
     const handleFilterChange = (filter) => {
         if (filter.startsWith("cloud:")) {
             const parts = filter.split(":");
@@ -893,432 +509,8 @@ export const FileExplorer = () => {
         }
     };
     handleFilterChangeRef.current = handleFilterChange;
-    const handleSidebarDrop = async (item, targetFolderName) => {
-        try {
-            // Construct the source path correctly
-            let sourcePath = "/";
-            if (isInboxMode) {
-                sourcePath = "/Telegram Inbox";
-            }
-            else if (currentPath.length > 1) {
-                // For all folder types, we construct the path consistently
-                sourcePath = `/${currentPath.join('/')}`;
-            }
-            // Construct the target path
-            let targetPath = "/Home";
-            if (targetFolderName === "Telegram Inbox") {
-                targetPath = "/Telegram Inbox";
-            }
-            else if (targetFolderName !== "Home") {
-                // Since folders are now in the database, we can construct the path directly
-                targetPath = `/Home/${targetFolderName}`;
-            }
-            const baseUrl = getApiBaseUrl();
-            // For the default case, we need to append /api to the base URL
-            const apiUrl = baseUrl ? `${baseUrl}` : '';
-            const response = await fetchWithTimeout(`${apiUrl}/files/move`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                credentials: "include", // Add this to include cookies for authentication
-                body: JSON.stringify({
-                    file_id: item.id, // Use file_id instead of file_path
-                    target_path: targetPath,
-                }),
-            }, 3000); // 3 second timeout
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || "Failed to move file");
-            }
-            toast.success(`Moved "${item.name}" to ${targetFolderName}`);
-            // Refresh current location after drag and drop
-            refetch();
-        }
-        catch (error) {
-            toast.error(error.message || "Failed to move file");
-        }
-    };
-    const handleNewFolder = async (folderName) => {
-        try {
-            if (isInboxMode || currentFolder === "Telegram Inbox" || currentApiPath === "/inbox") {
-                toast.error("Cannot create folders in Telegram Inbox. Inbox is reserved for incoming messages.");
-                return;
-            }
-            if (currentFolder === "Starred" || currentApiPath === "/starred") {
-                toast.error("Cannot create folders in Starred.");
-                return;
-            }
-            if (isEffectiveTrashMode || currentFolder === "Trash" || currentApiPath === "/trash") {
-                toast.error("Cannot create folders in Trash.");
-                return;
-            }
-            if (isCloudMode) {
-                if (!cloudFolderId || ["root", "google_drive", "trash", "starred", "shared_with_me"].includes(cloudFolderId)) {
-                    toast.error("Cannot create folders at root level or in virtual sections. Please navigate inside My Drive first.");
-                    return;
-                }
-                const effectiveParent = cloudFolderId === "my_drive" ? "root" : cloudFolderId;
-                await api.createCloudFolder(cloudAccountId, folderName, effectiveParent);
-                toast.success(`Folder "${folderName}" created in Google Drive`);
-                setNewFolderDialogOpen(false);
-                refetch();
-                return;
-            }
-            // Use currentApiPath which correctly handles /Home and subfolders
-            const backendPath = currentApiPath;
-            const baseUrl = getApiBaseUrl();
-            // For the default case, we need to append /api to the base URL
-            const apiUrl = baseUrl ? `${baseUrl}` : '';
-            const response = await fetchWithTimeout(`${apiUrl}/folders/create`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                credentials: "include", // Add this to include cookies for authentication
-                body: JSON.stringify({
-                    folderName,
-                    currentPath: backendPath,
-                }),
-            }, 3000); // 3 second timeout
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || "Failed to create folder");
-            }
-            toast.success(`Folder "${folderName}" created successfully`);
-            setNewFolderDialogOpen(false);
-            // Refresh current location after creating folder
-            refetch();
-        }
-        catch (error) {
-            toast.error(error.message || "Failed to create folder");
-        }
-    };
-    // Add the missing functions
-    const handleDelete = (item, index) => {
-        setDeleteDialog({ item, index });
-    };
-    const handleRename = (item, index) => {
-        setRenamingItem({ item, index });
-    };
-    const handleMove = async (item, targetFolder) => {
-        try {
-            if (isCloudMode && cloudAccountId) {
-                if (targetFolder.is_virtual || ["trash", "starred", "shared_with_me"].includes(targetFolder.id)) {
-                    toast.error("Cannot move items into virtual folders.");
-                    return;
-                }
-                const fileId = item.cloud_file_id || item.id;
-                const targetId = targetFolder.cloud_file_id || targetFolder.id;
-                if (!fileId || !targetId) {
-                    toast.error("Invalid cloud items for move operation.");
-                    return;
-                }
-                const toastId = toast.loading(`Moving "${item.name}" into "${targetFolder.name}"...`);
-                try {
-                    await api.transferCloudInternal(cloudAccountId, [fileId], targetId, "cut");
-                    toast.dismiss(toastId);
-                    toast.success(`Moved "${item.name}" to "${targetFolder.name}"`);
-                    refetch();
-                }
-                catch (err) {
-                    toast.dismiss(toastId);
-                    toast.error(err.message || "Failed to move item in Google Drive");
-                }
-                return;
-            }
-            // Determine source path from item or current path
-            let sourcePath = item.file_path || (currentPath.length > 1 ? `/${currentPath.join('/')}` : "/Home");
-            // Construct the target path dynamically based on targetFolder's actual location
-            let targetPath = "/Home";
-            if (targetFolder.name === "Home") {
-                targetPath = "/Home";
-            }
-            else if (targetFolder.file_path) {
-                // Use the folder's actual parent path in the file tree
-                const parent = targetFolder.file_path.replace(/\/+$/, '');
-                targetPath = parent && parent !== "/" ? `${parent}/${targetFolder.name}` : `/${targetFolder.name}`;
-            }
-            else {
-                // Fallback using currentApiPath
-                const current = currentApiPath || (currentPath.length > 1 ? `/${currentPath.join('/')}` : "/Home");
-                targetPath = `${current.replace(/\/+$/, '')}/${targetFolder.name}`;
-            }
-            // Ensure paths are properly formatted
-            sourcePath = sourcePath.replace(/\/+/g, '/'); // Remove duplicate slashes
-            targetPath = targetPath.replace(/\/+/g, '/'); // Remove duplicate slashes
-            // Ensure targetPath doesn't end with a slash unless it's root
-            if (targetPath !== "/" && targetPath.endsWith("/")) {
-                targetPath = targetPath.slice(0, -1);
-            }
-            await moveItem(item, targetPath, sourcePath);
-            toast.success(`Moved "${item.name}" to ${targetFolder.name}`);
-            // Refresh current location after move
-            refetch();
-        }
-        catch (error) {
-            logger.error("Error moving file", { error, item, targetFolder });
-            toast.error(error.message || "Failed to move file");
-        }
-    };
-    const handleDownloadFolderPart = (part) => {
-        const baseUrl = getApiBaseUrl();
-        const downloadUrl = part.download_url.startsWith('http')
-            ? part.download_url
-            : `${baseUrl || ''}${part.download_url}`;
-        downloadManager.addDownload(downloadUrl, part.name);
-        toast.success(`Started download for ${part.name}`);
-    };
-    const handleDownloadAllFolderParts = (parts) => {
-        const baseUrl = getApiBaseUrl();
-        parts.forEach((part, index) => {
-            setTimeout(() => {
-                const downloadUrl = part.download_url.startsWith('http')
-                    ? part.download_url
-                    : `${baseUrl || ''}${part.download_url}`;
-                downloadManager.addDownload(downloadUrl, part.name);
-            }, index * 400);
-        });
-        toast.success(`Queued ${parts.length} parts for download`);
-    };
-    const handleDownload = async (item) => {
-        try {
-            if (item.is_cloud) {
-                if (item.type === "folder") {
-                    toast.info("Folder download from Google Drive is not supported directly. Please copy files to Telegram storage.");
-                    return;
-                }
-                const fileId = item.cloud_file_id || item.id;
-                const dlUrl = api.getCloudDownloadUrl(cloudAccountId || item.cloud_account_id, fileId);
-                downloadManager.addDownload(dlUrl, item.name);
-                toast.success(`Download queued: ${item.name}`);
-                return;
-            }
-            const baseUrl = getApiBaseUrl();
-            if (item.type === "folder") {
-                toast.info(`Preparing zip for "${item.name}"...`);
-                const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
-                const tokenParam = token ? `&token=${encodeURIComponent(token)}` : "";
-                const param = item.id
-                    ? `id=${encodeURIComponent(item.id)}`
-                    : `path=${encodeURIComponent(item.file_path ? `${item.file_path}/${item.name}` : (currentApiPath ? `${currentApiPath}/${item.name}` : `/Home/${item.name}`))}`;
-                const response = await fetchWithTimeout(`${baseUrl || ""}/folders/download-info?${param}${tokenParam}`, { credentials: "include" });
-                if (!response.ok) {
-                    const err = await response.json().catch(() => ({}));
-                    throw new Error(err.detail || `Failed to prepare folder download: ${response.status}`);
-                }
-                const info = await response.json();
-                if (!info.parts || info.parts.length === 0) {
-                    toast.warning("Folder is empty or has no files to download.");
-                    return;
-                }
-                if (info.parts.length === 1) {
-                    // Single part (<= 2GB), start download directly
-                    const part = info.parts[0];
-                    handleDownloadFolderPart(part);
-                }
-                else {
-                    // Multiple parts (> 2GB), show part selection dialog
-                    setFolderDownloadInfo(info);
-                }
-                return;
-            }
-            console.log('[FileExplorer] handleDownload - baseUrl:', baseUrl);
-            // Construct the download URL - for the new path structure, we just need the file name
-            // The backend will handle extracting the file name from paths like /Home/Images/filename.jpg
-            const fileName = item.name;
-            let downloadUrl = baseUrl
-                ? `${baseUrl}/dl/${fileName}`
-                : `/dl/${fileName}`;
-            console.log('[FileExplorer] handleDownload - constructed URL:', downloadUrl);
-            // Add to download manager for tracking - this will automatically start the download
-            // The download manager will handle adding auth tokens as needed
-            const downloadId = downloadManager.addDownload(downloadUrl, item.name);
-            // The download is now handled by the download manager's queue system
-            // We don't need to call downloadFile directly
-        }
-        catch (error) {
-            logger.error("Failed to download file:", error);
-            toast.error(error.message || "Failed to download file");
-        }
-    };
-    const confirmRename = async (newName) => {
-        if (!renamingItem)
-            return;
-        try {
-            const item = renamingItem.item;
-            if (isCloudMode) {
-                const fileId = item.cloud_file_id || item.id;
-                await api.renameCloudFile(cloudAccountId, fileId, newName);
-                toast.success(`Renamed "${item.name}" to "${newName}"`);
-                setRenamingItem(null);
-                refetch();
-                return;
-            }
-            const backendPath = currentApiPath;
-            const baseUrl = getApiBaseUrl();
-            // For the default case, we need to append /api to the base URL
-            const apiUrl = baseUrl ? `${baseUrl}` : '';
-            const response = await fetchWithTimeout(`${apiUrl}/files/rename`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                credentials: "include", // Add this to include cookies for authentication
-                body: JSON.stringify({
-                    file_id: item.id, // Use file_id instead of file_path
-                    new_name: newName,
-                }),
-            }, 3000); // 3 second timeout
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || "Failed to rename file");
-            }
-            toast.success(`Renamed "${item.name}" to "${newName}"`);
-            setRenamingItem(null);
-            // Refresh current location after renaming file
-            refetch();
-        }
-        catch (error) {
-            toast.error(error.message || "Failed to rename file");
-        }
-    };
-    const confirmDelete = async () => {
-        if (!deleteDialog)
-            return;
-        try {
-            const item = deleteDialog.item;
-            if (!item.id)
-                return;
-            if (isCloudMode) {
-                const fileId = item.cloud_file_id || item.id;
-                const isAlreadyTrashed = cloudFolderId === "trash" || Boolean(item.is_trashed);
-                await api.deleteCloudFile(cloudAccountId, fileId, isAlreadyTrashed);
-                toast.success(isAlreadyTrashed ? `Permanently deleted "${item.name}" from Google Drive` : `Moved "${item.name}" to Google Drive Trash`);
-                setDeleteDialog(null);
-                refetch();
-                return;
-            }
-            if (isTrashMode) {
-                await api.deleteForever(item.id);
-                toast.success(`Permanently deleted "${item.name}"`);
-            }
-            else {
-                await api.trashFile(item.id);
-                toast.success(`Moved "${item.name}" to Trash`);
-            }
-            setDeleteDialog(null);
-            // Refresh current location after deleting file
-            refetch();
-        }
-        catch (error) {
-            toast.error(error.message || "Failed to delete item");
-        }
-    };
-    const handleToggleStar = async (item) => {
-        if (!item.id)
-            return;
-        try {
-            if (isCloudMode) {
-                const fileId = item.cloud_file_id || item.id;
-                const newStarred = !(item.starred || item.is_starred);
-                await api.starCloudFile(cloudAccountId || item.cloud_account_id, fileId, newStarred);
-                toast.success(newStarred ? `Added "${item.name}" to Starred in Google Drive` : `Removed "${item.name}" from Starred in Google Drive`);
-                refetch();
-                return;
-            }
-            const newStarred = !item.starred;
-            await api.toggleStar(item.id, newStarred);
-            toast.success(newStarred ? `Added "${item.name}" to Starred` : `Removed "${item.name}" from Starred`);
-            refetch();
-        }
-        catch (error) {
-            toast.error(error.message || "Failed to update star status");
-        }
-    };
-    const handleRestoreItem = async (item) => {
-        if (!item.id)
-            return;
-        try {
-            if (isCloudMode) {
-                const fileId = item.cloud_file_id || item.id;
-                await api.restoreCloudFile(cloudAccountId || item.cloud_account_id, fileId);
-                toast.success(`Restored "${item.name}" in Google Drive`);
-                refetch();
-                return;
-            }
-            await api.restoreFile(item.id);
-            toast.success(`Restored "${item.name}"`);
-            refetch();
-        }
-        catch (error) {
-            toast.error(error.message || "Failed to restore item");
-        }
-    };
-    // Selection bar batch actions: one request per item, one summary toast, one refresh
-    const plural = (n) => `${n} item${n === 1 ? "" : "s"}`;
-    const runForEach = async (list, fn, done) => {
-        if (list.length === 0)
-            return;
-        const results = await Promise.allSettled(list.map(fn));
-        const ok = results.filter((r) => r.status === "fulfilled").length;
-        const failed = results.filter((r) => r.status === "rejected");
-        if (ok > 0) {
-            toast.success(done(ok));
-            refetch();
-        }
-        if (failed.length > 0)
-            toast.error(`${plural(failed.length)} failed: ${failed[0].reason?.message || "unknown error"}`);
-    };
-    const withoutSystemFolders = (list) => {
-        const kept = list.filter((it) => !isSystemProtectedFolder(it, currentPath));
-        if (kept.length < list.length)
-            toast.error("Default system folders can't be moved");
-        return kept;
-    };
-    const batchActions = {
-        setStarred: (list, on) => runForEach(list.filter((it) => isItemStarred(it) !== on), (it) => (isCloudMode
-            ? api.starCloudFile(cloudAccountId || it.cloud_account_id, it.cloud_file_id || it.id, on)
-            : api.toggleStar(it.id, on)), (n) => (on ? `Starred ${plural(n)}` : `Removed ${plural(n)} from Starred`)),
-        toVault: (list) => runForEach(withoutSystemFolders(list), (it) => api.moveIntoVault(it.id), (n) => `Moved ${plural(n)} to the vault`),
-        toHome: (list) => runForEach(list, (it) => api.moveOutOfVault(it.id), (n) => `Moved ${plural(n)} to Home`),
-        restore: (list) => runForEach(list, (it) => (isCloudMode
-            ? api.restoreCloudFile(cloudAccountId || it.cloud_account_id, it.cloud_file_id || it.id)
-            : api.restoreFile(it.id)), (n) => `Restored ${plural(n)}`),
-        moveTo: async (list, targetPath) => {
-            const target = (targetPath || "/Home").replace(/\/+/g, "/").replace(/(.)\/$/, "$1");
-            const { moves, skipped } = planMove(withoutSystemFolders(list), target, { fallbackPath: currentApiPath || "/Home" });
-            if (moves.length === 0) {
-                if (skipped.length > 0)
-                    toast.info(skipped.some((x) => x.reason === "into-itself") ? "A folder can't be moved into itself" : "Already in that folder");
-                return;
-            }
-            await runForEach(moves, ({ item, via }) => (via === "vault-in" ? api.moveIntoVault(item.id, target)
-                : via === "vault-out" ? api.moveOutOfVault(item.id, target)
-                    : moveItem(item, target, item.file_path || currentApiPath || "/Home")), (n) => `Moved ${plural(n)} to ${target}`);
-        },
-    };
-    const handleEmptyTrash = async () => {
-        try {
-            setIsEmptyingTrash(true);
-            if (isCloudMode) {
-                await api.emptyCloudTrash(cloudAccountId);
-                toast.success("Google Drive trash emptied successfully");
-            }
-            else {
-                const res = await api.emptyTrash();
-                toast.success(res.message || "Trash emptied successfully");
-            }
-            setEmptyTrashDialogOpen(false);
-            refetch();
-        }
-        catch (error) {
-            toast.error(error.message || "Failed to empty trash");
-        }
-        finally {
-            setIsEmptyingTrash(false);
-        }
-    };
+    const batchActions = createBatchActions({ isCloudMode, cloudAccountId, currentPath, currentApiPath, refetch, moveItem });
+    const { handleSidebarDrop, handleNewFolder, handleDelete, handleRename, handleMove, handleDownloadFolderPart, handleDownloadAllFolderParts, handleDownload, confirmRename, confirmDelete, handleToggleStar, handleRestoreItem, handleEmptyTrash } = createItemActions({ cloudAccountId, cloudFolderId, currentApiPath, currentFolder, currentPath, deleteDialog, isCloudMode, isEffectiveTrashMode, isInboxMode, isTrashMode, moveItem, refetch, renamingItem, setDeleteDialog, setEmptyTrashDialogOpen, setFolderDownloadInfo, setIsEmptyingTrash, setNewFolderDialogOpen, setRenamingItem });
     const cancelDelete = () => {
         setDeleteDialog(null);
     };
@@ -1347,80 +539,52 @@ export const FileExplorer = () => {
             setSelectedFilter(filter);
         }
     }, [currentPath, selectedFilter]);
+    // Opens Files at a stored folder path (Storage "Show in folder", other pages' links)
+    const openFolderPath = (folderPath) => {
+        const target = segmentsFromFilePath(folderPath);
+        setCurrentPath(target);
+        setSelectedFilter(target[0] === "Private Vault" ? "vault" : (target.length >= 2 && target[1] === "Telegram Inbox" ? "inbox" : "all"));
+        setTypeFilter("all");
+        setSizeFilter("all");
+        setDateFilter("all");
+        setSearchQuery("");
+        showFiles();
+    };
+    const openFolderPathRef = useRef(null);
+    openFolderPathRef.current = openFolderPath;
     useEffect(() => {
         const handleCategoryChange = (e) => {
-            if (e.detail?.filter || e.detail?.typeFilter || e.detail?.folderPath) {
-                setShowProfile(false);
-                setShowSettings(false);
-                setShowUserManagement(false);
-                setShowStorageAnalytics(false);
-                setShowTransfers(false);
-                navigate('/');
-                if (e.detail.folderPath) {
-                    const clean = e.detail.folderPath.replace(/^\/+/, "").split("/").filter(Boolean);
-                    const target = clean.length === 0 ? ["Home"] : (clean[0] === "Home" ? clean : ["Home", ...clean]);
-                    setCurrentPath(target);
-                    setSelectedFilter(target[0] === "Private Vault" ? "vault" : (target.length >= 2 && target[1] === "Telegram Inbox" ? "inbox" : "all"));
-                    setTypeFilter("all");
-                    setSizeFilter("all");
-                    setDateFilter("all");
-                    setSearchQuery("");
-                } else {
-                    if (e.detail.filter) {
-                        handleFilterChangeRef.current(e.detail.filter);
-                    } else {
-                        handleFilterChangeRef.current("all");
-                    }
-                    if (e.detail.typeFilter) {
-                        setTypeFilter(e.detail.typeFilter);
-                    }
-                }
+            const detail = e.detail || {};
+            if (detail.folderPath) {
+                openFolderPathRef.current(detail.folderPath);
+            }
+            else if (detail.filter || detail.typeFilter) {
+                handleFilterChangeRef.current(detail.filter || "all");
+                if (detail.typeFilter)
+                    setTypeFilter(detail.typeFilter);
+                showFiles();
             }
         };
         window.addEventListener('changeCategory', handleCategoryChange);
         return () => window.removeEventListener('changeCategory', handleCategoryChange);
-    }, [navigate]);
-    // Profile and Users are tabs of Settings; their old addresses still open it
-    const showSettingsArea = showProfile || showSettings || showUserManagement;
-    const activeView = showSettingsArea ? 'settings' :
-                showStorageAnalytics ? 'storage' :
-                    showTransfers ? 'transfers' : 'files';
-    const handleNavigateView = (view, filter) => {
-        if (view === 'profile' || view === 'settings' || view === 'users') {
+    }, [showFiles]);
+    // The page comes from the address alone (see useExplorerHistory); Profile and Users are Settings tabs
+    const activeView = view;
+    const handleNavigateView = (target, filter) => {
+        if (target === 'profile' || target === 'settings' || target === 'users') {
             // For settings the second argument is the tab to open
-            setShowSettings(true);
-            setShowProfile(false);
-            setShowUserManagement(false);
-            setShowStorageAnalytics(false);
-            setShowTransfers(false);
-            navigate(settingsUrl(view === 'settings' ? filter : view));
+            navigate(settingsUrl(target === 'settings' ? filter : target));
         }
-        else if (view === 'storage') {
-            setShowStorageAnalytics(true);
-            setShowProfile(false);
-            setShowSettings(false);
-            setShowUserManagement(false);
-            setShowTransfers(false);
+        else if (target === 'storage') {
             navigate('/storage');
         }
-        else if (view === 'transfers' || view === 'downloads') {
-            setShowTransfers(true);
-            setShowProfile(false);
-            setShowSettings(false);
-            setShowUserManagement(false);
-            setShowStorageAnalytics(false);
+        else if (target === 'transfers' || target === 'downloads') {
             navigate('/transfers');
         }
         else {
-            setShowProfile(false);
-            setShowSettings(false);
-            setShowUserManagement(false);
-            setShowStorageAnalytics(false);
-            setShowTransfers(false);
-            navigate('/');
-            if (filter) {
+            if (filter)
                 handleFilterChange(filter);
-            }
+            showFiles();
         }
     };
     // Places where nothing can be added (uploads, new folders); returns why, or null when allowed
@@ -1481,45 +645,23 @@ export const FileExplorer = () => {
       <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
       <ErrorBoundary name="This page" key={activeView}>
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        {showSettingsArea ? (<motion.div key="settings" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
+        {view === "settings" ? (<div key="settings" className={PAGE_CLASS}>
             <Suspense fallback={<PanelLoading />}>
               <SettingsContent onOpenDrive={(accountId) => handleNavigateView("files", `cloud:${accountId}:root`)} onOpenVault={() => handleNavigateView("files", "vault")} onLogout={() => runShellAction("logout")}/>
             </Suspense>
-          </motion.div>) : showStorageAnalytics ? (<motion.div key="storage-analytics" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
+          </div>) : view === "storage" ? (<div key="storage" className={PAGE_CLASS}>
             <Suspense fallback={<PanelLoading />}>
-              <StorageAnalyticsContent
-                onBack={() => {
-                  setShowStorageAnalytics(false);
-                  navigate('/');
-                }}
-                onOpenTrash={() => {
-                  setShowStorageAnalytics(false);
-                  navigate('/');
-                  handleFilterChange("trash");
-                }}
-                onOpenCategory={(categoryKey) => {
-                  setShowStorageAnalytics(false);
-                  navigate('/');
-                  handleFilterChange("all");
-                  setTypeFilter(categoryKey);
-                }}
-                onShowInFolder={(folderPath) => {
-                  setShowStorageAnalytics(false);
-                  navigate('/');
-                  const clean = (folderPath || "/Home").replace(/^\/+/, "").split("/").filter(Boolean);
-                  const target = clean.length === 0 ? ["Home"] : (clean[0] === "Home" ? clean : ["Home", ...clean]);
-                  setCurrentPath(target);
-                  setSelectedFilter(target[0] === "Private Vault" ? "vault" : (target.length >= 2 && target[1] === "Telegram Inbox" ? "inbox" : "all"));
-                  setTypeFilter("all");
-                  setSizeFilter("all");
-                  setDateFilter("all");
-                  setSearchQuery("");
-                }}
-              />
+              <StorageAnalyticsContent onOpenTrash={() => handleNavigateView("files", "trash")} onOpenCategory={(categoryKey) => {
+                handleFilterChange("all");
+                setTypeFilter(categoryKey);
+                showFiles();
+            }} onShowInFolder={openFolderPath}/>
             </Suspense>
-          </motion.div>) : showTransfers ? (<motion.div key="transfers" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
-            <Transfers onNewTransfer={() => setRemoteDownloadOpen(true)}/>
-          </motion.div>) : (<div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          </div>) : view === "transfers" ? (<div key="transfers" className={PAGE_CLASS}>
+            <Suspense fallback={<PanelLoading />}>
+              <Transfers onNewTransfer={() => setRemoteDownloadOpen(true)}/>
+            </Suspense>
+          </div>) : (<div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             <TopBar currentPath={currentPath} searchQuery={searchQuery} viewMode={viewMode} onSearchChange={setSearchQuery} onViewModeChange={setViewMode} onBreadcrumbClick={handleBreadcrumbClick} sortField={sortField} sortOrder={sortOrder} foldersFirst={foldersFirst} onSortChange={(field, order) => {
                 setSortField(field);
                 setSortOrder(order);
@@ -1552,7 +694,7 @@ export const FileExplorer = () => {
       </div>
 
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} onNavigateView={handleNavigateView} onAction={runShellAction}/>
-      <ConnectCloudModal open={connectDriveOpen} onOpenChange={setConnectDriveOpen} onSuccess={() => window.dispatchEvent(new Event("cloudAccountsChanged"))}/>
+      <WhenOpen open={connectDriveOpen}><ConnectCloudModal open={connectDriveOpen} onOpenChange={setConnectDriveOpen} onSuccess={() => window.dispatchEvent(new Event("cloudAccountsChanged"))}/></WhenOpen>
 
       <DeleteDialog open={!!deleteDialog} itemName={deleteDialog?.item.name || ""} itemType={deleteDialog?.item.type || "file"} onConfirm={confirmDelete} onCancel={cancelDelete} isTrashMode={isEffectiveTrashMode} isCloudMode={isCloudMode}/>
 
@@ -1582,12 +724,12 @@ export const FileExplorer = () => {
       <NewFolderDialog open={newFolderDialogOpen} currentPath={currentApiPath} // Pass the full path, not just the folder name
      onClose={() => setNewFolderDialogOpen(false)} onConfirm={handleNewFolder}/>
 
-      <FolderDownloadDialog open={!!folderDownloadInfo} info={folderDownloadInfo} onClose={() => setFolderDownloadInfo(null)} onDownloadPart={handleDownloadFolderPart} onDownloadAll={handleDownloadAllFolderParts}/>
+      <WhenOpen open={!!folderDownloadInfo}><FolderDownloadDialog open={!!folderDownloadInfo} info={folderDownloadInfo} onClose={() => setFolderDownloadInfo(null)} onDownloadPart={handleDownloadFolderPart} onDownloadAll={handleDownloadAllFolderParts}/></WhenOpen>
 
-      <WebDAVMountDialog open={showWebDAVDialog} onOpenChange={setShowWebDAVDialog} username={username || undefined}/>
+      <WhenOpen open={showWebDAVDialog}><WebDAVMountDialog open={showWebDAVDialog} onOpenChange={setShowWebDAVDialog} username={username || undefined}/></WhenOpen>
 
-      <VaultModal isOpen={showVaultModal} onClose={() => setShowVaultModal(false)} onSuccess={handleVaultUnlocked} userEmail={userEmail}/>
+      <WhenOpen open={showVaultModal}><VaultModal isOpen={showVaultModal} onClose={() => setShowVaultModal(false)} onSuccess={handleVaultUnlocked} userEmail={userEmail}/></WhenOpen>
 
-      <RemoteDownloadDialog isOpen={remoteDownloadOpen} onClose={() => setRemoteDownloadOpen(false)} defaultPath={currentApiPath}/>
+      <WhenOpen open={remoteDownloadOpen}><RemoteDownloadDialog isOpen={remoteDownloadOpen} onClose={() => setRemoteDownloadOpen(false)} defaultPath={currentApiPath}/></WhenOpen>
     </div>);
 };

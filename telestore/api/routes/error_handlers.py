@@ -35,9 +35,12 @@ async def validation_exception_handler(request: Request, exc):
     )
 
 async def http_exception_handler(request: Request, exc):
+    # Keep headers such as Retry-After (sign-in and PIN lockouts) and WWW-Authenticate
+    headers = getattr(exc, "headers", None)
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": exc.detail}
+        content={"detail": exc.detail},
+        headers=dict(headers) if headers else None
     )
 
 # Export handlers for registration on main app

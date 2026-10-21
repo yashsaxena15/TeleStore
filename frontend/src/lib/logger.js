@@ -34,6 +34,8 @@ if (typeof window !== 'undefined' && window.__TAURI__) {
         logReady = null;
     });
 }
+// The web app only prints warnings and errors in production; the desktop app still writes everything to its log file
+const quietConsole = import.meta.env.PROD && !isTauriEnv;
 export var LogLevel;
 (function (LogLevel) {
     LogLevel["DEBUG"] = "DEBUG";
@@ -48,6 +50,8 @@ const formatMessage = (level, message, data) => {
 };
 export const logger = {
     debug: async (message, data) => {
+        if (quietConsole)
+            return;
         const formattedMessage = formatMessage(LogLevel.DEBUG, message, data);
         console.debug(formattedMessage);
         // Try to use Tauri commands for logging if available
@@ -72,6 +76,8 @@ export const logger = {
         }
     },
     info: async (message, data) => {
+        if (quietConsole)
+            return;
         const formattedMessage = formatMessage(LogLevel.INFO, message, data);
         console.info(formattedMessage);
         // Try to use Tauri commands for logging if available

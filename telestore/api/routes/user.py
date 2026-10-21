@@ -8,6 +8,7 @@ from typing import Optional, List
 from telestore.security.credentials import require_auth, User
 from telestore.db import database
 from telestore.utils.passwords import hash_password
+from telestore.security.attempt_limiter import TooManyAttempts, password_limiter, wait_message
 from d4rk.Logs import setup_logger
 
 logger = setup_logger("user_routes")
@@ -388,7 +389,19 @@ async def change_user_password(request: Request, user_id_param: str, password_re
         # without a current password; the requester is already authenticated as self or owner.
         has_password = bool(database.Users.get_password_hash(target_username))
         if has_password:
+            # Same brute-force protection as sign-in, keyed by the account being changed
+            key = f"pw:{target_username.strip().lower()}"
+            try:
+                password_limiter.check(key)
+            except TooManyAttempts as e:
+                raise HTTPException(status_code=429, detail=wait_message(e.retry_after), headers={"Retry-After": str(e.retry_after)})
             is_password_correct = database.Users.verify_current_password(target_username, password_request.current_password)
+            if is_password_correct:
+                password_limiter.success(key)
+            else:
+                lock = password_limiter.failure(key)
+                if lock:
+                    raise HTTPException(status_code=429, detail=wait_message(lock), headers={"Retry-After": str(lock)})
         else:
             logger.info(f"Setting first password for user: {target_username}")
             is_password_correct = True

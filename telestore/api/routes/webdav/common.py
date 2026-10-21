@@ -11,7 +11,8 @@ from fastapi import APIRouter, Request, HTTPException
 
 from telestore.db import database
 from telestore.config import OWNER, LOGS, MOVIE, GROUP, FILTER_CHAT
-from telestore.security.credentials import verify_credentials
+from telestore.security.credentials import check_login
+from telestore.security.attempt_limiter import TooManyAttempts
 from d4rk.Logs import setup_logger
 
 logger = setup_logger("webdav_routes")
@@ -80,7 +81,11 @@ def authenticate_webdav(request: Request) -> Tuple[Dict[str, Any], str, Optional
                 chat_id = user_data.get("index_chat_id")
                 return user_data, owner_id, chat_id
 
-    if not username or not password or not verify_credentials(username, password):
+    try:
+        signed_in = bool(username and password) and check_login(username, password)
+    except TooManyAttempts as e:
+        raise HTTPException(status_code=429, detail="Too many failed sign-ins", headers={"Retry-After": str(e.retry_after)})
+    if not signed_in:
         raise HTTPException(
             status_code=401,
             detail="Unauthorized",

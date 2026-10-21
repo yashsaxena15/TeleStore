@@ -79,6 +79,11 @@ def reset_db_mocks():
     mock_files.create_default_folders.return_value = []
     mock_files.find_one.return_value = None
 
+    # Sign-in and PIN lockouts must not leak from one test into the next
+    from telestore.security.attempt_limiter import password_limiter, pin_limiter
+    password_limiter.__init__()
+    pin_limiter.__init__()
+
     yield
 
 

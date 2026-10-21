@@ -612,13 +612,25 @@ class Files(Collection):
         return True
 
     def get_storage_analytics(self, owner_id: str = None) -> dict:
-        """Calculates total storage used, breakdown by categories, total counts, and largest files"""
-        query = {}
-        if owner_id:
-            query["owner_id"] = owner_id
-        
-        all_items = list(self.find(query))
-        
+        """Total storage used, breakdown by category, counts and the largest files.
+
+        One aggregation in MongoDB, so the server never loads every file record into memory.
+        """
+        query = {"owner_id": owner_id} if owner_id else {}
+        try:
+            result = next(self.aggregate(_storage_pipeline(query)), None) or {}
+        except Exception as e:
+            logger.warning(f"Storage aggregation unavailable, summing in Python instead: {e}")
+            return self._summarize_storage(self.find(query))
+        return _shape_storage_result(result)
+
+    @staticmethod
+    def _summarize_storage(all_items) -> dict:
+        """Storage totals computed in Python, item by item.
+
+        Used when the database cannot run the aggregation (and as the reference the
+        aggregation is tested against).
+        """
         total_bytes = 0
         trash_bytes = 0
         trash_count = 0
@@ -715,3 +727,89 @@ class Files(Collection):
             "by_category": categories,
             "largest_files": largest_files
         }
+
+
+# ── Storage analytics aggregation ─────────────────────────────────────────────
+_STORAGE_EXTS = {
+    "archive": ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'iso'],
+    "video": ['mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv', 'm4v', '3gp', 'ts'],
+    "photo": ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic'],
+    "audio": ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'opus', 'wma'],
+    "document": ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'xlsm', 'xlsb', 'ppt', 'pptx', 'txt', 'csv', 'tsv', 'ods', 'epub'],
+}
+_STORAGE_CATEGORIES = ["video", "audio", "photo", "document", "archive", "other"]
+
+
+def _storage_pipeline(match: dict) -> list:
+    """Same rules as Files._summarize_storage, expressed as one MongoDB aggregation."""
+    size = {"$convert": {"input": {"$ifNull": ["$file_size", 0]}, "to": "long", "onError": 0, "onNull": 0}}
+    name_parts = {"$split": [{"$ifNull": ["$file_name", ""]}, "."]}
+    ext = {"$cond": [{"$gt": [{"$size": name_parts}, 1]}, {"$toLower": {"$arrayElemAt": [name_parts, -1]}}, ""]}
+    trashed = {"$eq": ["$trashed", True]}
+    is_folder = {"$eq": ["$file_type", "folder"]}
+    category = {"$switch": {"branches": [
+        {"case": {"$or": [{"$eq": ["$file_type", "video"]}, {"$in": ["$_ext", _STORAGE_EXTS["video"]]}]}, "then": "video"},
+        {"case": {"$or": [{"$in": ["$file_type", ["audio", "voice"]]}, {"$in": ["$_ext", _STORAGE_EXTS["audio"]]}]}, "then": "audio"},
+        {"case": {"$or": [{"$eq": ["$file_type", "photo"]}, {"$in": ["$_ext", _STORAGE_EXTS["photo"]]}]}, "then": "photo"},
+        {"case": {"$in": ["$_ext", _STORAGE_EXTS["archive"]]}, "then": "archive"},
+        {"case": {"$or": [{"$eq": ["$file_type", "document"]}, {"$in": ["$_ext", _STORAGE_EXTS["document"]]}]}, "then": "document"},
+    ], "default": "other"}}
+    active_files = {"$match": {"trashed": {"$ne": True}, "file_type": {"$ne": "folder"}}}
+    return [
+        {"$match": match},
+        {"$addFields": {"_size": size}},
+        {"$facet": {
+            "totals": [{"$group": {
+                "_id": None,
+                "trash_count": {"$sum": {"$cond": [trashed, 1, 0]}},
+                "trash_bytes": {"$sum": {"$cond": [trashed, "$_size", 0]}},
+                "starred_count": {"$sum": {"$cond": [{"$and": [{"$eq": ["$starred", True]}, {"$not": [trashed]}]}, 1, 0]}},
+                "total_folders": {"$sum": {"$cond": [{"$and": [is_folder, {"$not": [trashed]}]}, 1, 0]}},
+                "total_files": {"$sum": {"$cond": [{"$or": [is_folder, trashed]}, 0, 1]}},
+                "total_bytes": {"$sum": {"$cond": [{"$or": [is_folder, trashed]}, 0, "$_size"]}},
+            }}],
+            "categories": [
+                active_files,
+                {"$addFields": {"_ext": ext}},
+                {"$group": {"_id": category, "count": {"$sum": 1}, "bytes": {"$sum": "$_size"}}},
+            ],
+            # Vault files count toward the totals above but are never listed by name
+            "largest": [
+                active_files,
+                {"$match": {"is_vault": {"$ne": True}, "file_path": {"$not": {"$regex": "^/Vault(/|$)"}}}},
+                {"$sort": {"_size": -1}},
+                {"$limit": 10},
+                {"$project": {"file_unique_id": 1, "file_name": 1, "_size": 1, "file_type": 1, "file_path": 1, "thumbnail": 1, "modified_date": 1}},
+            ],
+        }},
+    ]
+
+
+def _shape_storage_result(result: dict) -> dict:
+    totals = (result.get("totals") or [{}])[0]
+    categories = {key: {"count": 0, "bytes": 0} for key in _STORAGE_CATEGORIES}
+    for row in result.get("categories") or []:
+        categories[row["_id"]] = {"count": int(row.get("count", 0)), "bytes": int(row.get("bytes", 0))}
+    largest_files = [
+        {
+            "id": str(f.get("_id")),
+            "file_unique_id": f.get("file_unique_id"),
+            "file_name": f.get("file_name"),
+            "file_size": int(f.get("_size") or 0),
+            "file_type": f.get("file_type"),
+            "file_path": f.get("file_path"),
+            "thumbnail": f.get("thumbnail"),
+            "modified_date": f.get("modified_date"),
+        }
+        for f in result.get("largest") or []
+    ]
+    return {
+        "total_bytes": int(totals.get("total_bytes", 0)),
+        "total_files": int(totals.get("total_files", 0)),
+        "total_folders": int(totals.get("total_folders", 0)),
+        "trash_bytes": int(totals.get("trash_bytes", 0)),
+        "trash_count": int(totals.get("trash_count", 0)),
+        "starred_count": int(totals.get("starred_count", 0)),
+        "by_category": categories,
+        "largest_files": largest_files,
+    }

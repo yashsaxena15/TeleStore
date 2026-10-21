@@ -9,6 +9,7 @@ from google.auth.transport import requests as google_requests
 from telestore.config import GOOGLE_CLIENT_ID, DEFAULT_ADMIN_USERNAME, DEFAULT_ADMIN_PASSWORD
 from telestore.db import database
 from pydantic import BaseModel
+from telestore.security.attempt_limiter import TooManyAttempts, password_limiter
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -55,6 +56,22 @@ def verify_credentials(username: str, password: str) -> bool:
     is_username_valid = username == USERNAME
     is_password_valid = verify_password(password)
     return is_username_valid and is_password_valid
+
+def check_login(username: str, password: str) -> bool:
+    """verify_credentials with brute-force protection for every password sign-in.
+
+    Raises TooManyAttempts while the username is locked, including when this failure starts a lock.
+    """
+    key = f"pw:{(username or '').strip().lower()}"
+    password_limiter.check(key)
+    if verify_credentials(username, password):
+        password_limiter.success(key)
+        return True
+    lock = password_limiter.failure(key)
+    if lock:
+        logger.warning(f"Password sign-in for '{username}' locked for {lock}s after repeated failures")
+        raise TooManyAttempts(lock)
+    return False
 
 def verify_google_token(token: str) -> Optional[dict]:
     """Verify Google ID token and return user info if valid"""

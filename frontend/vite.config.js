@@ -75,6 +75,9 @@ export default defineConfig(({ mode }) => ({
     },
   },
   
+  // Production builds drop routine console output (it also exposed URLs and request details)
+  esbuild: mode === "production" && !process.env.TAURI_DEBUG ? { pure: ["console.log", "console.debug", "console.info"] } : undefined,
+
   // Environment variable prefix for Tauri
   envPrefix: ['VITE_', 'TAURI_'],
   
@@ -103,11 +106,18 @@ export default defineConfig(({ mode }) => ({
         // React rarely changes, so keep it in its own long-cached chunk
         manualChunks: {
           "react-vendor": ["react", "react-dom", "react-router-dom"],
+          // UI building blocks change rarely too; a separate chunk stays cached across app updates
+          "ui-vendor": ["@tanstack/react-query", "@tanstack/react-virtual", "sonner", "cmdk", "@radix-ui/react-dialog", "@radix-ui/react-alert-dialog", "@radix-ui/react-dropdown-menu", "@radix-ui/react-select", "@radix-ui/react-popover", "@radix-ui/react-tooltip", "@radix-ui/react-switch", "@radix-ui/react-slot"],
         },
       },
     },
   },
   
+  // Unit tests only; the Playwright browser tests in e2e/ run separately
+  test: {
+    exclude: ["**/node_modules/**", "**/dist/**", "e2e/**"],
+  },
+
   // Configure for Tauri preview
   preview: {
     port: 8080,

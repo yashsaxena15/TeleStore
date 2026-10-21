@@ -137,10 +137,9 @@ const Login = () => {
             };
             logger.info("Making login request to", `${apiUrl}/auth/login`);
             const response = await fetchWithTimeout(`${apiUrl}/auth/login`, fetchOptions, 5000);
-            logger.info("Login response", { status: response.status, headers: [...response.headers.entries()] });
+            logger.info("Login response", { status: response.status });
             if (response.ok) {
                 const responseData = await response.json();
-                logger.info("Login response data", responseData);
                 // Store auth token in localStorage for both Tauri and browser
                 if (responseData.auth_token) {
                     localStorage.setItem('auth_token', responseData.auth_token);
