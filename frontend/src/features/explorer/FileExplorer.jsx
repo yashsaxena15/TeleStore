@@ -27,20 +27,22 @@ import { isItemStarred } from "./lib/fileCardHelpers";
 import { isSystemProtectedFolder } from "./lib/fileKeyboardNavigation";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { downloadManager } from "@/features/transfers/downloadManager";
-import { motion } from "framer-motion";
 import { useError } from "@/contexts/ErrorHandlerContext"; // Import the error context
 import { FolderDownloadDialog } from "@/features/explorer/dialogs/FolderDownloadDialog";
 import { WebDAVMountDialog } from "@/features/cloud/WebDAVMountDialog";
 import { VaultModal } from "@/features/vault/VaultModal";
 import { RemoteDownloadDialog } from "@/features/cloud/RemoteDownloadDialog";
 import { settingsUrl } from "@/features/settings/settingsTabs";
+import { pathFromUrl, segmentsFromFilePath, viewFromPathname } from "./lib/explorerRoutes";
+import { useExplorerHistory } from "./hooks/useExplorerHistory";
+
+// Pages fade in (same feel as before, without a motion library)
+const PAGE_CLASS = "flex-1 flex flex-col h-full min-h-0 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300";
 
 // Page panels are split into their own chunks and load when first shown
 const SettingsContent = lazy(() => import("@/features/settings/SettingsContent").then((m) => ({ default: m.SettingsContent })));
 const StorageAnalyticsContent = lazy(() => import("@/features/storage/StorageAnalyticsContent").then((m) => ({ default: m.StorageAnalyticsContent })));
 const PanelLoading = () => (<div className="flex flex-1 items-center justify-center p-10 text-sm text-muted-foreground">Loading…</div>);
-// Addresses that open a page instead of a folder
-const APP_PAGE_PATHS = new Set(["/settings", "/profile", "/users", "/storage", "/transfers", "/downloads", "/login"]);
 export const FileExplorer = () => {
     const location = useLocation();
     const navigate = useNavigate(); // Add navigate hook
@@ -48,20 +50,11 @@ export const FileExplorer = () => {
     const { showError } = useError(); // Use the error context
     // Initialize currentPath from URL or localStorage or default to ["Home"]
     const [currentPath, setCurrentPath] = useState(() => {
-        // First check if we have a path in the URL (app pages like /settings are not folders)
-        if (location.pathname && location.pathname !== "/" && !APP_PAGE_PATHS.has(location.pathname)) {
-            // Split the path and filter out empty segments
-            const pathSegments = location.pathname.split('/').filter(segment => segment.length > 0);
-            if (pathSegments.length > 0) {
-                // Decode each segment to handle URL encoding (e.g., %20 for spaces)
-                const decodedSegments = pathSegments.map(segment => decodeURIComponent(segment));
-                // If the first segment is not "Home", add it
-                if (decodedSegments[0] !== "Home") {
-                    return ["Home", ...decodedSegments];
-                }
-                return decodedSegments;
-            }
-        }
+        // A folder address wins (a saved history entry first); page addresses like /settings are not folders
+        if (location.state?.explorer?.path)
+            return location.state.explorer.path;
+        if (location.pathname !== "/" && viewFromPathname(location.pathname) === "files")
+            return pathFromUrl(location.pathname);
         // Fallback to localStorage or default
         const savedPath = localStorage.getItem('fileExplorerPath');
         if (savedPath) {
@@ -77,11 +70,6 @@ export const FileExplorer = () => {
         }
         return ["Home"];
     });
-    const [showProfile, setShowProfile] = useState(() => window.location.pathname === '/profile');
-    const [showSettings, setShowSettings] = useState(() => window.location.pathname === '/settings');
-    const [showUserManagement, setShowUserManagement] = useState(() => window.location.pathname === '/users');
-    const [showStorageAnalytics, setShowStorageAnalytics] = useState(() => window.location.pathname === '/storage');
-    const [showTransfers, setShowTransfers] = useState(() => window.location.pathname === '/transfers' || window.location.pathname === '/downloads');
     const isMobile = useIsMobile();
     // Details pane: remembered on desktop; on phones it is a sheet opened per item
     const [detailsPinned, setDetailsPinned] = useState(() => {
@@ -172,60 +160,6 @@ export const FileExplorer = () => {
     useEffect(() => {
         localStorage.setItem('fileExplorerPath', JSON.stringify(currentPath));
     }, [currentPath]);
-    // Update browser history when currentPath changes
-    useEffect(() => {
-        if (selectedFilter.startsWith("cloud:"))
-            return;
-        // Update the browser history with the new path
-        const pathString = currentPath.length === 1 && currentPath[0] === "Home"
-            ? "/"
-            : "/" + currentPath.slice(1).map(segment => encodeURIComponent(segment)).join('/');
-        // Use replaceState for the initial load to avoid creating extra history entries
-        if (window.history.state === null) {
-            window.history.replaceState({ path: currentPath }, '', pathString);
-        }
-        else {
-            window.history.pushState({ path: currentPath }, '', pathString);
-        }
-    }, [currentPath, selectedFilter]);
-    // Handle browser back/forward buttons
-    useEffect(() => {
-        const handlePopState = (event) => {
-            if (event.state && event.state.path) {
-                setCurrentPath(event.state.path);
-            }
-            else if (!APP_PAGE_PATHS.has(window.location.pathname)) {
-                // Parse the path from the URL
-                const pathSegments = window.location.pathname.split('/').filter(segment => segment.length > 0);
-                if (pathSegments.length === 0) {
-                    setCurrentPath(["Home"]);
-                }
-                else {
-                    // Decode each segment to handle URL encoding (e.g., %20 for spaces)
-                    const decodedSegments = pathSegments.map(segment => decodeURIComponent(segment));
-                    setCurrentPath(decodedSegments);
-                }
-            }
-            // Also check if we should show profile, settings, user management, storage analytics, or downloads based on the new location
-            const p = window.location.pathname;
-            setShowProfile(p === '/profile');
-            setShowSettings(p === '/settings');
-            setShowUserManagement(p === '/users');
-            setShowStorageAnalytics(p === '/storage');
-            setShowTransfers(p === '/transfers' || p === '/downloads');
-        };
-        window.addEventListener('popstate', handlePopState);
-        return () => window.removeEventListener('popstate', handlePopState);
-    }, []);
-    // Sync view states whenever location.pathname changes
-    useEffect(() => {
-        const p = location.pathname;
-        setShowProfile(p === '/profile');
-        setShowSettings(p === '/settings');
-        setShowUserManagement(p === '/users');
-        setShowStorageAnalytics(p === '/storage');
-        setShowTransfers(p === '/transfers' || p === '/downloads');
-    }, [location.pathname]);
     // Log when the component mounts
     useEffect(() => {
         logger.info("FileExplorer component mounted", { currentPath, location: window.location.pathname });
@@ -249,6 +183,7 @@ export const FileExplorer = () => {
     const [cloudBreadcrumbs, setCloudBreadcrumbs] = useState([
         { id: "root", name: "Google Drive" }
     ]);
+    const { view, showFiles } = useExplorerHistory({ currentPath, selectedFilter, cloudBreadcrumbs, setCurrentPath, setSelectedFilter, setCloudBreadcrumbs });
     const isTrashMode = selectedFilter === "trash" || currentFolder === "Trash";
     const isEffectiveTrashMode = isTrashMode || (isCloudMode && cloudFolderId === "trash");
     const isStarredMode = selectedFilter === "starred" || currentFolder === "Starred";
@@ -1347,80 +1282,52 @@ export const FileExplorer = () => {
             setSelectedFilter(filter);
         }
     }, [currentPath, selectedFilter]);
+    // Opens Files at a stored folder path (Storage "Show in folder", other pages' links)
+    const openFolderPath = (folderPath) => {
+        const target = segmentsFromFilePath(folderPath);
+        setCurrentPath(target);
+        setSelectedFilter(target[0] === "Private Vault" ? "vault" : (target.length >= 2 && target[1] === "Telegram Inbox" ? "inbox" : "all"));
+        setTypeFilter("all");
+        setSizeFilter("all");
+        setDateFilter("all");
+        setSearchQuery("");
+        showFiles();
+    };
+    const openFolderPathRef = useRef(null);
+    openFolderPathRef.current = openFolderPath;
     useEffect(() => {
         const handleCategoryChange = (e) => {
-            if (e.detail?.filter || e.detail?.typeFilter || e.detail?.folderPath) {
-                setShowProfile(false);
-                setShowSettings(false);
-                setShowUserManagement(false);
-                setShowStorageAnalytics(false);
-                setShowTransfers(false);
-                navigate('/');
-                if (e.detail.folderPath) {
-                    const clean = e.detail.folderPath.replace(/^\/+/, "").split("/").filter(Boolean);
-                    const target = clean.length === 0 ? ["Home"] : (clean[0] === "Home" ? clean : ["Home", ...clean]);
-                    setCurrentPath(target);
-                    setSelectedFilter(target[0] === "Private Vault" ? "vault" : (target.length >= 2 && target[1] === "Telegram Inbox" ? "inbox" : "all"));
-                    setTypeFilter("all");
-                    setSizeFilter("all");
-                    setDateFilter("all");
-                    setSearchQuery("");
-                } else {
-                    if (e.detail.filter) {
-                        handleFilterChangeRef.current(e.detail.filter);
-                    } else {
-                        handleFilterChangeRef.current("all");
-                    }
-                    if (e.detail.typeFilter) {
-                        setTypeFilter(e.detail.typeFilter);
-                    }
-                }
+            const detail = e.detail || {};
+            if (detail.folderPath) {
+                openFolderPathRef.current(detail.folderPath);
+            }
+            else if (detail.filter || detail.typeFilter) {
+                handleFilterChangeRef.current(detail.filter || "all");
+                if (detail.typeFilter)
+                    setTypeFilter(detail.typeFilter);
+                showFiles();
             }
         };
         window.addEventListener('changeCategory', handleCategoryChange);
         return () => window.removeEventListener('changeCategory', handleCategoryChange);
-    }, [navigate]);
-    // Profile and Users are tabs of Settings; their old addresses still open it
-    const showSettingsArea = showProfile || showSettings || showUserManagement;
-    const activeView = showSettingsArea ? 'settings' :
-                showStorageAnalytics ? 'storage' :
-                    showTransfers ? 'transfers' : 'files';
-    const handleNavigateView = (view, filter) => {
-        if (view === 'profile' || view === 'settings' || view === 'users') {
+    }, [showFiles]);
+    // The page comes from the address alone (see useExplorerHistory); Profile and Users are Settings tabs
+    const activeView = view;
+    const handleNavigateView = (target, filter) => {
+        if (target === 'profile' || target === 'settings' || target === 'users') {
             // For settings the second argument is the tab to open
-            setShowSettings(true);
-            setShowProfile(false);
-            setShowUserManagement(false);
-            setShowStorageAnalytics(false);
-            setShowTransfers(false);
-            navigate(settingsUrl(view === 'settings' ? filter : view));
+            navigate(settingsUrl(target === 'settings' ? filter : target));
         }
-        else if (view === 'storage') {
-            setShowStorageAnalytics(true);
-            setShowProfile(false);
-            setShowSettings(false);
-            setShowUserManagement(false);
-            setShowTransfers(false);
+        else if (target === 'storage') {
             navigate('/storage');
         }
-        else if (view === 'transfers' || view === 'downloads') {
-            setShowTransfers(true);
-            setShowProfile(false);
-            setShowSettings(false);
-            setShowUserManagement(false);
-            setShowStorageAnalytics(false);
+        else if (target === 'transfers' || target === 'downloads') {
             navigate('/transfers');
         }
         else {
-            setShowProfile(false);
-            setShowSettings(false);
-            setShowUserManagement(false);
-            setShowStorageAnalytics(false);
-            setShowTransfers(false);
-            navigate('/');
-            if (filter) {
+            if (filter)
                 handleFilterChange(filter);
-            }
+            showFiles();
         }
     };
     // Places where nothing can be added (uploads, new folders); returns why, or null when allowed
@@ -1481,45 +1388,21 @@ export const FileExplorer = () => {
       <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
       <ErrorBoundary name="This page" key={activeView}>
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        {showSettingsArea ? (<motion.div key="settings" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
+        {view === "settings" ? (<div key="settings" className={PAGE_CLASS}>
             <Suspense fallback={<PanelLoading />}>
               <SettingsContent onOpenDrive={(accountId) => handleNavigateView("files", `cloud:${accountId}:root`)} onOpenVault={() => handleNavigateView("files", "vault")} onLogout={() => runShellAction("logout")}/>
             </Suspense>
-          </motion.div>) : showStorageAnalytics ? (<motion.div key="storage-analytics" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
+          </div>) : view === "storage" ? (<div key="storage" className={PAGE_CLASS}>
             <Suspense fallback={<PanelLoading />}>
-              <StorageAnalyticsContent
-                onBack={() => {
-                  setShowStorageAnalytics(false);
-                  navigate('/');
-                }}
-                onOpenTrash={() => {
-                  setShowStorageAnalytics(false);
-                  navigate('/');
-                  handleFilterChange("trash");
-                }}
-                onOpenCategory={(categoryKey) => {
-                  setShowStorageAnalytics(false);
-                  navigate('/');
-                  handleFilterChange("all");
-                  setTypeFilter(categoryKey);
-                }}
-                onShowInFolder={(folderPath) => {
-                  setShowStorageAnalytics(false);
-                  navigate('/');
-                  const clean = (folderPath || "/Home").replace(/^\/+/, "").split("/").filter(Boolean);
-                  const target = clean.length === 0 ? ["Home"] : (clean[0] === "Home" ? clean : ["Home", ...clean]);
-                  setCurrentPath(target);
-                  setSelectedFilter(target[0] === "Private Vault" ? "vault" : (target.length >= 2 && target[1] === "Telegram Inbox" ? "inbox" : "all"));
-                  setTypeFilter("all");
-                  setSizeFilter("all");
-                  setDateFilter("all");
-                  setSearchQuery("");
-                }}
-              />
+              <StorageAnalyticsContent onOpenTrash={() => handleNavigateView("files", "trash")} onOpenCategory={(categoryKey) => {
+                handleFilterChange("all");
+                setTypeFilter(categoryKey);
+                showFiles();
+            }} onShowInFolder={openFolderPath}/>
             </Suspense>
-          </motion.div>) : showTransfers ? (<motion.div key="transfers" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col h-full min-h-0 overflow-hidden">
+          </div>) : view === "transfers" ? (<div key="transfers" className={PAGE_CLASS}>
             <Transfers onNewTransfer={() => setRemoteDownloadOpen(true)}/>
-          </motion.div>) : (<div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          </div>) : (<div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             <TopBar currentPath={currentPath} searchQuery={searchQuery} viewMode={viewMode} onSearchChange={setSearchQuery} onViewModeChange={setViewMode} onBreadcrumbClick={handleBreadcrumbClick} sortField={sortField} sortOrder={sortOrder} foldersFirst={foldersFirst} onSortChange={(field, order) => {
                 setSortField(field);
                 setSortOrder(order);
