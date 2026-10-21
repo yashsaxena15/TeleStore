@@ -135,7 +135,7 @@ def get_otp_html_template(otp_code: str, purpose: str = "Private Vault Setup") -
     </html>
     """
 
-async def create_and_send_vault_otp(email: str, user_id: str, purpose: str = "Private Vault Verification") -> dict:
+async def create_and_send_vault_otp(email: str, user_id: str, purpose: str = "Private Vault Verification", label: str = "Vault") -> dict:
     """
     Generates an OTP, stores it in MongoDB (MyApp.VaultOTP), enforces rate limits,
     and sends the email to the recipient.
@@ -172,9 +172,9 @@ async def create_and_send_vault_otp(email: str, user_id: str, purpose: str = "Pr
     })
 
     # Dispatch email
-    subject = f"Your {APP_NAME} Vault Code: {otp_code}"
+    subject = f"Your {APP_NAME} {label} Code: {otp_code}"
     html = get_otp_html_template(otp_code, purpose)
-    text = f"Your {APP_NAME} Vault Verification Code is: {otp_code}. Valid for 10 minutes."
+    text = f"Your {APP_NAME} {label} code is: {otp_code}. Valid for 10 minutes."
 
     await send_email_async(email, subject, html, text)
     return {"success": True, "expires_at": expires_at.isoformat()}

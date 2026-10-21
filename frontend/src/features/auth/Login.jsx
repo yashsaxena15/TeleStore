@@ -1,11 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { getApiBaseUrl, fetchWithTimeout } from "@/lib/api";
-import { FcGoogle } from "react-icons/fc";
+import { useGoogleSignIn } from "./useGoogleSignIn";
+import { ForgotPasswordDialog } from "./ForgotPasswordDialog";
 import { BackendUrlUpdater } from "@/features/settings/BackendUrlUpdater";
 import logger from "@/lib/logger";
 import authService from "./authService";
@@ -17,22 +18,11 @@ const Login = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
     const [showBackendConfig, setShowBackendConfig] = useState(false);
+    const [forgotOpen, setForgotOpen] = useState(false);
+    const [notice, setNotice] = useState("");
     const navigate = useNavigate();
     const { showError } = useError(); // Use the error context
-    useEffect(() => {
-        logger.info("Login page mounted");
-        // Dynamically load Google Identity Services script
-        const script = document.createElement("script");
-        script.src = "https://accounts.google.com/gsi/client";
-        script.async = true;
-        script.defer = true;
-        document.head.appendChild(script);
-        return () => {
-            document.head.removeChild(script);
-        };
-    }, []);
-    const handleCredentialResponse = async (response) => {
-        logger.info("Google credential response received", response);
+    const handleCredentialResponse = async (credential) => {
         setIsLoading(true);
         setError("");
         try {
@@ -45,12 +35,11 @@ const Login = () => {
                     "Content-Type": "application/json",
                     ...authService.getAuthHeaders()
                 },
-                body: JSON.stringify({ token: response.credential }),
+                body: JSON.stringify({ token: credential }),
             }, 5000);
-            logger.info("Google login response", { status: res.status, headers: [...res.headers.entries()] });
+
             if (res.ok) {
                 const responseData = await res.json();
-                logger.info("Google login successful", responseData);
                 // Store auth token in localStorage for both Tauri and browser
                 if (responseData.auth_token) {
                     localStorage.setItem('auth_token', responseData.auth_token);
@@ -77,49 +66,8 @@ const Login = () => {
             setIsLoading(false);
         }
     };
-    const initializeGoogleSignIn = () => {
-        if (window.google && window.google.accounts) {
-            logger.info("Initializing Google Sign-In");
-            window.google.accounts.id.initialize({
-                client_id: "YOUR_GOOGLE_CLIENT_ID_HERE", // This should be replaced with actual client ID
-                callback: handleCredentialResponse,
-            });
-            window.google.accounts.id.renderButton(document.getElementById("googleSignInButton"), {
-                theme: "outline",
-                size: "large",
-                width: 250,
-                text: "signin_with"
-            });
-        }
-        else {
-            logger.warn("Google accounts not available yet");
-        }
-    };
-    useEffect(() => {
-        logger.info("Checking for Google accounts availability");
-        if (window.google && window.google.accounts) {
-            logger.info("Google accounts available, initializing");
-            initializeGoogleSignIn();
-        }
-        else {
-            // Retry initialization after a delay if google script hasn't loaded yet
-            logger.warn("Google accounts not available, scheduling retry");
-            const timer = setTimeout(() => {
-                if (window.google && window.google.accounts) {
-                    logger.info("Google accounts available on retry, initializing");
-                    initializeGoogleSignIn();
-                }
-                else {
-                    logger.warn("Google accounts still not available after retry");
-                }
-            }, 1000);
-            return () => clearTimeout(timer);
-        }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialize Google sign-in once on mount
-    }, []);
     const handleSubmit = async (e) => {
         e.preventDefault();
-        logger.info("Login form submitted", { username, password });
         setIsLoading(true);
         setError("");
         try {
@@ -133,7 +81,7 @@ const Login = () => {
                     "Content-Type": "application/json",
                     ...authService.getAuthHeaders()
                 },
-                body: JSON.stringify({ username, password }),
+                body: JSON.stringify({ username: username.trim(), password }),
             };
             logger.info("Making login request to", `${apiUrl}/auth/login`);
             const response = await fetchWithTimeout(`${apiUrl}/auth/login`, fetchOptions, 5000);
@@ -167,12 +115,7 @@ const Login = () => {
             setIsLoading(false);
         }
     };
-    const handleGoogleLogin = async () => {
-        logger.info("Google login initiated");
-        if (window.google && window.google.accounts) {
-            window.google.accounts.id.prompt();
-        }
-    };
+    const google = useGoogleSignIn(handleCredentialResponse);
     const handleBackendConfigSuccess = () => {
         setShowBackendConfig(false);
         setError("");
@@ -196,6 +139,13 @@ const Login = () => {
             {error && (<div className="bg-destructive/10 border border-destructive/20 text-destructive p-3 rounded-lg text-sm">
                 {error}
               </div>)}
+            {notice && !error && (<div role="status" className="bg-success/10 border border-success/25 text-success p-3 rounded-lg text-sm">{notice}</div>)}
+            <ForgotPasswordDialog open={forgotOpen} onOpenChange={setForgotOpen} initialUsername={username.trim()} onDone={(name) => {
+                setUsername(name);
+                setPassword("");
+                setError("");
+                setNotice("Password changed. Sign in with your new password.");
+            }}/>
             
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
@@ -219,6 +169,10 @@ const Login = () => {
                 </div>
               </div>
               
+              <div className="flex justify-end -mt-2">
+                <button type="button" className="text-xs text-primary hover:underline" onClick={() => setForgotOpen(true)}>Forgot password?</button>
+              </div>
+
               <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90 font-semibold py-2 px-4 rounded-lg transition duration-200" disabled={isLoading}>
                 {isLoading ? (<span className="flex items-center justify-center">
                     <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -230,21 +184,20 @@ const Login = () => {
               </Button>
             </form>
             
-            <div className="relative my-6">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-border"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-card text-muted-foreground">Or continue with</span>
-              </div>
-            </div>
-            
-            <div className="flex flex-col space-y-3">
-              <Button variant="outline" className="w-full flex items-center justify-center space-x-2 border-border text-foreground hover:bg-accent" onClick={handleGoogleLogin} disabled={isLoading}>
-                <FcGoogle className="h-5 w-5"/>
-                <span>Sign in with Google</span>
-              </Button>
-              
+            {google.available && (<>
+                <div className="relative my-6">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-border"></div>
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-2 bg-card text-muted-foreground">Or continue with</span>
+                  </div>
+                </div>
+                {/* Google draws its own button here */}
+                <div ref={google.buttonRef} className="flex justify-center min-h-[44px]"/>
+              </>)}
+
+            <div className="flex flex-col space-y-3 mt-4">
               <div className="text-center text-sm text-muted-foreground">
                 <p>Don&apos;t have an account? Contact your administrator</p>
               </div>

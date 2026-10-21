@@ -68,6 +68,13 @@ class UpdateUserRequest(BaseModel):
     permissions: Optional[UserPermission] = None  # old clients; no longer used
 
 
+def _is_bot_contact(doc: dict) -> bool:
+    """A record the Telegram bot made on /start: named by a Telegram ID, no password and no email."""
+    name = doc.get("username")
+    named_by_id = isinstance(name, int) or (isinstance(name, str) and name.lstrip("-").isdigit())
+    return named_by_id and not doc.get("password_hash") and not doc.get("email")
+
+
 def _user_response(doc: dict, id_value: str, user_type: str, **overrides) -> "UserResponse":
     username = doc.get("username", "")
     active, can_upload = account_flags(username, doc)
@@ -90,7 +97,7 @@ def _user_response(doc: dict, id_value: str, user_type: str, **overrides) -> "Us
     return UserResponse(**fields)
 
 class ChangePasswordRequest(BaseModel):
-    current_password: str
+    current_password: str = ""  # not needed when the owner sets someone else's password
     new_password: str
 
 class IndexChatResponse(BaseModel):
@@ -129,6 +136,9 @@ async def get_users(request: Request, user: User = Depends(require_auth)):
         for user_doc in all_users:
             # Skip admin user as we'll add it separately with full details
             if user_doc.get("username") == "admin":
+                continue
+            # The bot saves a bare record for anyone who sends /start; those aren't sign-in accounts
+            if _is_bot_contact(user_doc):
                 continue
                 
             # Determine user type
@@ -361,7 +371,12 @@ async def change_user_password(request: Request, user_id_param: str, password_re
         # Accounts without a password yet (e.g. Telegram/Google sign-in) set their first one
         # without a current password; the requester is already authenticated as self or owner.
         has_password = bool(database.Users.get_password_hash(target_username))
-        if has_password:
+        if is_owner and not is_self:
+            # The owner sets a new password for someone who forgot theirs; no current password needed
+            logger.info(f"Owner set a new password for user: {target_username}")
+            is_password_correct = True
+            password_limiter.success(f"pw:{target_username.strip().lower()}")
+        elif has_password:
             # Same brute-force protection as sign-in, keyed by the account being changed
             key = f"pw:{target_username.strip().lower()}"
             try:
@@ -383,6 +398,8 @@ async def change_user_password(request: Request, user_id_param: str, password_re
             logger.warning(f"Incorrect current password for user: {target_username}")
             raise HTTPException(status_code=400, detail="Current password is incorrect")
         
+        if len(password_request.new_password) < 6:
+            raise HTTPException(status_code=400, detail="Use a password of at least 6 characters.")
         # Hash new password
         logger.info(f"Hashing new password for user: {target_username}")
         new_password_hash = hash_password(password_request.new_password)

@@ -60,21 +60,41 @@ def verify_credentials(username: str, password: str) -> bool:
     is_password_valid = verify_password(password)
     return is_username_valid and is_password_valid
 
-def check_login(username: str, password: str) -> bool:
+def canonical_username(username: Optional[str]) -> str:
+    """The stored spelling of a typed username: spaces around it and letter case don't matter
+    (phone keyboards add a trailing space and capitalise the first letter)."""
+    import re
+    name = (username or "").strip()
+    if not name:
+        return name
+    try:
+        if database.Users.getUser(name):
+            return name
+        doc = database.Users.find_one({"username": {"$regex": f"^{re.escape(name)}$", "$options": "i"}})
+        if doc and isinstance(doc.get("username"), str):
+            return doc["username"]
+    except Exception as e:
+        logger.error(f"Username lookup failed for '{name}': {e}")
+    return name
+
+
+def check_login(username: str, password: str) -> Optional[str]:
     """verify_credentials with brute-force protection for every password sign-in.
 
+    Returns the account's stored username when the password is right, else None.
     Raises TooManyAttempts while the username is locked, including when this failure starts a lock.
     """
-    key = f"pw:{(username or '').strip().lower()}"
+    name = canonical_username(username)
+    key = f"pw:{name.lower()}"
     password_limiter.check(key)
-    if verify_credentials(username, password):
+    if verify_credentials(name, password):
         password_limiter.success(key)
-        return True
+        return name
     lock = password_limiter.failure(key)
     if lock:
-        logger.warning(f"Password sign-in for '{username}' locked for {lock}s after repeated failures")
+        logger.warning(f"Password sign-in for '{name}' locked for {lock}s after repeated failures")
         raise TooManyAttempts(lock)
-    return False
+    return None
 
 def verify_google_token(token: str) -> Optional[dict]:
     """Verify Google ID token and return user info if valid"""
@@ -89,10 +109,10 @@ def verify_google_token(token: str) -> Optional[dict]:
         # Specify the CLIENT_ID of the app that accesses the backend:
         idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), GOOGLE_CLIENT_ID)
         
-        # Check if the user's email is in the authorized admins list
+        # Who may sign in is decided by the login route (added users and AUTHORIZED_ADMIN_EMAILS)
         user_email = idinfo['email']
-        if user_email not in AUTHORIZED_ADMINS:
-            logger.warning(f"Google user {user_email} is not in the authorized admins list")
+        if not idinfo.get('email_verified', False):
+            logger.warning(f"Google account {user_email} has no verified email")
             return None
         
         # ID token is valid. Get user info
