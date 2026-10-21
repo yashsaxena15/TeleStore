@@ -3,6 +3,7 @@
 from fastapi import Request, Response, HTTPException
 
 
+from telestore.security.credentials import ACCOUNT_DISABLED, UPLOADS_DISABLED, account_flags
 from telestore.api.routes.webdav.common import authenticate_webdav, parse_webdav_path, router
 from telestore.api.routes.webdav.operations import handle_copy, handle_delete, handle_lock, handle_mkcol, handle_move, handle_proppatch
 from telestore.api.routes.webdav.propfind import handle_propfind
@@ -29,6 +30,11 @@ async def webdav_dispatcher(request: Request, path: str = ""):
     # 2. Authenticate all operational WebDAV requests
     user_data, owner_id, default_chat_id = authenticate_webdav(request)
     segments = parse_webdav_path(path)
+    active, can_upload = account_flags(user_data.get("username"), user_data)
+    if not active:
+        raise HTTPException(status_code=403, detail=ACCOUNT_DISABLED)
+    if method in ("PUT", "COPY") and not can_upload:
+        raise HTTPException(status_code=403, detail=UPLOADS_DISABLED)
 
     # 3. Handle specific methods
     if method == "PROPFIND":

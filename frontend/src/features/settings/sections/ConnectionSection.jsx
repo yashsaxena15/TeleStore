@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { IndexChatDialog } from "@/features/explorer/dialogs/IndexChatDialog";
 import { api, updateApiBaseUrl, resetApiBaseUrl } from "@/lib/api";
+import authService from "@/features/auth/authService";
 import { SettingsPanel, Field, StatusPill } from "../SettingsUi";
 import { defaultBackendUrl, savedBackendUrl, isValidBackendUrl, testBackendUrl } from "../connection";
 
@@ -78,23 +79,28 @@ const IndexChatPanel = () => {
     const [busy, setBusy] = useState(false);
     const [botDialogOpen, setBotDialogOpen] = useState(false);
     useEffect(() => {
-        api.getUserIndexChat()
+        const load = () => api.getUserIndexChat()
             .then((r) => {
             setSaved(r.index_chat_id ?? null);
-            setValue(r.index_chat_id != null ? String(r.index_chat_id) : "");
+            setValue((current) => (current.trim() && current.trim() !== String(r.index_chat_id ?? "") ? current : (r.index_chat_id != null ? String(r.index_chat_id) : "")));
         })
             .catch(() => { });
+        load();
+        // After adding the bot in Telegram the server knows the new group; pick it up on return
+        window.addEventListener("focus", load);
+        return () => window.removeEventListener("focus", load);
     }, []);
     const trimmed = value.trim();
-    const valid = trimmed === "" || /^-?\d+$/.test(trimmed);
+    // A chat is required: without one, uploads fail
+    const valid = /^-?\d+$/.test(trimmed);
     const dirty = trimmed !== (saved != null ? String(saved) : "");
     const save = async () => {
         setBusy(true);
         try {
-            const id = trimmed ? parseInt(trimmed, 10) : null;
+            const id = parseInt(trimmed, 10);
             await api.updateUserIndexChat({ index_chat_id: id });
             setSaved(id);
-            toast.success(id ? "Index chat saved" : "Index chat cleared");
+            toast.success("Index chat saved");
         }
         catch (err) {
             toast.error(err.message || "Couldn't save the index chat");
@@ -103,10 +109,16 @@ const IndexChatPanel = () => {
             setBusy(false);
         }
     };
-    return (<SettingsPanel icon={Hash} title="Index chat" description="The Telegram group or channel where your uploads are stored">
-      <Field label="Chat ID" htmlFor="index-chat" hint={valid ? "Usually starts with -100. Leave empty to use the server's default." : undefined}>
+    return (<SettingsPanel icon={Hash} title="Index chat" description="The private Telegram group where your files are kept. Every file you upload is stored there as a message.">
+      {saved == null && (<p role="status" className="text-sm text-warning">Not set up yet. Uploads won't work until the bot is in one of your groups.</p>)}
+      <ol className="grid gap-1 text-sm text-muted-foreground list-decimal pl-5">
+        <li>In Telegram, create a private group (or use one you already have).</li>
+        <li>Press <span className="text-foreground font-medium">Add bot to a chat</span> and pick that group.</li>
+        <li>In the group, tap the button the bot posts. The chat ID below fills in by itself.</li>
+      </ol>
+      <Field label="Chat ID" htmlFor="index-chat" hint={trimmed && !valid ? undefined : "Group IDs start with -100. You only type one here if you already know it."}>
         <Input id="index-chat" inputMode="numeric" className="h-9 font-mono text-[13px] max-w-sm" value={value} onChange={(e) => setValue(e.target.value)} placeholder="-1001234567890"/>
-        {!valid && <p role="alert" className="text-xs text-destructive">A chat ID is a number, for example -1001234567890.</p>}
+        {trimmed && !valid && <p role="alert" className="text-xs text-destructive">A chat ID is a number, for example -1001234567890.</p>}
       </Field>
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" size="sm" className="h-8" onClick={() => setBotDialogOpen(true)}><Send className="w-3.5 h-3.5 mr-1.5"/>Add bot to a chat</Button>
@@ -117,7 +129,8 @@ const IndexChatPanel = () => {
     </SettingsPanel>);
 };
 
+// The server address only matters in the desktop app; in a browser it is always this site
 export const ConnectionSection = () => (<div className="grid gap-4">
-    <BackendUrlPanel />
+    {authService.isTauri() && <BackendUrlPanel />}
     <IndexChatPanel />
   </div>);

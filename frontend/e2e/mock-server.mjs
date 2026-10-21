@@ -39,8 +39,8 @@ const ROUTES = {
     "/user/profile": { username: "admin", email: "owner@example.com", telegram_first_name: "Yash" },
     "/user/is-owner": { is_owner: true },
     "/user": { users: [
-        { id: "1", username: "admin", email: "owner@example.com", telegram_username: "yash", permissions: { read: true, write: true }, user_type: "local" },
-        { id: "u2", username: "family", email: "family@example.com", permissions: { read: true, write: false }, user_type: "local" },
+        { id: "1", username: "admin", email: "owner@example.com", telegram_username: "yash", active: true, can_upload: true, is_owner: true, has_telegram: true, has_index_chat: true, user_type: "local" },
+        { id: "u2", username: "family", email: "family@example.com", active: true, can_upload: true, has_telegram: false, has_index_chat: false, user_type: "local" },
     ] },
     "/user/index-chat": { index_chat_id: -1004314578828 },
     "/cloud/accounts": { accounts: [{ id: "acc1", account_name: "My Drive", account_email: "me@gmail.com" }] },
@@ -104,6 +104,10 @@ const mutation = (req, res, url, body) => {
     }
     if (url.pathname === "/vault/unlock") {
         return send(res, 429, { detail: "Too many wrong attempts. Try again in 1 minute." }, "application/json");
+    }
+    if (url.pathname === "/user" && req.method === "POST") {
+        const data = JSON.parse(body || "{}");
+        return send(res, 200, { id: "u9", username: data.username, email: data.email, active: true, can_upload: data.can_upload !== false, has_telegram: false, has_index_chat: false, user_type: "local", created_at: "2026-10-21" });
     }
     send(res, 200, { success: true });
 };

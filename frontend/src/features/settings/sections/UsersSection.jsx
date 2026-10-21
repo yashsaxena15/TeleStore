@@ -7,7 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { api } from "@/lib/api";
+import { api, mapUser } from "@/lib/api";
 import logger from "@/lib/logger";
 import { cn } from "@/lib/utils";
 import { SettingsPanel, Field, Segmented } from "../SettingsUi";
@@ -17,7 +17,7 @@ const MIN_PASSWORD = 6;
 const LOGIN_TYPES = [{ value: "local", label: "Username & password" }, { value: "google", label: "Google sign-in" }];
 
 const AddUserDialog = ({ open, onOpenChange, onAdded }) => {
-    const empty = { username: "", email: "", password: "", read: true, write: false };
+    const empty = { username: "", email: "", password: "", canUpload: true };
     const [type, setType] = useState("local");
     const [form, setForm] = useState(empty);
     const [busy, setBusy] = useState(false);
@@ -40,7 +40,7 @@ const AddUserDialog = ({ open, onOpenChange, onAdded }) => {
             const added = await api.addUser({
                 ...(type === "local" ? { username: form.username.trim(), password: form.password } : {}),
                 email: form.email.trim(),
-                permissions: { read: form.read, write: form.write },
+                can_upload: form.canUpload,
             });
             onAdded(added);
             toast.success(`${added.username || form.email.trim()} added`);
@@ -58,7 +58,7 @@ const AddUserDialog = ({ open, onOpenChange, onAdded }) => {
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Add user</DialogTitle>
-          <DialogDescription>Give someone their own sign-in. You can change what they can do later.</DialogDescription>
+          <DialogDescription>They get their own private library, empty to start. To upload, they connect Telegram and add the bot to their own group once they sign in.</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="grid gap-3">
           <Field label="How they sign in"><div><Segmented label="How they sign in" value={type} options={LOGIN_TYPES} onChange={setType}/></div></Field>
@@ -67,10 +67,10 @@ const AddUserDialog = ({ open, onOpenChange, onAdded }) => {
             <Input id="nu-email" type="email" className="h-9" value={form.email} onChange={(e) => set({ email: e.target.value })}/>
           </Field>
           {type === "local" && (<Field label="Password" htmlFor="nu-password"><Input id="nu-password" type="password" autoComplete="new-password" className="h-9" value={form.password} onChange={(e) => set({ password: e.target.value })}/></Field>)}
-          <div className="flex flex-wrap gap-6 pt-1">
-            <label className="flex items-center gap-2 text-sm"><Switch checked={form.read} onCheckedChange={(v) => set({ read: v })}/>Can view files</label>
-            <label className="flex items-center gap-2 text-sm"><Switch checked={form.write} onCheckedChange={(v) => set({ write: v })}/>Can change files</label>
-          </div>
+          <label className="flex items-start gap-2.5 text-sm pt-1">
+            <Switch className="mt-0.5" checked={form.canUpload} onCheckedChange={(v) => set({ canUpload: v })}/>
+            <span>Can upload<span className="block text-xs text-muted-foreground">Uploads, cloud leeches and torrents, Drive transfers, compressing. Uses your bots and bandwidth.</span></span>
+          </label>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <DialogFooter className="gap-2 sm:gap-0 pt-1">
             <Button type="button" variant="outline" onClick={close}>Cancel</Button>
@@ -146,6 +146,15 @@ const SetPasswordDialog = ({ user, onOpenChange }) => {
     </Dialog>);
 };
 
+// What a user still has to do before they can upload
+const setupStatus = (user) => {
+    if (!user.hasTelegram)
+        return { ready: false, label: "Needs Telegram", hint: "They connect their Telegram account in Settings › Account." };
+    if (!user.hasIndexChat)
+        return { ready: false, label: "Needs index chat", hint: "They add the bot to their own Telegram group in Settings › Connection." };
+    return { ready: true, label: "Ready to upload", hint: "Telegram connected and index chat set." };
+};
+
 export const UsersSection = () => {
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -162,15 +171,20 @@ export const UsersSection = () => {
         })
             .finally(() => setLoading(false));
     }, []);
-    // Saves email/permission changes; the table shows the change right away and rolls back on failure
+    // Saves email / Active / Can upload; the table shows the change right away and rolls back on failure
     const saveUser = async (user, patch) => {
         const before = users;
-        const next = { ...user, ...patch, permissions: { ...user.permissions, ...patch.permissions } };
-        setUsers(users.map((u) => (u.id === user.id ? next : u)));
+        setUsers(users.map((u) => (u.id === user.id ? { ...u, ...patch } : u)));
         setEditing(null);
+        const body = {};
+        if (patch.email !== undefined) body.email = patch.email;
+        if (patch.active !== undefined) body.active = patch.active;
+        if (patch.canUpload !== undefined) body.can_upload = patch.canUpload;
         try {
-            await api.updateUser(user.id, { email: next.email, permissions: next.permissions });
+            await api.updateUser(user.id, body);
             if (patch.email) toast.success("Email updated");
+            if (patch.active !== undefined) toast.success(patch.active ? `${user.username || user.email} can sign in again` : `${user.username || user.email} is turned off`);
+            if (patch.canUpload !== undefined) toast.success(patch.canUpload ? `Uploads turned on for ${user.username || user.email}` : `Uploads turned off for ${user.username || user.email}`);
         }
         catch (err) {
             setUsers(before);
@@ -189,25 +203,24 @@ export const UsersSection = () => {
             toast.error(errorMessage(err, "Couldn't remove the user"));
         }
     };
-    const added = (raw) => setUsers((list) => [...list, {
-            id: raw.id, username: raw.username, email: raw.email, permissions: raw.permissions || { read: true, write: false },
-            userType: raw.user_type || raw.userType, telegramUsername: raw.telegram_username,
-        }]);
-    return (<SettingsPanel icon={Users} title="Users" description="Who can sign in and what they can do" actions={<Button size="sm" className="h-8" onClick={() => setAddOpen(true)}><UserPlus className="w-3.5 h-3.5 mr-1.5"/>Add user</Button>}>
+    const added = (raw) => setUsers((list) => [...list, mapUser(raw)]);
+    return (<SettingsPanel icon={Users} title="Users" description="Each person has their own private library; nobody sees anyone else's files." actions={<Button size="sm" className="h-8" onClick={() => setAddOpen(true)}><UserPlus className="w-3.5 h-3.5 mr-1.5"/>Add user</Button>}>
       {loading ? (<p className="text-sm text-muted-foreground">Loading users…</p>) : users.length === 0 ? (<p className="text-sm text-muted-foreground">No users yet.</p>) : (<div className="-mx-4 -mb-4 overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[10.5px] uppercase tracking-wider text-muted-foreground border-b border-border">
                 <th className="font-semibold px-4 py-2">User</th>
                 <th className="font-semibold px-2 py-2 hidden md:table-cell">Telegram</th>
-                <th className="font-semibold px-2 py-2 text-center w-16">View</th>
-                <th className="font-semibold px-2 py-2 text-center w-16">Change</th>
+                <th className="font-semibold px-2 py-2 text-center w-16" title="Turned-off accounts can't sign in. Their files are kept.">Active</th>
+                <th className="font-semibold px-2 py-2 text-center w-20" title="Uploads, cloud leeches, Drive transfers and compressing">Can upload</th>
                 <th className="w-12"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
               {users.map((user) => {
                 const isAdmin = user.username === "admin";
+                const locked = user.isOwner || isAdmin;
+                const setup = setupStatus(user);
                 const name = user.username || user.email || "Unknown";
                 return (<tr key={user.id} className="border-b border-border last:border-0 hover:bg-muted/40">
                     <td className="px-4 py-2.5 max-w-0 w-full">
@@ -216,10 +229,11 @@ export const UsersSection = () => {
                         <span className={cn("shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded", user.userType === "google" ? "bg-info/15 text-info" : "bg-muted text-muted-foreground")}>{user.userType === "google" ? "Google" : "Local"}</span>
                       </div>
                       {user.email && user.email !== name && <p className="text-xs text-muted-foreground truncate">{user.email}</p>}
+                      <p className={cn("text-[11px] mt-0.5", setup.ready ? "text-success" : "text-warning")} title={setup.hint}>{setup.label}</p>
                     </td>
                     <td className="px-2 py-2.5 hidden md:table-cell whitespace-nowrap text-muted-foreground">{user.telegramUsername ? `@${user.telegramUsername}` : "Not connected"}</td>
-                    <td className="px-2 py-2.5 text-center"><Switch checked={Boolean(user.permissions?.read)} onCheckedChange={(v) => saveUser(user, { permissions: { read: v } })} aria-label={`${name} can view files`}/></td>
-                    <td className="px-2 py-2.5 text-center"><Switch checked={Boolean(user.permissions?.write)} onCheckedChange={(v) => saveUser(user, { permissions: { write: v } })} aria-label={`${name} can change files`}/></td>
+                    <td className="px-2 py-2.5 text-center" title={locked ? "The owner account can't be turned off" : undefined}><Switch checked={user.active} disabled={locked} onCheckedChange={(v) => saveUser(user, { active: v })} aria-label={`${name} is active`}/></td>
+                    <td className="px-2 py-2.5 text-center" title={locked ? "The owner account can always upload" : undefined}><Switch checked={user.canUpload} disabled={locked} onCheckedChange={(v) => saveUser(user, { canUpload: v })} aria-label={`${name} can upload`}/></td>
                     <td className="pr-3 py-2.5 text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>

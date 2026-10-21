@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional
 
-from telestore.security.credentials import require_auth, User
+from telestore.security.credentials import require_auth, require_upload, User
 from telestore.services.remote_transfer_manager import remote_transfer_manager
 from telestore.db import database
 
@@ -30,7 +30,7 @@ class RetryRemoteTransferModel(BaseModel):
 async def add_remote_transfer(
     request: Request,
     body: EnqueueRemoteTransferModel,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_upload)
 ):
     """Enqueue a Google Drive (file/folder), BitTorrent Magnet, or direct URL server-to-server download."""
     if not user.telegram_user_id:
@@ -72,7 +72,7 @@ async def upload_torrent_transfer(
     request: Request,
     file: UploadFile = File(...),
     destination_path: Optional[str] = Form("/Home"),
-    user: User = Depends(require_auth)
+    user: User = Depends(require_upload)
 ):
     """Enqueue a BitTorrent transfer from an uploaded .torrent file."""
     if not user.telegram_user_id:
@@ -151,7 +151,7 @@ async def cancel_remote_group(
 @router.post("/resume-group")
 async def resume_remote_group(
     body: ResumeRemoteGroupModel,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_upload)
 ):
     """Manually resume all tasks in a group that were paused due to quota cooldown."""
     user_id = str(user.telegram_user_id or user.username)
@@ -161,7 +161,7 @@ async def resume_remote_group(
 @router.post("/retry")
 async def retry_remote_task(
     body: RetryRemoteTransferModel,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_upload)
 ):
     """Retry a failed or paused remote transfer task."""
     user_id = str(user.telegram_user_id or user.username)

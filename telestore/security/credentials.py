@@ -1,4 +1,4 @@
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBearer
 from typing import Optional
 import hmac
@@ -23,6 +23,9 @@ class User(BaseModel):
     telegram_first_name: Optional[str] = None
     telegram_last_name: Optional[str] = None
     telegram_profile_picture: Optional[str] = None
+    # Set by the owner in Settings › Users (missing means allowed)
+    active: bool = True
+    can_upload: bool = True
 
 # Fallback admin, used only when the username is not in the database.
 # Both values come from .env (DEFAULT_ADMIN_PASSWORD is required by telestore.config).
@@ -110,6 +113,30 @@ def verify_google_token(token: str) -> Optional[dict]:
         logger.error(f"Google token verification failed: {e}")
         return None
 
+ACCOUNT_DISABLED = "This account has been turned off. Ask the owner to turn it back on."
+UPLOADS_DISABLED = "Uploading is turned off for this account. Ask the owner to turn it on."
+
+
+def is_owner_account(username: Optional[str], user_data: Optional[dict]) -> bool:
+    """The admin login and the Telegram OWNER can never be turned off or limited."""
+    from telestore.config import OWNER
+    if username == "admin":
+        return True
+    tg_id = (user_data or {}).get("telegram_user_id")
+    try:
+        return OWNER is not None and tg_id is not None and int(tg_id) == int(OWNER)
+    except (TypeError, ValueError):
+        return False
+
+
+def account_flags(username: Optional[str], user_data: Optional[dict]) -> tuple:
+    """(active, can_upload) for a user record; missing values mean allowed."""
+    if is_owner_account(username, user_data):
+        return True, True
+    data = user_data or {}
+    return data.get("active", True) is not False, data.get("can_upload", True) is not False
+
+
 def is_authenticated(request: Request) -> bool:
     auth_status = request.session.get("authenticated", False)
     logger.info(f"Checking authentication status: {auth_status}")
@@ -131,6 +158,15 @@ def is_admin(request: Request) -> bool:
     
     return False
 
+def _with_account_flags(user: User, user_data: Optional[dict]) -> User:
+    active, can_upload = account_flags(user.username, user_data)
+    if not active:
+        # A turned-off account stops working on its next request, even with an open session
+        raise HTTPException(status_code=403, detail=ACCOUNT_DISABLED)
+    user.active, user.can_upload = active, can_upload
+    return user
+
+
 def require_auth(request: Request) -> User:
     # Check session first
     if request.session.get("authenticated"):
@@ -149,7 +185,7 @@ def require_auth(request: Request) -> User:
             telegram_last_name=user_data.get("telegram_last_name") if user_data else None,
             telegram_profile_picture=user_data.get("telegram_profile_picture") if user_data else None
         )
-        return user
+        return _with_account_flags(user, user_data)
     
     # Check if authenticated via token (from middleware)
     if hasattr(request.state, 'authenticated_via_token') and request.state.authenticated_via_token:
@@ -169,7 +205,7 @@ def require_auth(request: Request) -> User:
             telegram_last_name=user_data.get("telegram_last_name") if user_data else None,
             telegram_profile_picture=user_data.get("telegram_profile_picture") if user_data else None
         )
-        return user
+        return _with_account_flags(user, user_data)
     
     raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -201,3 +237,10 @@ def get_current_user(request: Request) -> Optional[str]:
             return "admin"
         return username
     return None
+
+
+def require_upload(user: User = Depends(require_auth)) -> User:
+    """Like require_auth, for anything that adds files (uploads, leeches, transfers, archives)."""
+    if not user.can_upload:
+        raise HTTPException(status_code=403, detail=UPLOADS_DISABLED)
+    return user

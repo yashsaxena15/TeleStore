@@ -14,7 +14,7 @@ from fastapi import APIRouter, Request, Depends, HTTPException, Query, UploadFil
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
-from telestore.security.credentials import require_auth, User
+from telestore.security.credentials import require_auth, require_upload, User
 from telestore.services.google_drive_manager import GoogleDriveManager
 from telestore.services.remote_transfer_manager import remote_transfer_manager
 from telestore.db import database
@@ -687,7 +687,7 @@ async def transfer_to_telegram(
     account_id: str,
     body: TransferToTelegramRequest,
     request: Request,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_upload)
 ):
     """
     Stream and copy/cut a file or full recursive folder directly from Google Drive into Telegram storage.
@@ -796,7 +796,7 @@ async def transfer_from_telegram(
     account_id: str,
     body: TransferFromTelegramRequest,
     request: Request,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_upload)
 ):
     """
     Stream and copy/cut Telegram files/folders directly into Google Drive.
@@ -904,7 +904,7 @@ async def upload_to_google_drive(
     account_id: str,
     file: UploadFile = File(...),
     folder_id: Optional[str] = Query("root"),
-    user: User = Depends(require_auth)
+    user: User = Depends(require_upload)
 ):
     """
     Directly upload a file from the user's browser into Google Drive.

@@ -5,7 +5,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from telestore.security.credentials import require_auth, User
+from telestore.security.credentials import require_auth, require_upload, User
 from telestore.db import database
 from d4rk.Logs import setup_logger
 from telestore.services.byte_streamer import ByteStreamer
@@ -76,7 +76,7 @@ async def inspect_archive_endpoint(
 async def extract_archive_endpoint(
     body: ExtractRequest,
     request: Request,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_upload)
 ):
     """
     Initiates asynchronous cloud extraction.
@@ -134,7 +134,7 @@ async def extract_archive_endpoint(
 async def compress_archive_endpoint(
     body: CompressRequest,
     request: Request,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_upload)
 ):
     """
     Initiates asynchronous cloud compression into a ZIP archive.

@@ -72,6 +72,39 @@ test.describe("navigation", () => {
     });
 });
 
+test.describe("users and connection", () => {
+    test("owner turns a user off and uploads off, and adds a user", async ({ page, request }) => {
+        await page.goto("/settings?tab=users");
+        await expect(page.getByText("Needs Telegram")).toBeVisible();
+        // The owner's own switches are locked
+        await expect(page.getByRole("switch", { name: "admin is active" })).toBeDisabled();
+        await page.getByRole("switch", { name: "family is active" }).click();
+        await page.getByRole("switch", { name: "family can upload" }).click();
+        await expect.poll(async () => (await mutations(request)).filter((r) => r.path === "/user/u2").map((r) => r.body)).toEqual(['{"active":false}', '{"can_upload":false}']);
+
+        await page.getByRole("button", { name: "Add user" }).first().click();
+        const dialog = page.getByRole("dialog");
+        await dialog.getByLabel("Username").fill("newbie");
+        await dialog.getByLabel("Email").fill("newbie@example.com");
+        await dialog.getByLabel("Password").fill("secret123");
+        await dialog.getByRole("switch").click();
+        await dialog.getByRole("button", { name: "Add user" }).click();
+        await expect(page.getByText("newbie", { exact: true })).toBeVisible();
+        const add = (await mutations(request)).find((r) => r.path === "/user" && r.method === "POST");
+        expect(JSON.parse(add.body)).toMatchObject({ username: "newbie", can_upload: false });
+    });
+
+    test("connection page in a browser shows only the index chat", async ({ page }) => {
+        await page.goto("/settings?tab=connection");
+        await expect(page.getByText("Index chat", { exact: true })).toBeVisible();
+        await expect(page.getByText("Backend server URL")).toHaveCount(0);
+        await expect(page.getByLabel("Chat ID")).toHaveValue("-1004314578828");
+        // An empty chat ID can't be saved (uploads would stop working)
+        await page.getByLabel("Chat ID").fill("");
+        await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+    });
+});
+
 test.describe("file explorer", () => {
     test("selection bar, details pane and Move to…", async ({ page, request }) => {
         await page.goto("/");

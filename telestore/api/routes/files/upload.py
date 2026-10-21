@@ -10,7 +10,7 @@ import secrets
 import shutil
 from typing import List, Dict, Any
 
-from telestore.security.credentials import require_auth, User
+from telestore.security.credentials import require_auth, require_upload, User
 from telestore.db import database
 from telestore.services.pipeline_uploader import upload_part_task
 from telestore.services.priority_manager import priority_manager
@@ -25,7 +25,7 @@ async def upload_file(
     request: Request,  # Make request parameter required to access bot manager
     file: UploadFile = File(...),
     path: str = Form(default="/", description="Destination path for the uploaded file"),
-    user: User = Depends(require_auth)
+    user: User = Depends(require_upload)
 ):
     try:
         # DEBUG: Log the received path and file info
@@ -312,7 +312,7 @@ class InitUploadRequest(BaseModel):
 @router.post("/upload/init")
 async def init_chunked_upload(
     req: InitUploadRequest,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_upload)
 ):
     if not user.telegram_user_id:
         raise HTTPException(status_code=400, detail="TELEGRAM_NOT_VERIFIED: Please verify your Telegram account before uploading files")
