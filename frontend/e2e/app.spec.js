@@ -135,6 +135,17 @@ test.describe("item actions", () => {
         await expect.poll(async () => (await mutations(request)).some((r) => r.path.startsWith("/folders/create") && r.body.includes("Taxes 2026"))).toBe(true);
     });
 
+    test("upload a file from the New menu", async ({ page, request }) => {
+        await page.goto("/");
+        await row(page, "Movies").dblclick();
+        await expect(row(page, "Arrival.2016.1080p.mkv")).toBeVisible();
+        const chooser = page.waitForEvent("filechooser");
+        await page.getByRole("button", { name: "New", exact: true }).first().click();
+        await page.getByRole("menuitem", { name: /Upload files/ }).click();
+        await (await chooser).setFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
+        await expect.poll(async () => (await mutations(request)).some((r) => r.path.startsWith("/files/upload") && r.body.includes("notes.txt") && r.body.includes("/Home/Movies"))).toBe(true);
+    });
+
     test("copy in one folder, paste in another", async ({ page, request }) => {
         await page.goto("/");
         await page.getByRole("button", { name: "Select Q3-report.pdf" }).click();

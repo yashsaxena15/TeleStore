@@ -26,3 +26,6 @@ export function isItemStarred(item) {
   if (!item) return false;
   return Boolean(item.starred || item.is_starred);
 }
+
+// Stable identity for an item (selection, list keys)
+export const getItemKey = (item) => item.id || item.file_unique_id || item.name;
