@@ -10,14 +10,12 @@ import { MobileNav } from "@/components/layout/MobileNav";
 import { Dock } from "@/components/layout/dock/Dock";
 import { CommandPalette } from "@/components/layout/CommandPalette";
 import { ErrorBoundary } from "@/components/feedback/ErrorBoundary";
-import { ConnectCloudModal } from "@/features/cloud/ConnectCloudModal";
 import authService from "@/features/auth/authService";
 import { TopBar } from "@/components/layout/TopBar";
 import { FileGrid } from "./FileGrid";
 import { FilePagination } from "./FilePagination";
 import { DeleteDialog } from "@/features/explorer/dialogs/DeleteDialog";
 import { NewFolderDialog } from "@/features/explorer/dialogs/NewFolderDialog";
-import Transfers from "@/features/transfers/Transfers";
 import { getApiBaseUrl, fetchWithTimeout, api } from "@/lib/api";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, } from "@/components/ui/alert-dialog";
 import logger from "@/lib/logger";
@@ -28,10 +26,6 @@ import { isSystemProtectedFolder } from "./lib/fileKeyboardNavigation";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { downloadManager } from "@/features/transfers/downloadManager";
 import { useError } from "@/contexts/ErrorHandlerContext"; // Import the error context
-import { FolderDownloadDialog } from "@/features/explorer/dialogs/FolderDownloadDialog";
-import { WebDAVMountDialog } from "@/features/cloud/WebDAVMountDialog";
-import { VaultModal } from "@/features/vault/VaultModal";
-import { RemoteDownloadDialog } from "@/features/cloud/RemoteDownloadDialog";
 import { settingsUrl } from "@/features/settings/settingsTabs";
 import { pathFromUrl, segmentsFromFilePath, viewFromPathname } from "./lib/explorerRoutes";
 import { useExplorerHistory } from "./hooks/useExplorerHistory";
@@ -40,6 +34,15 @@ import { useExplorerHistory } from "./hooks/useExplorerHistory";
 const PAGE_CLASS = "flex-1 flex flex-col h-full min-h-0 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300";
 
 // Page panels are split into their own chunks and load when first shown
+// Pages and dialogs that are not needed on first load arrive when they are opened
+const Transfers = lazy(() => import("@/features/transfers/Transfers"));
+const ConnectCloudModal = lazy(() => import("@/features/cloud/ConnectCloudModal").then((m) => ({ default: m.ConnectCloudModal })));
+const FolderDownloadDialog = lazy(() => import("@/features/explorer/dialogs/FolderDownloadDialog").then((m) => ({ default: m.FolderDownloadDialog })));
+const WebDAVMountDialog = lazy(() => import("@/features/cloud/WebDAVMountDialog").then((m) => ({ default: m.WebDAVMountDialog })));
+const VaultModal = lazy(() => import("@/features/vault/VaultModal").then((m) => ({ default: m.VaultModal })));
+const RemoteDownloadDialog = lazy(() => import("@/features/cloud/RemoteDownloadDialog").then((m) => ({ default: m.RemoteDownloadDialog })));
+// Mounts a lazy dialog only while it is open
+const WhenOpen = ({ open, children }) => (open ? <Suspense fallback={null}>{children}</Suspense> : null);
 const SettingsContent = lazy(() => import("@/features/settings/SettingsContent").then((m) => ({ default: m.SettingsContent })));
 const StorageAnalyticsContent = lazy(() => import("@/features/storage/StorageAnalyticsContent").then((m) => ({ default: m.StorageAnalyticsContent })));
 const PanelLoading = () => (<div className="flex flex-1 items-center justify-center p-10 text-sm text-muted-foreground">Loading…</div>);
@@ -1401,7 +1404,9 @@ export const FileExplorer = () => {
             }} onShowInFolder={openFolderPath}/>
             </Suspense>
           </div>) : view === "transfers" ? (<div key="transfers" className={PAGE_CLASS}>
-            <Transfers onNewTransfer={() => setRemoteDownloadOpen(true)}/>
+            <Suspense fallback={<PanelLoading />}>
+              <Transfers onNewTransfer={() => setRemoteDownloadOpen(true)}/>
+            </Suspense>
           </div>) : (<div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             <TopBar currentPath={currentPath} searchQuery={searchQuery} viewMode={viewMode} onSearchChange={setSearchQuery} onViewModeChange={setViewMode} onBreadcrumbClick={handleBreadcrumbClick} sortField={sortField} sortOrder={sortOrder} foldersFirst={foldersFirst} onSortChange={(field, order) => {
                 setSortField(field);
@@ -1435,7 +1440,7 @@ export const FileExplorer = () => {
       </div>
 
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} onNavigateView={handleNavigateView} onAction={runShellAction}/>
-      <ConnectCloudModal open={connectDriveOpen} onOpenChange={setConnectDriveOpen} onSuccess={() => window.dispatchEvent(new Event("cloudAccountsChanged"))}/>
+      <WhenOpen open={connectDriveOpen}><ConnectCloudModal open={connectDriveOpen} onOpenChange={setConnectDriveOpen} onSuccess={() => window.dispatchEvent(new Event("cloudAccountsChanged"))}/></WhenOpen>
 
       <DeleteDialog open={!!deleteDialog} itemName={deleteDialog?.item.name || ""} itemType={deleteDialog?.item.type || "file"} onConfirm={confirmDelete} onCancel={cancelDelete} isTrashMode={isEffectiveTrashMode} isCloudMode={isCloudMode}/>
 
@@ -1465,12 +1470,12 @@ export const FileExplorer = () => {
       <NewFolderDialog open={newFolderDialogOpen} currentPath={currentApiPath} // Pass the full path, not just the folder name
      onClose={() => setNewFolderDialogOpen(false)} onConfirm={handleNewFolder}/>
 
-      <FolderDownloadDialog open={!!folderDownloadInfo} info={folderDownloadInfo} onClose={() => setFolderDownloadInfo(null)} onDownloadPart={handleDownloadFolderPart} onDownloadAll={handleDownloadAllFolderParts}/>
+      <WhenOpen open={!!folderDownloadInfo}><FolderDownloadDialog open={!!folderDownloadInfo} info={folderDownloadInfo} onClose={() => setFolderDownloadInfo(null)} onDownloadPart={handleDownloadFolderPart} onDownloadAll={handleDownloadAllFolderParts}/></WhenOpen>
 
-      <WebDAVMountDialog open={showWebDAVDialog} onOpenChange={setShowWebDAVDialog} username={username || undefined}/>
+      <WhenOpen open={showWebDAVDialog}><WebDAVMountDialog open={showWebDAVDialog} onOpenChange={setShowWebDAVDialog} username={username || undefined}/></WhenOpen>
 
-      <VaultModal isOpen={showVaultModal} onClose={() => setShowVaultModal(false)} onSuccess={handleVaultUnlocked} userEmail={userEmail}/>
+      <WhenOpen open={showVaultModal}><VaultModal isOpen={showVaultModal} onClose={() => setShowVaultModal(false)} onSuccess={handleVaultUnlocked} userEmail={userEmail}/></WhenOpen>
 
-      <RemoteDownloadDialog isOpen={remoteDownloadOpen} onClose={() => setRemoteDownloadOpen(false)} defaultPath={currentApiPath}/>
+      <WhenOpen open={remoteDownloadOpen}><RemoteDownloadDialog isOpen={remoteDownloadOpen} onClose={() => setRemoteDownloadOpen(false)} defaultPath={currentApiPath}/></WhenOpen>
     </div>);
 };

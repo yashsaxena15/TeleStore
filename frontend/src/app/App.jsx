@@ -1,9 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/sonner";
-import Login from "@/features/auth/Login";
-import NotFound from "@/app/pages/NotFound";
 import Index from "@/app/pages/Index";
 import { DockProvider } from "@/components/layout/dock/DockContext";
 import logger from "@/lib/logger";
@@ -14,6 +12,9 @@ import authService from "@/features/auth/authService";
 import { ErrorProvider } from "@/contexts/ErrorHandlerContext";
 import { MediaPlayerProvider } from "@/features/player/MediaPlayerContext";
 import { initTheme } from "@/lib/theme";
+// Sign-in and the 404 page are only needed when shown
+const Login = lazy(() => import("@/features/auth/Login"));
+const NotFound = lazy(() => import("@/app/pages/NotFound"));
 const queryClient = new QueryClient();
 // Debug component to log current route
 const RouteDebugger = () => {
@@ -26,7 +27,7 @@ const AppRoutes = () => {
     return (<>
       <RouteDebugger />
       <Routes>
-        <Route path="/login" element={<Login />}/>
+        <Route path="/login" element={<Suspense fallback={null}><Login /></Suspense>}/>
         <Route path="/settings" element={<Index />}/>
         <Route path="/profile" element={<Index />}/>
         <Route path="/downloads" element={<Index />}/>
@@ -37,7 +38,7 @@ const AppRoutes = () => {
         {/* Handle dynamic paths for file explorer */}
         <Route path="/:path/*" element={<Index />}/>
         {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-        <Route path="*" element={<NotFound />}/>
+        <Route path="*" element={<Suspense fallback={null}><NotFound /></Suspense>}/>
       </Routes>
     </>);
 };
