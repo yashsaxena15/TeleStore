@@ -47,6 +47,7 @@ const ROUTES = {
     "/cloud/acc1/storage": { usageInDrive: 10_200_000_000, limit: 15_000_000_000 },
     "/vault/status": { is_setup: true, is_unlocked: false, email: "ow***er@example.com", remaining_seconds: 0, auto_lock_minutes: 15 },
     "/api/health": { status: "healthy" },
+    "/auth/google/config": { client_id: null },
     "/files/analytics": {
         total_bytes: 214_000_000_000, total_files: 1843, total_folders: 96, starred_count: 12, trash_count: 7, trash_bytes: 3_400_000_000,
         by_category: { video: { count: 312, bytes: 168_000_000_000 }, audio: { count: 640, bytes: 9_800_000_000 }, photo: { count: 702, bytes: 6_100_000_000 }, document: { count: 151, bytes: 1_900_000_000 }, archive: { count: 31, bytes: 26_000_000_000 }, other: { count: 7, bytes: 2_200_000_000 } },
@@ -101,6 +102,9 @@ const mutation = (req, res, url, body) => {
     requests.push({ method: req.method, path: url.pathname, body });
     if (url.pathname === "/auth/login") {
         return body.includes('"password":"wrong"') ? send(res, 401, { detail: "Incorrect username or password" }) : send(res, 200, { message: "Login successful", username: "admin", auth_token: "test-token" });
+    }
+    if (url.pathname === "/auth/forgot-password/request") {
+        return send(res, 200, { message: "If that account has an email address, we've sent a 6-digit code to it." });
     }
     if (url.pathname === "/vault/unlock") {
         return send(res, 429, { detail: "Too many wrong attempts. Try again in 1 minute." }, "application/json");

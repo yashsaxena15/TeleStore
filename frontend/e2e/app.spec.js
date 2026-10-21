@@ -80,7 +80,8 @@ test.describe("users and connection", () => {
         await expect(page.getByRole("switch", { name: "admin is active" })).toBeDisabled();
         await page.getByRole("switch", { name: "family is active" }).click();
         await page.getByRole("switch", { name: "family can upload" }).click();
-        await expect.poll(async () => (await mutations(request)).filter((r) => r.path === "/user/u2").map((r) => r.body)).toEqual(['{"active":false}', '{"can_upload":false}']);
+        // The two requests can arrive in either order
+        await expect.poll(async () => (await mutations(request)).filter((r) => r.path === "/user/u2").map((r) => r.body).sort()).toEqual(['{"active":false}', '{"can_upload":false}']);
 
         await page.getByRole("button", { name: "Add user" }).first().click();
         const dialog = page.getByRole("dialog");
@@ -102,6 +103,45 @@ test.describe("users and connection", () => {
         // An empty chat ID can't be saved (uploads would stop working)
         await page.getByLabel("Chat ID").fill("");
         await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+    });
+});
+
+test.describe("sign-in and passwords", () => {
+    test("login trims the username; Google is hidden when not set up", async ({ page, request }) => {
+        await page.goto("/login");
+        await expect(page.getByText("Forgot password?")).toBeVisible();
+        await expect(page.getByText("Or continue with")).toHaveCount(0);
+        await page.getByLabel("Username").fill("yashsaxena15 ");
+        await page.getByLabel("Password", { exact: true }).fill("right");
+        await page.getByRole("button", { name: "Sign In" }).click();
+        await expect.poll(async () => (await mutations(request)).find((r) => r.path === "/auth/login")?.body).toBe('{"username":"yashsaxena15","password":"right"}');
+    });
+
+    test("forgot password: code by email, then a new password", async ({ page, request }) => {
+        await page.goto("/login");
+        await page.getByText("Forgot password?").click();
+        const dialog = page.getByRole("dialog");
+        await dialog.getByLabel("Username").fill("yashsaxena15");
+        await dialog.getByRole("button", { name: "Send code" }).click();
+        await expect(dialog.getByText(/sent a 6-digit code/)).toBeVisible();
+        await dialog.getByLabel("Code from the email").fill("123456");
+        await dialog.getByLabel("New password", { exact: true }).fill("brandnew1");
+        await dialog.getByLabel("Repeat new password").fill("brandnew1");
+        await dialog.getByRole("button", { name: "Set new password" }).click();
+        await expect(page.getByText("Password changed. Sign in with your new password.")).toBeVisible();
+        const reset = (await mutations(request)).find((r) => r.path === "/auth/forgot-password/reset");
+        expect(JSON.parse(reset.body)).toEqual({ username: "yashsaxena15", code: "123456", new_password: "brandnew1" });
+    });
+
+    test("owner sets a new password without the old one", async ({ page, request }) => {
+        await page.goto("/settings?tab=users");
+        await page.getByRole("button", { name: "Actions for family" }).click();
+        await page.getByRole("menuitem", { name: "Set a new password" }).click();
+        const dialog = page.getByRole("dialog");
+        await expect(dialog.getByLabel("Current password")).toHaveCount(0);
+        await dialog.getByLabel("New password", { exact: true }).fill("fresh123");
+        await dialog.getByRole("button", { name: "Set password" }).click();
+        await expect.poll(async () => (await mutations(request)).find((r) => r.path === "/user/u2/password")?.body).toBe('{"current_password":"","new_password":"fresh123"}');
     });
 });
 

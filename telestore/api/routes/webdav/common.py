@@ -82,7 +82,10 @@ def authenticate_webdav(request: Request) -> Tuple[Dict[str, Any], str, Optional
                 return user_data, owner_id, chat_id
 
     try:
-        signed_in = bool(username and password) and check_login(username, password)
+        account = check_login(username, password) if (username and password) else None
+        signed_in = bool(account)
+        if account:
+            username = account
     except TooManyAttempts as e:
         raise HTTPException(status_code=429, detail="Too many failed sign-ins", headers={"Retry-After": str(e.retry_after)})
     if not signed_in:

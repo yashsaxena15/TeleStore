@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { api, mapUser } from "@/lib/api";
+import { useUserProfile } from "@/hooks/useShellData";
 import logger from "@/lib/logger";
 import { cn } from "@/lib/utils";
 import { SettingsPanel, Field, Segmented } from "../SettingsUi";
@@ -101,7 +102,8 @@ const EditEmailDialog = ({ user, onOpenChange, onSave }) => {
     </Dialog>);
 };
 
-const SetPasswordDialog = ({ user, onOpenChange }) => {
+// For someone else the owner just sets a new one (no current password); for themselves the server asks for it
+const SetPasswordDialog = ({ user, isSelf, onOpenChange }) => {
     const [current, setCurrent] = useState("");
     const [next, setNext] = useState("");
     const [busy, setBusy] = useState(false);
@@ -116,8 +118,8 @@ const SetPasswordDialog = ({ user, onOpenChange }) => {
         if (next.length < MIN_PASSWORD) return setError(`Use at least ${MIN_PASSWORD} characters.`);
         setBusy(true);
         try {
-            await api.changeUserPassword(user.id, { current_password: current, new_password: next });
-            toast.success(`Password changed for ${user.username}`);
+            await api.changeUserPassword(user.id, { current_password: isSelf ? current : "", new_password: next });
+            toast.success(isSelf ? "Password changed" : `New password set for ${user.username}. Let them know it.`);
             onOpenChange(false);
         }
         catch (err) {
@@ -130,16 +132,16 @@ const SetPasswordDialog = ({ user, onOpenChange }) => {
     return (<Dialog open={Boolean(user)} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Change password for {user?.username}</DialogTitle>
-          <DialogDescription>The server asks for their current password when they already have one.</DialogDescription>
+          <DialogTitle>{isSelf ? "Change your password" : `Set a new password for ${user?.username}`}</DialogTitle>
+          <DialogDescription>{isSelf ? "Enter your current password, then the new one." : "Use this when they've forgotten theirs. Tell them the new password; they can change it in Settings › Account."}</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="grid gap-3">
-          <Field label="Their current password" htmlFor="up-current"><Input id="up-current" type="password" autoComplete="off" className="h-9" value={current} onChange={(e) => { setCurrent(e.target.value); setError(""); }}/></Field>
+          {isSelf && <Field label="Current password" htmlFor="up-current"><Input id="up-current" type="password" autoComplete="current-password" className="h-9" value={current} onChange={(e) => { setCurrent(e.target.value); setError(""); }}/></Field>}
           <Field label="New password" htmlFor="up-new"><Input id="up-new" type="password" autoComplete="new-password" className="h-9" value={next} onChange={(e) => { setNext(e.target.value); setError(""); }}/></Field>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <DialogFooter className="gap-2 sm:gap-0 pt-1">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={busy || !next}>{busy ? "Saving…" : "Change password"}</Button>
+            <Button type="submit" disabled={busy || !next}>{busy ? "Saving…" : isSelf ? "Change password" : "Set password"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -156,6 +158,7 @@ const setupStatus = (user) => {
 };
 
 export const UsersSection = () => {
+    const me = useUserProfile();
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [addOpen, setAddOpen] = useState(false);
@@ -241,7 +244,7 @@ export const UsersSection = () => {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
                           <DropdownMenuItem className="gap-2" onSelect={() => setEditing(user)}><Mail className="w-4 h-4 text-muted-foreground"/>Change email</DropdownMenuItem>
-                          {user.userType !== "google" && <DropdownMenuItem className="gap-2" onSelect={() => setPasswordFor(user)}><KeyRound className="w-4 h-4 text-muted-foreground"/>Change password</DropdownMenuItem>}
+                          {user.userType !== "google" && <DropdownMenuItem className="gap-2" onSelect={() => setPasswordFor(user)}><KeyRound className="w-4 h-4 text-muted-foreground"/>{user.username === me?.username ? "Change password" : "Set a new password"}</DropdownMenuItem>}
                           {!isAdmin && (<>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onSelect={() => setDeleting(user)}><Trash2 className="w-4 h-4"/>Remove user</DropdownMenuItem>
@@ -257,7 +260,7 @@ export const UsersSection = () => {
 
       <AddUserDialog open={addOpen} onOpenChange={setAddOpen} onAdded={added}/>
       <EditEmailDialog user={editing} onOpenChange={(o) => !o && setEditing(null)} onSave={saveUser}/>
-      <SetPasswordDialog user={passwordFor} onOpenChange={(o) => !o && setPasswordFor(null)}/>
+      <SetPasswordDialog user={passwordFor} isSelf={passwordFor?.username === me?.username} onOpenChange={(o) => !o && setPasswordFor(null)}/>
       <AlertDialog open={Boolean(deleting)} onOpenChange={(o) => !o && setDeleting(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
