@@ -97,3 +97,21 @@ class TestRecoveryEmail:
             res = client.post("/api/vault/recovery-email/confirm", json={"email": "new@example.com", "pin": PIN, "otp_code": "000000"})
         assert res.status_code == 400
         vault_coll.update_one.assert_not_called()
+
+
+class TestPinLockout:
+    def test_wrong_pins_lock_the_vault(self, client, vault_coll):
+        for _ in range(5):
+            assert client.post("/api/vault/unlock", json={"pin": "0000"}).status_code == 401
+        res = client.post("/api/vault/unlock", json={"pin": "0000"})
+        assert res.status_code == 429
+        assert "Try again" in res.json()["detail"]
+        # The right PIN is refused too while locked, and so are other PIN checks
+        assert client.post("/api/vault/unlock", json={"pin": PIN}).status_code == 429
+        res = client.post("/api/vault/change-pin", json={"current_pin": PIN, "new_pin": "1111"})
+        assert res.status_code == 429
+
+    def test_badly_formed_pins_do_not_count(self, client, vault_coll):
+        for _ in range(10):
+            assert client.post("/api/vault/unlock", json={"pin": "12"}).status_code == 400
+        assert client.post("/api/vault/unlock", json={"pin": PIN}).status_code == 200

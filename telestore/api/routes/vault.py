@@ -2,6 +2,7 @@ import os
 import time
 import re
 import hashlib
+import hmac
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -15,6 +16,7 @@ from telestore.security.credentials import require_auth, User
 from telestore.services.email_service import create_and_send_vault_otp, check_vault_otp, verify_vault_otp, get_vault_db
 from telestore.config import SESSION_SECRET_KEY
 from telestore.db import database
+from telestore.security.attempt_limiter import TooManyAttempts, pin_limiter, wait_message
 
 logger = logging.getLogger(__name__)
 
@@ -143,13 +145,31 @@ def _start_unlocked_session(request: Request, config: Optional[dict]) -> None:
     request.session["vault_timeout"] = _auto_lock_minutes(config) * 60
 
 
-def _check_pin(config: dict, pin: str) -> bytes:
-    """Return the PIN-derived key when the PIN matches, else raise 401."""
+def _too_many(seconds: int) -> HTTPException:
+    return HTTPException(status_code=429, detail=wait_message(seconds), headers={"Retry-After": str(seconds)})
+
+
+def _check_pin(config: dict, pin: str, wrong_detail: str = "Incorrect vault PIN.") -> bytes:
+    """Return the PIN-derived key when the PIN matches, else raise 401.
+
+    Every PIN check goes through here so wrong guesses are rate limited per vault:
+    after a few misses the vault refuses PINs (429) for a time that doubles each miss.
+    """
     if not re.match(r"^\d{4}$", pin or ""):
         raise HTTPException(status_code=400, detail="Please enter your 4-digit vault PIN.")
+    key = f"pin:{config.get('user_id')}"
+    try:
+        pin_limiter.check(key)
+    except TooManyAttempts as e:
+        raise _too_many(e.retry_after)
     derived = _derive_pin_key(pin, bytes.fromhex(config["pin_salt"]))
-    if hashlib.sha256(derived).hexdigest() != config["pin_hash"]:
-        raise HTTPException(status_code=401, detail="Incorrect vault PIN.")
+    if not hmac.compare_digest(hashlib.sha256(derived).hexdigest(), config["pin_hash"]):
+        lock = pin_limiter.failure(key)
+        if lock:
+            logger.warning(f"Vault PIN for user {config.get('user_id')} locked for {lock}s after repeated failures")
+            raise _too_many(lock)
+        raise HTTPException(status_code=401, detail=wrong_detail)
+    pin_limiter.success(key)
     return derived
 
 
@@ -324,12 +344,7 @@ async def unlock_vault(request: Request, body: UnlockVaultModel, user: User = De
     if not config:
         raise HTTPException(status_code=404, detail="Vault is not setup yet.")
 
-    pin_salt = bytes.fromhex(config["pin_salt"])
-    pin_derived_key = _derive_pin_key(pin, pin_salt)
-    calculated_hash = hashlib.sha256(pin_derived_key).hexdigest()
-
-    if calculated_hash != config["pin_hash"]:
-        raise HTTPException(status_code=401, detail="Incorrect 4-digit PIN.")
+    pin_derived_key = _check_pin(config, pin, "Incorrect 4-digit PIN.")
 
     try:
         vault_key = AESGCM(pin_derived_key).decrypt(
@@ -455,10 +470,7 @@ async def change_pin(request: Request, body: ChangePinModel, user: User = Depend
         raise HTTPException(status_code=404, detail="Vault not found.")
 
     # Verify current PIN
-    current_salt = bytes.fromhex(config["pin_salt"])
-    current_derived_key = _derive_pin_key(current_pin, current_salt)
-    if hashlib.sha256(current_derived_key).hexdigest() != config["pin_hash"]:
-        raise HTTPException(status_code=401, detail="Current PIN is incorrect.")
+    current_derived_key = _check_pin(config, current_pin, "Current PIN is incorrect.")
 
     # Decrypt VaultKey using current PIN
     try:

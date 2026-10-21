@@ -4,7 +4,8 @@ from fastapi import APIRouter, Request, HTTPException, status
 from pydantic import BaseModel
 import secrets
 
-from telestore.security.credentials import verify_credentials, verify_google_token
+from telestore.security.credentials import check_login, verify_google_token
+from telestore.security.attempt_limiter import TooManyAttempts, wait_message
 
 from telestore.db import database
 from d4rk.Logs import setup_logger
@@ -26,7 +27,14 @@ async def login_post_route(request: Request, login_data: LoginRequest):
     logger.info(f"Login attempt for user: {login_data.username}")
     
     # Log the verification process
-    is_valid = verify_credentials(login_data.username, login_data.password)
+    try:
+        is_valid = check_login(login_data.username, login_data.password)
+    except TooManyAttempts as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=wait_message(e.retry_after),
+            headers={"Retry-After": str(e.retry_after)},
+        )
     logger.info(f"Credentials verification result: {is_valid}")
     
     if is_valid:
