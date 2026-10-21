@@ -1,6 +1,7 @@
 // API base URL - will use proxy in development
 import logger from '@/lib/logger';
 import authService from '@/features/auth/authService';
+import { uploadFile, uploadFileChunked } from '@/lib/uploadApi';
 const getDefaultApiUrl = () => {
     const savedUrl = localStorage.getItem("serverUrl");
     if (savedUrl) {
@@ -14,7 +15,6 @@ const SERVER_URL_KEY = "serverUrl";
 export const getApiBaseUrl = () => {
     // Check if there's a custom server URL in localStorage
     const customUrl = localStorage.getItem(SERVER_URL_KEY);
-    console.log('[getApiBaseUrl] Checking for custom URL:', customUrl);
     if (customUrl) {
         return customUrl;
     }
@@ -22,10 +22,8 @@ export const getApiBaseUrl = () => {
     if (typeof window !== 'undefined') {
         // Check if running in Tauri
         const isTauri = authService.isTauri();
-        console.log('[getApiBaseUrl] Tauri detection:', isTauri);
         if (isTauri) {
             // In Tauri, always use localhost:8148 by default
-            console.log('[getApiBaseUrl] Returning Tauri default URL: http://localhost:8148');
             return 'http://localhost:8148';
         }
         // For web, use the origin where the app is served
@@ -58,1353 +56,282 @@ export const getFullApiUrl = (endpoint) => {
     // For same-origin requests, use the endpoint directly (no /api prefix)
     return endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 };
-// Import Tauri HTTP plugin
+// The Tauri HTTP plugin (desktop app) is loaded on demand; browsers use fetch
 let http = null;
-let isTauriEnv = false;
-let httpReady = null;
-// Check if we're running in Tauri (using direct detection to avoid circular dependencies)
-if (typeof window !== 'undefined' && window.__TAURI__) {
-    isTauriEnv = true;
-    logger.info('[API] Detected Tauri environment');
-    console.log('[API] Detected Tauri environment with window.__TAURI__:', !!window.__TAURI__);
-}
-// Dynamically import the HTTP plugin only in Tauri environment
-httpReady = import('@tauri-apps/plugin-http').then((module) => {
-    http = module;
-    logger.info('[API] Tauri HTTP plugin loaded successfully');
-}).catch((error) => {
-    logger.error('[API] Failed to load Tauri HTTP plugin:', error);
-    httpReady = null;
-});
-// Utility function to add auth headers to fetch options
+const isTauriEnv = typeof window !== 'undefined' && Boolean(window.__TAURI__);
+let httpReady = isTauriEnv
+    ? import('@tauri-apps/plugin-http').then((module) => {
+        http = module;
+    }).catch((error) => {
+        logger.error('[API] Failed to load Tauri HTTP plugin:', error);
+        httpReady = null;
+    })
+    : null;
+// Every request carries the sign-in headers from authService
 function addAuthHeaders(options = {}) {
-    const headers = new Headers(options.headers || {});
-    // Get authentication headers from authService
-    const authHeaders = authService.getAuthHeaders();
-    // Merge authentication headers
-    Object.entries(authHeaders).forEach(([key, value]) => {
-        headers.set(key, value);
+    const headers = {};
+    new Headers(options.headers || {}).forEach((value, key) => {
+        headers[key] = value;
     });
-    // Convert Headers object to plain object for Tauri compatibility
-    const headersObj = {};
-    headers.forEach((value, key) => {
-        headersObj[key] = value;
+    Object.entries(authService.getAuthHeaders()).forEach(([key, value]) => {
+        headers[key] = value;
     });
-    return {
-        ...options,
-        headers: headersObj,
-    };
+    return { ...options, headers };
 }
-// Utility function to implement fetch with timeout
+// fetch with a timeout (and the Tauri HTTP plugin in the desktop app). Never logs headers or bodies.
 export const fetchWithTimeout = async (url, options = {}, timeout = 30000) => {
-    // Add auth headers to all requests
     const mergedOptions = addAuthHeaders(options);
-    // Check if we're running in Tauri (using direct detection to avoid circular dependencies)
-    const isTauri = typeof window !== 'undefined' && !!window.__TAURI__;
-    // For Tauri environment, we don't want to send credentials as they don't work the same way
-    let tauriCredentials = mergedOptions.credentials;
-    if (isTauri && tauriCredentials === 'include') {
-        tauriCredentials = undefined;
-    }
-    logger.info('[API] fetchWithTimeout called with:', { url, options, mergedOptions, timeout });
-    // Use Tauri HTTP plugin if available (in Tauri environment)
     if (isTauriEnv) {
-        logger.info('[API] Running in Tauri environment');
         try {
-            // Wait for Tauri HTTP plugin to load if it's still loading
-            if (httpReady) {
-                logger.info('[API] Waiting for Tauri HTTP plugin to load');
+            if (httpReady)
                 await httpReady;
-            }
             if (http) {
-                logger.info('[API] Using Tauri HTTP plugin for request to:', url);
-                // Make the request using Tauri's HTTP plugin
-                const response = await http.fetch(url, {
+                // Cookies don't apply in the desktop app; it signs in with the token header
+                return await http.fetch(url, {
                     method: mergedOptions.method || 'GET',
                     headers: mergedOptions.headers,
                     body: mergedOptions.body instanceof FormData ? mergedOptions.body : (typeof mergedOptions.body === 'string' ? mergedOptions.body : (mergedOptions.body ? JSON.stringify(mergedOptions.body) : undefined)),
-                    credentials: isTauriEnv && tauriCredentials === 'include' ? undefined : (tauriCredentials === 'include' ? 'include' : 'omit'),
+                    credentials: mergedOptions.credentials === 'include' ? undefined : 'omit',
                 });
-                logger.info('[API] Tauri HTTP response status:', response.status);
-                // Return the response directly as it's already a standard Response object
-                return response;
-            }
-            else {
-                logger.warn('[API] Tauri HTTP plugin not available after waiting, falling back to standard fetch');
             }
         }
         catch (error) {
-            logger.error('[API] Tauri HTTP request failed, falling back to standard fetch:', error);
+            logger.error('[API] Tauri HTTP request failed, falling back to fetch:', error?.message || String(error));
         }
-        // Fall back to standard fetch if Tauri HTTP plugin fails
-        logger.info('[API] Falling back to standard fetch for request to:', url);
     }
-    // Standard browser fetch with timeout (for non-Tauri environments)
-    logger.info('[API] Using standard fetch for request to:', url);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
         controller.abort(new Error(`Request timed out after ${Math.round(timeout / 1000)}s`));
     }, timeout);
     try {
-        logger.info('[API] Making fetch request with options:', mergedOptions);
-        const response = await fetch(url, {
-            ...mergedOptions,
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        logger.info('[API] Standard fetch response status:', response.status);
-        return response;
+        return await fetch(url, { ...mergedOptions, signal: controller.signal });
     }
     catch (error) {
-        clearTimeout(timeoutId);
         if (error?.name === 'AbortError' || error?.message?.toLowerCase().includes('aborted')) {
-            logger.error('[API] Request timed out or was aborted:', { url, timeout });
             throw new Error(`Request timed out after ${Math.round(timeout / 1000)}s. Please try again.`);
         }
-        logger.error('[API] Standard fetch error:', error);
         throw error;
     }
-};
-// JSON request to a vault endpoint; throws with the server's message on failure
-async function vaultPost(path, body, fallbackMessage, method = 'POST') {
-    const response = await fetchWithTimeout(`${getApiBaseUrl()}${path}`, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.detail || fallbackMessage);
+    finally {
+        clearTimeout(timeoutId);
     }
-    return response.json();
+};
+
+/** An error from the server, with its HTTP status and the server's own message when it gave one. */
+export class ApiError extends Error {
+    constructor(message, status) {
+        super(message);
+        this.name = 'ApiError';
+        this.status = status;
+    }
 }
-export const api = {
-    async fetchFiles(path = '/', page, pageSize, sortBy, sortOrder) {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
+
+// FastAPI sends {"detail": "..."} or, for validation errors, {"detail": [{"msg": "..."}, ...]}
+export function messageFromBody(body, fallback) {
+    const detail = body?.detail;
+    if (typeof detail === 'string' && detail.trim())
+        return detail;
+    if (Array.isArray(detail) && detail.length)
+        return detail.map((d) => d?.msg || String(d)).join('; ');
+    if (typeof body?.message === 'string' && body.message.trim())
+        return body.message;
+    return fallback;
+}
+
+async function errorFromResponse(response, fallback) {
+    const body = await response.json().catch(() => null);
+    const message = messageFromBody(body, response.status === 401 ? 'Authentication required. Please log in again.' : fallback);
+    return new ApiError(message, response.status);
+}
+
+/**
+ * One request to the TeleStore API. Sends cookies and the sign-in headers, encodes a JSON or
+ * FormData body, and on failure throws an ApiError carrying the server's message.
+ * Options: method, body, query (object; empty values skipped), timeout, fallback (error text),
+ * soft (value to return instead of throwing), raw (return the Response).
+ */
+export async function request(path, { method = 'GET', body, query, timeout, fallback = 'Request failed', soft, raw = false } = {}) {
+    let url = `${getApiBaseUrl() || ''}${path}`;
+    if (query) {
         const params = new URLSearchParams();
-        params.append('path', path);
-        if (page !== undefined && page !== null) {
-            params.append('page', page.toString());
-        }
-        if (pageSize !== undefined && pageSize !== null) {
-            params.append('page_size', pageSize.toString());
-        }
-        if (sortBy) {
-            params.append('sort_by', sortBy);
-        }
-        if (sortOrder) {
-            params.append('sort_order', sortOrder);
-        }
-        // Prepare fetch options
-        const fetchOptions = {
-            method: 'GET',
-            headers: authService.getAuthHeaders(),
-        };
-        const response = await fetchWithTimeout(`${apiUrl}/files?${params.toString()}`, fetchOptions, 5000);
-        if (!response.ok) {
-            // Handle specific error cases
-            if (response.status === 401) {
-                throw new Error("Authentication required. Please log in again.");
-            }
-            throw new Error(`Failed to fetch files: ${response.statusText}`);
-        }
-        return response.json();
-    },
-    async checkAuth() {
-        const baseUrl = getApiBaseUrl();
-        // For the default case, we use the base URL directly (no /api prefix)
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        // Prepare fetch options
-        const fetchOptions = {
-            method: 'GET',
-            headers: authService.getAuthHeaders(),
-        };
-        const response = await fetchWithTimeout(`${apiUrl}/auth/check`, fetchOptions, 3000); // 3 second timeout
-        if (!response.ok) {
-            // Handle specific error cases
-            if (response.status === 401) {
-                throw new Error("Authentication required. Please log in again.");
-            }
-            throw new Error(`Failed to check auth: ${response.statusText}`);
-        }
-        return response.json();
-    },
+        Object.entries(query).forEach(([key, value]) => {
+            if (value !== undefined && value !== null && value !== '')
+                params.append(key, String(value));
+        });
+        const qs = params.toString();
+        if (qs)
+            url += `?${qs}`;
+    }
+    const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
+    const options = { method, credentials: 'include', headers: {} };
+    if (body !== undefined) {
+        options.body = isForm ? body : JSON.stringify(body);
+        if (!isForm)
+            options.headers['Content-Type'] = 'application/json';
+    }
+    const response = await fetchWithTimeout(url, options, timeout);
+    if (!response.ok) {
+        if (soft !== undefined)
+            return soft;
+        throw await errorFromResponse(response, fallback);
+    }
+    if (raw)
+        return response;
+    if (response.status === 204)
+        return null;
+    const text = await response.text();
+    if (!text)
+        return null;
+    try {
+        return JSON.parse(text);
+    }
+    catch {
+        return text;
+    }
+}
+
+const post = (path, body, opts = {}) => request(path, { method: 'POST', body, ...opts });
+const put = (path, body, opts = {}) => request(path, { method: 'PUT', body, ...opts });
+const enc = encodeURIComponent;
+const withToken = (url) => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+    return token ? `${url}?token=${enc(token)}` : url;
+};
+
+const mapUser = (user) => ({
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    telegramUserId: user.telegram_user_id,
+    telegramUsername: user.telegram_username,
+    permissions: user.permissions,
+    createdAt: user.created_at,
+    lastActive: user.last_active,
+    userType: user.user_type,
+});
+
+export const api = {
+    // ── Files and folders ──────────────────────────────────────────────
+    fetchFiles: (path = '/', page, pageSize, sortBy, sortOrder) => request('/files', { query: { path, page, page_size: pageSize, sort_by: sortBy, sort_order: sortOrder }, timeout: 5000, fallback: 'Failed to fetch files' }),
+    createFolder: (folderName, currentPath) => post('/folders/create', { folderName, currentPath }, { timeout: 3000, fallback: 'Failed to create folder' }),
+    createFolderPath: (fullPath) => post('/folders/create-path', { fullPath }, { timeout: 3000, fallback: 'Failed to create folder path' }),
+    toggleStar: (fileId, starred) => post('/files/star', { file_id: fileId, starred }, { fallback: 'Failed to update star status' }),
+    trashFile: (fileId) => post('/files/trash', { file_id: fileId }, { fallback: 'Failed to move item to trash' }),
+    restoreFile: (fileId) => post('/files/restore', { file_id: fileId }, { fallback: 'Failed to restore item from trash' }),
+    emptyTrash: () => post('/files/trash/empty', undefined, { fallback: 'Failed to empty trash' }),
+    deleteForever: (fileId) => post('/files/delete', { file_id: fileId }, { fallback: 'Failed to permanently delete item' }),
+    getStorageAnalytics: () => request('/files/analytics', { fallback: 'Failed to fetch storage analytics' }),
+    uploadFile: (file, path = '/', onProgress) => uploadFile(file, path, onProgress),
+    uploadFileChunked: (file, path = '/', onProgress) => uploadFileChunked(file, path, onProgress),
+
+    // ── Account and users ──────────────────────────────────────────────
+    checkAuth: () => request('/auth/check', { timeout: 3000, fallback: 'Failed to check sign-in' }),
     async logout() {
-        const baseUrl = getApiBaseUrl();
-        // For the default case, we use the base URL directly (no /api prefix)
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        // Prepare fetch options
-        const fetchOptions = {
-            method: 'POST',
-            headers: authService.getAuthHeaders(),
-        };
-        const response = await fetchWithTimeout(`${apiUrl}/auth/logout`, fetchOptions, 3000); // 3 second timeout
-        if (!response.ok) {
-            // Handle specific error cases
-            if (response.status === 401) {
-                throw new Error("Authentication required. Please log in again.");
-            }
-            throw new Error(`Failed to logout: ${response.statusText}`);
-        }
-        // Clear auth token from localStorage
-        if (typeof window !== 'undefined') {
+        const data = await post('/auth/logout', undefined, { timeout: 3000, fallback: 'Failed to log out' });
+        if (typeof window !== 'undefined')
             localStorage.removeItem('auth_token');
-        }
-        return response.json();
+        return data;
     },
     async fetchUserProfile() {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        // Prepare fetch options
-        const fetchOptions = {
-            method: 'GET',
-            headers: authService.getAuthHeaders(),
-        };
-        const response = await fetchWithTimeout(`${apiUrl}/user/profile`, fetchOptions, 3000);
-        if (!response.ok) {
-            // Handle specific error cases
-            if (response.status === 401) {
-                throw new Error("Authentication required. Please log in again.");
-            }
-            throw new Error(`Failed to fetch user profile: ${response.statusText}`);
-        }
-        const data = await response.json();
-        // Map snake_case fields to camelCase
-        const userProfile = {
+        const data = await request('/user/profile', { timeout: 3000, fallback: 'Failed to fetch user profile' });
+        return {
             username: data.username,
             email: data.email,
             telegram_user_id: data.telegram_user_id,
             telegram_username: data.telegram_username,
             telegram_first_name: data.telegram_first_name,
             telegram_last_name: data.telegram_last_name,
-            telegram_profile_picture: data.telegram_profile_picture
+            telegram_profile_picture: data.telegram_profile_picture,
         };
-        return userProfile;
-    }, async isUserOwner() {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        // Prepare fetch options
-        const fetchOptions = {
-            method: 'GET',
-            headers: authService.getAuthHeaders(),
-        };
-        const response = await fetchWithTimeout(`${apiUrl}/user/is-owner`, fetchOptions, 3000);
-        if (!response.ok) {
-            // Handle specific error cases
-            if (response.status === 401) {
-                throw new Error("Authentication required. Please log in again.");
-            }
-            throw new Error(`Failed to check owner status: ${response.statusText}`);
-        }
-        const data = await response.json();
-        // Map snake_case fields to camelCase
-        const isOwnerResponse = {
-            is_owner: data.is_owner,
-            owner_telegram_id: data.owner_telegram_id
-        };
-        return isOwnerResponse;
+    },
+    async isUserOwner() {
+        const data = await request('/user/is-owner', { timeout: 3000, fallback: 'Failed to check owner status' });
+        return { is_owner: data.is_owner, owner_telegram_id: data.owner_telegram_id };
     },
     async getUsers() {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        // Prepare fetch options
-        const fetchOptions = {
-            method: 'GET',
-            headers: authService.getAuthHeaders(),
-        };
-        const response = await fetchWithTimeout(`${apiUrl}/user`, fetchOptions, 3000);
-        if (!response.ok) {
-            // Handle specific error cases
-            if (response.status === 401) {
-                throw new Error("Authentication required. Please log in again.");
-            }
-            throw new Error(`Failed to fetch users: ${response.statusText}`);
-        }
-        const data = await response.json();
-        // Map snake_case fields to camelCase
-        const usersResponse = {
-            users: data.users.map((user) => ({
-                id: user.id,
-                username: user.username,
-                email: user.email,
-                telegramUserId: user.telegram_user_id,
-                telegramUsername: user.telegram_username,
-                permissions: user.permissions,
-                createdAt: user.created_at,
-                lastActive: user.last_active,
-                userType: user.user_type
-            }))
-        };
-        return usersResponse;
+        const data = await request('/user', { timeout: 3000, fallback: 'Failed to fetch users' });
+        return { users: (data.users || []).map(mapUser) };
     },
-    async addUser(userData) {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        // Prepare fetch options
-        const fetchOptions = {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...authService.getAuthHeaders()
-            },
-            body: JSON.stringify(userData),
-        };
-        const response = await fetchWithTimeout(`${apiUrl}/user`, fetchOptions, 3000);
-        if (!response.ok) {
-            // Handle specific error cases
-            if (response.status === 401) {
-                throw new Error("Authentication required. Please log in again.");
-            }
-            throw new Error(`Failed to add user: ${response.statusText}`);
-        }
-        return response.json();
-    },
-    async updateUser(userId, userData) {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        // Prepare fetch options
-        const fetchOptions = {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                ...authService.getAuthHeaders()
-            },
-            body: JSON.stringify(userData),
-        };
-        const response = await fetchWithTimeout(`${apiUrl}/user/${userId}`, fetchOptions, 3000);
-        if (!response.ok) {
-            // Handle specific error cases
-            if (response.status === 401) {
-                throw new Error("Authentication required. Please log in again.");
-            }
-            throw new Error(`Failed to update user: ${response.statusText}`);
-        }
-        return response.json();
-    },
+    addUser: (userData) => post('/user', userData, { timeout: 3000, fallback: 'Failed to add user' }),
+    updateUser: (userId, userData) => put(`/user/${userId}`, userData, { timeout: 3000, fallback: 'Failed to update user' }),
     async deleteUser(userId) {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        // Prepare fetch options
-        const fetchOptions = {
-            method: 'DELETE',
-            headers: authService.getAuthHeaders(),
-        };
-        const response = await fetchWithTimeout(`${apiUrl}/user/${userId}`, fetchOptions, 3000);
-        if (!response.ok) {
-            // Handle specific error cases
-            if (response.status === 401) {
-                throw new Error("Authentication required. Please log in again.");
-            }
-            throw new Error(`Failed to delete user: ${response.statusText}`);
-        }
+        await request(`/user/${userId}`, { method: 'DELETE', timeout: 3000, fallback: 'Failed to delete user' });
     },
-    async changeUserPassword(userId, passwordData) {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        // Prepare fetch options
-        const fetchOptions = {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                ...authService.getAuthHeaders()
-            },
-            body: JSON.stringify(passwordData),
-        };
-        const response = await fetchWithTimeout(`${apiUrl}/user/${userId}/password`, fetchOptions, 5000);
-        if (!response.ok) {
-            // Handle specific error cases
-            if (response.status === 401) {
-                throw new Error("Authentication required. Please log in again.");
-            }
-            const errorText = await response.text();
-            throw new Error(errorText || `Failed to change user password: ${response.status}`);
-        }
-        return response.json();
-    },
-    async getUserIndexChat() {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        // Prepare fetch options
-        const fetchOptions = {
-            method: 'GET',
-            headers: authService.getAuthHeaders(),
-        };
-        const response = await fetchWithTimeout(`${apiUrl}/user/index-chat`, fetchOptions, 3000);
-        if (!response.ok) {
-            // Handle specific error cases
-            if (response.status === 401) {
-                throw new Error("Authentication required. Please log in again.");
-            }
-            throw new Error(`Failed to fetch index chat: ${response.statusText}`);
-        }
-        return response.json();
-    },
-    async updateUserIndexChat(indexChatData) {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        // Prepare fetch options
-        const fetchOptions = {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                ...authService.getAuthHeaders()
-            },
-            body: JSON.stringify(indexChatData),
-        };
-        const response = await fetchWithTimeout(`${apiUrl}/user/index-chat`, fetchOptions, 3000);
-        if (!response.ok) {
-            // Handle specific error cases
-            if (response.status === 401) {
-                throw new Error("Authentication required. Please log in again.");
-            }
-            throw new Error(`Failed to update index chat: ${response.statusText}`);
-        }
-        return response.json();
-    },
-    async uploadFileChunked(file, path = '/', onProgress) {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        const authHeaders = authService.getAuthHeaders();
-        // Step 1: Init chunked upload
-        const initRes = await fetch(`${apiUrl}/files/upload/init`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...authHeaders,
-            },
-            credentials: 'include',
-            body: JSON.stringify({
-                filename: file.name,
-                filesize: file.size,
-                path: path || '/Home'
-            })
-        });
-        if (!initRes.ok) {
-            const errData = await initRes.json().catch(() => ({}));
-            throw new Error(errData.detail || 'Failed to initialize chunked upload');
-        }
-        const initData = await initRes.json();
-        const uploadId = initData.upload_id;
-        const CHUNK_SIZE = initData.chunk_size || 20 * 1024 * 1024;
-        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-        let bytesUploaded = 0;
-        let lastTime = Date.now();
-        let lastLoaded = 0;
-        let currentSpeed = 0;
-        const formatSpeed = (bytesPerSec) => {
-            if (bytesPerSec <= 0)
-                return '0 B/s';
-            const k = 1024;
-            const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
-            const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
-            return parseFloat((bytesPerSec / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-        };
-        const formatEta = (seconds) => {
-            if (!isFinite(seconds) || seconds <= 0)
-                return '';
-            if (seconds > 3600)
-                return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-            if (seconds > 60)
-                return `${Math.floor(seconds / 60)}m ${Math.floor(seconds % 60)}s`;
-            return `${Math.round(seconds)}s`;
-        };
-        // Step 2: Upload chunks sequentially with auto-retry
-        for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
-            const start = chunkIdx * CHUNK_SIZE;
-            const end = Math.min(start + CHUNK_SIZE, file.size);
-            const chunkBlob = file.slice(start, end);
-            let success = false;
-            let lastErr = null;
-            for (let attempt = 0; attempt < 3; attempt++) {
-                try {
-                    const chunkFormData = new FormData();
-                    chunkFormData.append('upload_id', uploadId);
-                    chunkFormData.append('chunk_index', chunkIdx.toString());
-                    chunkFormData.append('chunk_file', chunkBlob, file.name);
-                    const chunkRes = await fetch(`${apiUrl}/files/upload/chunk`, {
-                        method: 'POST',
-                        headers: {
-                            ...authHeaders
-                        },
-                        credentials: 'include',
-                        body: chunkFormData
-                    });
-                    if (!chunkRes.ok) {
-                        const errData = await chunkRes.json().catch(() => ({}));
-                        throw new Error(errData.detail || `Chunk upload failed (${chunkRes.status})`);
-                    }
-                    success = true;
-                    bytesUploaded += (end - start);
-                    const now = Date.now();
-                    const timeDiff = (now - lastTime) / 1000;
-                    if (timeDiff >= 0.3) {
-                        const bytesDiff = bytesUploaded - lastLoaded;
-                        const instantSpeed = bytesDiff / timeDiff;
-                        currentSpeed = currentSpeed === 0 ? instantSpeed : 0.7 * currentSpeed + 0.3 * instantSpeed;
-                        lastTime = now;
-                        lastLoaded = bytesUploaded;
-                    }
-                    if (onProgress) {
-                        const percent = Math.min(99, Math.round((bytesUploaded / file.size) * 100));
-                        const remaining = file.size - bytesUploaded;
-                        const etaSec = currentSpeed > 0 ? remaining / currentSpeed : 0;
-                        onProgress(percent, bytesUploaded, file.size, formatSpeed(currentSpeed), formatEta(etaSec));
-                    }
-                    break;
-                }
-                catch (err) {
-                    lastErr = err;
-                    await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
-                }
-            }
-            if (!success) {
-                throw new Error(`Failed to upload chunk ${chunkIdx + 1}/${totalChunks}: ${lastErr?.message || 'Network error'}`);
-            }
-        }
-        // Step 3: Trigger completion (processed in background on server)
-        const completeFormData = new FormData();
-        completeFormData.append('upload_id', uploadId);
-        let initialResponseData = null;
-        try {
-            const completeRes = await fetch(`${apiUrl}/files/upload/complete`, {
-                method: 'POST',
-                headers: {
-                    ...authHeaders
-                },
-                credentials: 'include',
-                body: completeFormData
-            });
-            if (completeRes.ok) {
-                initialResponseData = await completeRes.json().catch(() => null);
-            }
-        }
-        catch (fetchErr) {
-            logger.warn('[API] /files/upload/complete connection dropped, checking status...', fetchErr);
-        }
-        // Fast path: if already completed
-        if (initialResponseData?.status === 'completed' && initialResponseData?.file) {
-            if (onProgress) {
-                onProgress(100, file.size, file.size, '', '');
-            }
-            return {
-                message: initialResponseData.message || 'File uploaded successfully',
-                file: initialResponseData.file
-            };
-        }
-        // Step 4: Poll status until complete (handles large files saving to Telegram cloud)
-        if (onProgress) {
-            onProgress(99, file.size, file.size, 'Saving to Telegram cloud...', '');
-        }
-        const pollIntervalMs = 2000;
-        const maxPollTimeMs = 30 * 60 * 1000; // 30 minutes max for large files
-        const startTime = Date.now();
-        while (Date.now() - startTime < maxPollTimeMs) {
-            await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
-            try {
-                const statusRes = await fetch(`${apiUrl}/files/upload/status/${uploadId}`, {
-                    headers: {
-                        ...authHeaders
-                    },
-                    credentials: 'include'
-                });
-                if (statusRes.ok) {
-                    const statusData = await statusRes.json();
-                    if (statusData.status === 'completed') {
-                        if (onProgress) {
-                            onProgress(100, file.size, file.size, '', '');
-                        }
-                        return {
-                            message: statusData.message || 'File uploaded successfully',
-                            file: statusData.file
-                        };
-                    }
-                    else if (statusData.status === 'error') {
-                        throw new Error(statusData.error || 'Upload failed while saving to Telegram');
-                    }
-                    else {
-                        // Still processing
-                        if (onProgress) {
-                            onProgress(99, file.size, file.size, 'Saving to Telegram cloud...', '');
-                        }
-                    }
-                }
-                else if (statusRes.status === 404) {
-                    throw new Error('Upload session expired or not found');
-                }
-            }
-            catch (err) {
-                if (err.message && (err.message.includes('saving to Telegram') || err.message.includes('expired or not found'))) {
-                    throw err;
-                }
-                logger.warn('[API] Polling upload status transient error:', err);
-            }
-        }
-        throw new Error('Upload completion timed out. Please check your drive.');
-    },
-    async uploadFile(file, path = '/', onProgress) {
-        // Automatically use chunked uploader for large files (> 50MB) for maximum resilience
-        if (file.size > 50 * 1024 * 1024) {
-            return this.uploadFileChunked(file, path, onProgress);
-        }
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('path', path);
-        return new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', `${apiUrl}/files/upload`, true);
-            xhr.withCredentials = true;
-            // Add auth headers
-            const authHeaders = authService.getAuthHeaders();
-            Object.entries(authHeaders).forEach(([key, value]) => {
-                xhr.setRequestHeader(key, value);
-            });
-            let lastTime = Date.now();
-            let lastLoaded = 0;
-            let currentSpeed = 0;
-            let lastCallbackTime = 0;
-            const formatSpeed = (bytesPerSec) => {
-                if (bytesPerSec <= 0)
-                    return '0 B/s';
-                const k = 1024;
-                const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
-                const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
-                return parseFloat((bytesPerSec / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-            };
-            const formatEta = (seconds) => {
-                if (!isFinite(seconds) || seconds <= 0)
-                    return '';
-                if (seconds > 3600) {
-                    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-                }
-                if (seconds > 60) {
-                    return `${Math.floor(seconds / 60)}m ${Math.floor(seconds % 60)}s`;
-                }
-                return `${Math.round(seconds)}s`;
-            };
-            // Track real upload progress (0% to 99% while sending data to server)
-            if (xhr.upload && onProgress) {
-                xhr.upload.onprogress = (event) => {
-                    if (event.lengthComputable && event.total > 0) {
-                        const now = Date.now();
-                        const timeDiff = (now - lastTime) / 1000;
-                        if (timeDiff >= 0.3) {
-                            const bytesDiff = event.loaded - lastLoaded;
-                            const instantSpeed = bytesDiff / timeDiff;
-                            currentSpeed = currentSpeed === 0 ? instantSpeed : 0.7 * currentSpeed + 0.3 * instantSpeed;
-                            lastTime = now;
-                            lastLoaded = event.loaded;
-                        }
-                        // Throttle progress state updates to every 250ms for smooth rendering
-                        if (now - lastCallbackTime >= 250 || event.loaded === event.total) {
-                            lastCallbackTime = now;
-                            const percent = Math.min(99, Math.round((event.loaded / event.total) * 100));
-                            const remainingBytes = event.total - event.loaded;
-                            const etaSeconds = currentSpeed > 0 ? remainingBytes / currentSpeed : 0;
-                            const speedStr = currentSpeed > 0 ? formatSpeed(currentSpeed) : '';
-                            const etaStr = etaSeconds > 0 ? formatEta(etaSeconds) : '';
-                            onProgress(percent, event.loaded, event.total, speedStr, etaStr);
-                        }
-                    }
-                };
-            }
-            xhr.onload = () => {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    if (onProgress) {
-                        onProgress(100, file.size, file.size, '', '');
-                    }
-                    try {
-                        const data = JSON.parse(xhr.responseText);
-                        resolve(data);
-                    }
-                    catch (e) {
-                        resolve({ message: "File uploaded successfully" });
-                    }
-                }
-                else if (xhr.status === 401) {
-                    reject(new Error("Authentication required. Please log in again."));
-                }
-                else {
-                    let errorMessage = `Failed to upload file: ${xhr.statusText || xhr.status}`;
-                    try {
-                        const errorData = JSON.parse(xhr.responseText);
-                        if (errorData.detail) {
-                            errorMessage = errorData.detail;
-                        }
-                    }
-                    catch (_) { }
-                    reject(new Error(errorMessage));
-                }
-            };
-            xhr.onerror = () => {
-                reject(new Error("Network error during file upload. Please check your connection."));
-            };
-            xhr.onabort = () => {
-                reject(new Error("Upload aborted."));
-            };
-            // No premature timeout: let large files complete as long as data transfers
-            xhr.timeout = 0;
-            xhr.send(formData);
-        });
-    },
-    async createFolder(folderName, currentPath) {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        // Prepare fetch options
-        const fetchOptions = {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...authService.getAuthHeaders()
-            },
-            body: JSON.stringify({ folderName, currentPath }),
-        };
-        const response = await fetchWithTimeout(`${apiUrl}/folders/create`, fetchOptions, 3000);
-        if (!response.ok) {
-            // Handle specific error cases
-            if (response.status === 401) {
-                throw new Error("Authentication required. Please log in again.");
-            }
-            throw new Error(`Failed to create folder: ${response.statusText}`);
-        }
-        return response.json();
-    },
-    async createFolderPath(fullPath) {
-        const baseUrl = getApiBaseUrl();
-        // For the default case, we use the base URL directly (no /api prefix)
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        // Prepare fetch options
-        const fetchOptions = {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...authService.getAuthHeaders()
-            },
-            body: JSON.stringify({ fullPath }),
-        };
-        const response = await fetchWithTimeout(`${apiUrl}/folders/create-path`, fetchOptions, 3000);
-        if (!response.ok) {
-            // Handle specific error cases
-            if (response.status === 401) {
-                throw new Error("Authentication required. Please log in again.");
-            }
-            throw new Error(`Failed to create folder path: ${response.statusText}`);
-        }
-        return response.json();
-    },
-    async toggleStar(fileId, starred) {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/files/star`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-            body: JSON.stringify({ file_id: fileId, starred }),
-        });
-        if (!response.ok) {
-            throw new Error('Failed to update star status');
-        }
-        return response.json();
-    },
-    async trashFile(fileId) {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/files/trash`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-            body: JSON.stringify({ file_id: fileId }),
-        });
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.detail || 'Failed to move item to trash');
-        }
-        return response.json();
-    },
-    async restoreFile(fileId) {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/files/restore`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-            body: JSON.stringify({ file_id: fileId }),
-        });
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.detail || 'Failed to restore item from trash');
-        }
-        return response.json();
-    },
-    async emptyTrash() {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/files/trash/empty`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-        });
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.detail || 'Failed to empty trash');
-        }
-        return response.json();
-    },
-    async deleteForever(fileId) {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/files/delete`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-            body: JSON.stringify({ file_id: fileId }),
-        });
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.detail || 'Failed to permanently delete item');
-        }
-        return response.json();
-    },
-    async getStorageAnalytics() {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/files/analytics`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-        });
-        if (!response.ok) {
-            throw new Error('Failed to fetch storage analytics');
-        }
-        return response.json();
-    },
-    async getVaultStatus() {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/vault/status`, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-        });
-        if (!response.ok) {
-            throw new Error('Failed to fetch vault status');
-        }
-        return response.json();
-    },
-    async requestVaultSetupOtp(email) {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/vault/setup/request-otp`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ email }),
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to send verification code');
-        }
-        return response.json();
-    },
-    async verifyVaultOtp(otp_code, purpose = 'Private Vault Setup', email) {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/vault/verify-otp`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ otp_code, purpose, email }),
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Invalid verification code');
-        }
-        return response.json();
-    },
-    async verifyAndCreateVault(email, otp_code, pin) {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/vault/setup/verify-and-create`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ email, otp_code, pin }),
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to create vault');
-        }
-        return response.json();
-    },
-    async unlockVault(pin) {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/vault/unlock`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ pin }),
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Incorrect PIN');
-        }
-        return response.json();
-    },
-    async lockVault() {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/vault/lock`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-        });
-        if (!response.ok) {
-            throw new Error('Failed to lock vault');
-        }
-        return response.json();
-    },
-    async requestForgotPinOtp() {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/vault/forgot-pin/request-otp`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to request reset code');
-        }
-        return response.json();
-    },
-    async resetVaultPin(otp_code, new_pin) {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/vault/forgot-pin/reset`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ otp_code, new_pin }),
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to reset PIN');
-        }
-        return response.json();
-    },
-    async changeVaultPin(current_pin, new_pin) {
-        return vaultPost('/vault/change-pin', { current_pin, new_pin }, 'Failed to change PIN');
-    },
-    async updateVaultSettings(settings) {
-        return vaultPost('/vault/settings', settings, 'Failed to save vault settings', 'PUT');
-    },
-    async requestRecoveryEmailOtp(email, pin) {
-        return vaultPost('/vault/recovery-email/request-otp', { email, pin }, 'Failed to send verification code');
-    },
-    async confirmRecoveryEmail(email, pin, otp_code) {
-        return vaultPost('/vault/recovery-email/confirm', { email, pin, otp_code }, 'Failed to change recovery email');
-    },
-    async moveIntoVault(fileId, targetPath = '/Vault') {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/vault/move-in`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ file_id: fileId, target_path: targetPath }),
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to move item to Vault');
-        }
-        return response.json();
-    },
-    async moveOutOfVault(fileId, targetPath = '/Home') {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/vault/move-out`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ file_id: fileId, target_path: targetPath }),
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to move item out of Vault');
-        }
-        return response.json();
-    },
-    async createVaultFolder(folderName, currentPath = '/Vault') {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/vault/create-folder`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ folder_name: folderName, current_path: currentPath }),
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to create folder in Vault');
-        }
-        return response.json();
-    },
-    async addRemoteTransfer(url, destination_path = '/Home') {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/transfers/remote/add`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ url, destination_path }),
-        }, 300000); // 5 minutes timeout for scanning deep Google Drive folder structures
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to start remote transfer');
-        }
-        return response.json();
-    },
-    async uploadTorrentFile(file, destination_path = '/Home') {
+    changeUserPassword: (userId, passwordData) => put(`/user/${userId}/password`, passwordData, { timeout: 5000, fallback: 'Failed to change password' }),
+    getUserIndexChat: () => request('/user/index-chat', { timeout: 3000, fallback: 'Failed to fetch index chat' }),
+    updateUserIndexChat: (indexChatData) => put('/user/index-chat', indexChatData, { timeout: 3000, fallback: 'Failed to update index chat' }),
+
+    // ── Private Vault ──────────────────────────────────────────────────
+    getVaultStatus: () => request('/vault/status', { fallback: 'Failed to fetch vault status' }),
+    requestVaultSetupOtp: (email) => post('/vault/setup/request-otp', { email }, { fallback: 'Failed to send verification code' }),
+    verifyVaultOtp: (otp_code, purpose = 'Private Vault Setup', email) => post('/vault/verify-otp', { otp_code, purpose, email }, { fallback: 'Invalid verification code' }),
+    verifyAndCreateVault: (email, otp_code, pin) => post('/vault/setup/verify-and-create', { email, otp_code, pin }, { fallback: 'Failed to create vault' }),
+    unlockVault: (pin) => post('/vault/unlock', { pin }, { fallback: 'Incorrect PIN' }),
+    lockVault: () => post('/vault/lock', undefined, { fallback: 'Failed to lock vault' }),
+    requestForgotPinOtp: () => post('/vault/forgot-pin/request-otp', undefined, { fallback: 'Failed to request reset code' }),
+    resetVaultPin: (otp_code, new_pin) => post('/vault/forgot-pin/reset', { otp_code, new_pin }, { fallback: 'Failed to reset PIN' }),
+    changeVaultPin: (current_pin, new_pin) => post('/vault/change-pin', { current_pin, new_pin }, { fallback: 'Failed to change PIN' }),
+    updateVaultSettings: (settings) => put('/vault/settings', settings, { fallback: 'Failed to save vault settings' }),
+    requestRecoveryEmailOtp: (email, pin) => post('/vault/recovery-email/request-otp', { email, pin }, { fallback: 'Failed to send verification code' }),
+    confirmRecoveryEmail: (email, pin, otp_code) => post('/vault/recovery-email/confirm', { email, pin, otp_code }, { fallback: 'Failed to change recovery email' }),
+    moveIntoVault: (fileId, targetPath = '/Vault') => post('/vault/move-in', { file_id: fileId, target_path: targetPath }, { fallback: 'Failed to move item to Vault' }),
+    moveOutOfVault: (fileId, targetPath = '/Home') => post('/vault/move-out', { file_id: fileId, target_path: targetPath }, { fallback: 'Failed to move item out of Vault' }),
+    createVaultFolder: (folderName, currentPath = '/Vault') => post('/vault/create-folder', { folder_name: folderName, current_path: currentPath }, { fallback: 'Failed to create folder in Vault' }),
+
+    // ── Cloud leech (remote transfers) ─────────────────────────────────
+    // Scanning a deep Google Drive folder can take minutes
+    addRemoteTransfer: (url, destination_path = '/Home') => post('/transfers/remote/add', { url, destination_path }, { timeout: 300000, fallback: 'Failed to start remote transfer' }),
+    uploadTorrentFile(file, destination_path = '/Home') {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('destination_path', destination_path);
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/transfers/remote/upload-torrent`, {
-            method: 'POST',
-            credentials: 'include',
-            body: formData,
-        }, 120000);
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to upload torrent file');
-        }
-        return response.json();
+        return post('/transfers/remote/upload-torrent', formData, { timeout: 120000, fallback: 'Failed to upload torrent file' });
     },
-    async getRemoteTasks() {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/transfers/remote/tasks`, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-        });
-        if (!response.ok) {
-            return { tasks: [] };
-        }
-        return response.json();
-    },
-    async cancelRemoteTask(task_id) {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/transfers/remote/cancel`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ task_id }),
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to cancel remote transfer');
-        }
-        return response.json();
-    },
-    async cancelRemoteGroup(group_id) {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/transfers/remote/cancel-group`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ group_id }),
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to cancel folder transfers');
-        }
-        return response.json();
-    },
-    async resumeRemoteGroup(group_id) {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/transfers/remote/resume-group`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ group_id }),
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to resume folder transfers');
-        }
-        return response.json();
-    },
-    async retryRemoteTransfer(task_id) {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/transfers/remote/retry`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ task_id }),
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to retry remote transfer');
-        }
-        return response.json();
-    },
-    async clearCompletedRemoteTasks() {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/transfers/remote/clear-completed`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to clear completed tasks');
-        }
-        return response.json();
-    },
-    async getMediaCacheStats() {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/media/cache/stats`, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-        });
-        if (!response.ok) {
-            return null;
-        }
-        return response.json();
-    },
-    async clearMediaCache() {
-        const response = await fetchWithTimeout(`${getApiBaseUrl()}/media/cache/clear`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to clear media cache');
-        }
-        return response.json();
-    },
-    async fetchCloudAccounts() {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        const response = await fetchWithTimeout(`${apiUrl}/cloud/accounts`, {
-            method: 'GET',
-            headers: authService.getAuthHeaders(),
-        });
-        if (!response.ok)
-            throw new Error('Failed to fetch cloud accounts');
-        return response.json();
-    },
-    async getGoogleAuthUrl(customClientId, customClientSecret, redirectUri) {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        const response = await fetchWithTimeout(`${apiUrl}/cloud/gdrive/auth-url`, {
-            method: 'POST',
-            headers: {
-                ...authService.getAuthHeaders(),
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                custom_client_id: customClientId,
-                custom_client_secret: customClientSecret,
-                redirect_uri: redirectUri
-            }),
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to generate Google Drive auth URL');
-        }
-        return response.json();
-    },
+    getRemoteTasks: () => request('/transfers/remote/tasks', { soft: { tasks: [] } }),
+    cancelRemoteTask: (task_id) => post('/transfers/remote/cancel', { task_id }, { fallback: 'Failed to cancel remote transfer' }),
+    cancelRemoteGroup: (group_id) => post('/transfers/remote/cancel-group', { group_id }, { fallback: 'Failed to cancel folder transfers' }),
+    resumeRemoteGroup: (group_id) => post('/transfers/remote/resume-group', { group_id }, { fallback: 'Failed to resume folder transfers' }),
+    retryRemoteTransfer: (task_id) => post('/transfers/remote/retry', { task_id }, { fallback: 'Failed to retry remote transfer' }),
+    clearCompletedRemoteTasks: () => post('/transfers/remote/clear-completed', undefined, { fallback: 'Failed to clear completed tasks' }),
+
+    // ── Streaming cache ────────────────────────────────────────────────
+    getMediaCacheStats: () => request('/media/cache/stats', { soft: null }),
+    clearMediaCache: () => post('/media/cache/clear', undefined, { fallback: 'Failed to clear media cache' }),
+
+    // ── Google Drive ───────────────────────────────────────────────────
+    fetchCloudAccounts: () => request('/cloud/accounts', { fallback: 'Failed to fetch cloud accounts' }),
+    getGoogleAuthUrl: (customClientId, customClientSecret, redirectUri) => post('/cloud/gdrive/auth-url', { custom_client_id: customClientId, custom_client_secret: customClientSecret, redirect_uri: redirectUri }, { fallback: 'Failed to generate Google Drive auth URL' }),
     async disconnectCloudAccount(accountId) {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        const response = await fetchWithTimeout(`${apiUrl}/cloud/accounts/${accountId}`, {
-            method: 'DELETE',
-            headers: authService.getAuthHeaders(),
-        });
-        if (!response.ok)
-            throw new Error('Failed to disconnect cloud account');
+        await request(`/cloud/accounts/${accountId}`, { method: 'DELETE', fallback: 'Failed to disconnect cloud account' });
     },
-    async fetchCloudFiles(accountId, folderId = 'root', pageSize = 50, pageToken, query, sortBy, sortOrder) {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        const params = new URLSearchParams();
-        params.append('folder_id', folderId);
-        params.append('page_size', pageSize.toString());
-        if (pageToken)
-            params.append('page_token', pageToken);
-        if (query)
-            params.append('query', query);
-        if (sortBy)
-            params.append('sort_by', sortBy);
-        if (sortOrder)
-            params.append('sort_order', sortOrder);
-        const response = await fetchWithTimeout(`${apiUrl}/cloud/${accountId}/files?${params.toString()}`, {
-            method: 'GET',
-            headers: authService.getAuthHeaders(),
-        }, 15000);
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to fetch cloud files');
-        }
-        return response.json();
-    },
+    fetchCloudFiles: (accountId, folderId = 'root', pageSize = 50, pageToken, query, sortBy, sortOrder) => request(`/cloud/${accountId}/files`, { query: { folder_id: folderId, page_size: pageSize, page_token: pageToken, query, sort_by: sortBy, sort_order: sortOrder }, timeout: 15000, fallback: 'Failed to fetch cloud files' }),
     async deleteCloudFile(accountId, fileId, permanent = false) {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        const response = await fetchWithTimeout(`${apiUrl}/cloud/${accountId}/files/delete`, {
-            method: 'POST',
-            headers: {
-                ...authService.getAuthHeaders(),
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ file_id: fileId, permanent }),
-        });
-        if (!response.ok)
-            throw new Error('Failed to delete file from Google Drive');
+        await post(`/cloud/${accountId}/files/delete`, { file_id: fileId, permanent }, { fallback: 'Failed to delete file from Google Drive' });
     },
     async renameCloudFile(accountId, fileId, newName) {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        const response = await fetchWithTimeout(`${apiUrl}/cloud/${accountId}/files/rename`, {
-            method: 'POST',
-            headers: {
-                ...authService.getAuthHeaders(),
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ file_id: fileId, new_name: newName }),
-        });
-        if (!response.ok)
-            throw new Error('Failed to rename file in Google Drive');
+        await post(`/cloud/${accountId}/files/rename`, { file_id: fileId, new_name: newName }, { fallback: 'Failed to rename file in Google Drive' });
     },
     async createCloudFolder(accountId, folderName, parentId = 'root') {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        const response = await fetchWithTimeout(`${apiUrl}/cloud/${accountId}/files/mkdir`, {
-            method: 'POST',
-            headers: {
-                ...authService.getAuthHeaders(),
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ folder_name: folderName, parent_id: parentId }),
-        });
-        if (!response.ok)
-            throw new Error('Failed to create folder in Google Drive');
+        await post(`/cloud/${accountId}/files/mkdir`, { folder_name: folderName, parent_id: parentId }, { fallback: 'Failed to create folder in Google Drive' });
     },
-    async transferCloudToTelegram(accountId, sourceFileId, destinationPath = '/Home', operation = 'copy') {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        const response = await fetchWithTimeout(`${apiUrl}/cloud/${accountId}/transfer-to-telegram`, {
-            method: 'POST',
-            headers: {
-                ...authService.getAuthHeaders(),
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                source_file_id: sourceFileId,
-                destination_path: destinationPath,
-                operation
-            }),
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to start cloud transfer');
-        }
-        return response.json();
-    },
-    async transferTelegramToCloud(accountId, sourceFileIds, sourceFolderPaths, targetFolderId = 'root', operation = 'copy') {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        const response = await fetchWithTimeout(`${apiUrl}/cloud/${accountId}/transfer-from-telegram`, {
-            method: 'POST',
-            headers: {
-                ...authService.getAuthHeaders(),
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                source_file_ids: sourceFileIds,
-                source_folder_paths: sourceFolderPaths,
-                target_folder_id: targetFolderId,
-                operation
-            }),
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to start transfer to Google Drive');
-        }
-        return response.json();
-    },
-    async transferCloudInternal(accountId, fileIds, targetFolderId = 'root', operation = 'copy') {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        const response = await fetchWithTimeout(`${apiUrl}/cloud/${accountId}/files/transfer-internal`, {
-            method: 'POST',
-            headers: {
-                ...authService.getAuthHeaders(),
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                file_ids: fileIds,
-                target_folder_id: targetFolderId,
-                operation
-            }),
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || `Failed to ${operation} items in Google Drive`);
-        }
-        return response.json();
-    },
-    async uploadToCloud(accountId, file, folderId = 'root') {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
+    transferCloudToTelegram: (accountId, sourceFileId, destinationPath = '/Home', operation = 'copy') => post(`/cloud/${accountId}/transfer-to-telegram`, { source_file_id: sourceFileId, destination_path: destinationPath, operation }, { fallback: 'Failed to start cloud transfer' }),
+    transferTelegramToCloud: (accountId, sourceFileIds, sourceFolderPaths, targetFolderId = 'root', operation = 'copy') => post(`/cloud/${accountId}/transfer-from-telegram`, { source_file_ids: sourceFileIds, source_folder_paths: sourceFolderPaths, target_folder_id: targetFolderId, operation }, { fallback: 'Failed to start transfer to Google Drive' }),
+    transferCloudInternal: (accountId, fileIds, targetFolderId = 'root', operation = 'copy') => post(`/cloud/${accountId}/files/transfer-internal`, { file_ids: fileIds, target_folder_id: targetFolderId, operation }, { fallback: `Failed to ${operation} items in Google Drive` }),
+    uploadToCloud(accountId, file, folderId = 'root') {
         const formData = new FormData();
         formData.append('file', file);
-        const targetFid = encodeURIComponent(folderId || 'root');
-        const response = await fetchWithTimeout(`${apiUrl}/cloud/${accountId}/upload?folder_id=${targetFid}`, {
-            method: 'POST',
-            headers: authService.getAuthHeaders(),
-            body: formData,
-        }, 300000);
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || 'Failed to upload file to Google Drive');
-        }
-        return response.json();
+        return request(`/cloud/${accountId}/upload`, { method: 'POST', body: formData, query: { folder_id: folderId || 'root' }, timeout: 300000, fallback: 'Failed to upload file to Google Drive' });
     },
-    async fetchCloudStorageQuota(accountId) {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        const response = await fetchWithTimeout(`${apiUrl}/cloud/${accountId}/storage`, {
-            method: 'GET',
-            headers: authService.getAuthHeaders(),
-        }, 15000);
-        if (!response.ok)
-            throw new Error('Failed to fetch cloud storage quota');
-        return response.json();
-    },
+    fetchCloudStorageQuota: (accountId) => request(`/cloud/${accountId}/storage`, { timeout: 15000, fallback: 'Failed to fetch cloud storage quota' }),
     async starCloudFile(accountId, fileId, starred) {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        const response = await fetchWithTimeout(`${apiUrl}/cloud/${accountId}/files/star`, {
-            method: 'POST',
-            headers: {
-                ...authService.getAuthHeaders(),
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ file_id: fileId, starred }),
-        });
-        if (!response.ok)
-            throw new Error('Failed to update star in Google Drive');
+        await post(`/cloud/${accountId}/files/star`, { file_id: fileId, starred }, { fallback: 'Failed to update star in Google Drive' });
     },
     async restoreCloudFile(accountId, fileId) {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        const response = await fetchWithTimeout(`${apiUrl}/cloud/${accountId}/files/restore`, {
-            method: 'POST',
-            headers: {
-                ...authService.getAuthHeaders(),
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ file_id: fileId }),
-        });
-        if (!response.ok)
-            throw new Error('Failed to restore file in Google Drive');
+        await post(`/cloud/${accountId}/files/restore`, { file_id: fileId }, { fallback: 'Failed to restore file in Google Drive' });
     },
     async emptyCloudTrash(accountId) {
-        const baseUrl = getApiBaseUrl();
-        const apiUrl = baseUrl ? `${baseUrl}` : '';
-        const response = await fetchWithTimeout(`${apiUrl}/cloud/${accountId}/trash/empty`, {
-            method: 'POST',
-            headers: authService.getAuthHeaders(),
-        });
-        if (!response.ok)
-            throw new Error('Failed to empty Google Drive trash');
+        await post(`/cloud/${accountId}/trash/empty`, undefined, { fallback: 'Failed to empty Google Drive trash' });
     },
-    getCloudStreamUrl(accountId, fileId) {
-        const baseUrl = getApiBaseUrl() || '';
-        const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
-        const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-        return `${baseUrl}/cloud/${encodeURIComponent(accountId)}/stream/${encodeURIComponent(fileId)}${tokenParam}`;
-    },
-    getCloudDownloadUrl(accountId, fileId) {
-        const baseUrl = getApiBaseUrl() || '';
-        const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
-        const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-        return `${baseUrl}/cloud/${encodeURIComponent(accountId)}/download/${encodeURIComponent(fileId)}${tokenParam}`;
-    },
+    getCloudStreamUrl: (accountId, fileId) => withToken(`${getApiBaseUrl() || ''}/cloud/${enc(accountId)}/stream/${enc(fileId)}`),
+    getCloudDownloadUrl: (accountId, fileId) => withToken(`${getApiBaseUrl() || ''}/cloud/${enc(accountId)}/download/${enc(fileId)}`),
 };
