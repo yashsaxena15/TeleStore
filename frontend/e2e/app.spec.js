@@ -102,6 +102,52 @@ test.describe("file explorer", () => {
     });
 });
 
+test.describe("item actions", () => {
+    const sent = async (request, path) => (await mutations(request)).filter((r) => r.path === path);
+
+    test("star, rename and move to trash", async ({ page, request }) => {
+        await page.goto("/");
+        await page.getByRole("button", { name: "Star Q3-report.pdf" }).click();
+        await expect.poll(async () => (await sent(request, "/files/star")).length).toBe(1);
+
+        await page.getByRole("button", { name: "More actions for project-src.zip" }).first().click();
+        await page.getByRole("menuitem", { name: /Rename/ }).click();
+        const input = page.locator("input:focus");
+        await input.fill("project-src-2.zip");
+        await input.press("Enter");
+        await expect.poll(async () => (await mutations(request)).some((r) => /rename/.test(r.path) && r.body.includes("project-src-2.zip"))).toBe(true);
+
+        await page.getByRole("button", { name: "Select team-offsite.jpg" }).click();
+        await page.getByRole("toolbar", { name: /selected$/ }).getByRole("button", { name: /Delete/ }).click();
+        const confirm = page.getByRole("alertdialog");
+        if (await confirm.isVisible().catch(() => false))
+            await confirm.getByRole("button", { name: /Delete|Move to Trash|Trash/ }).last().click();
+        await expect.poll(async () => (await sent(request, "/files/trash")).some((r) => r.body.includes('"f8"'))).toBe(true);
+    });
+
+    test("new folder from the New menu", async ({ page, request }) => {
+        await page.goto("/");
+        await page.getByRole("button", { name: "New", exact: true }).first().click();
+        await page.getByRole("menuitem", { name: /New folder/ }).click();
+        const dialog = page.getByRole("dialog");
+        await dialog.getByRole("textbox").fill("Taxes 2026");
+        await dialog.getByRole("button", { name: /Create/ }).click();
+        await expect.poll(async () => (await mutations(request)).some((r) => r.path.startsWith("/folders/create") && r.body.includes("Taxes 2026"))).toBe(true);
+    });
+
+    test("copy in one folder, paste in another", async ({ page, request }) => {
+        await page.goto("/");
+        await page.getByRole("button", { name: "Select Q3-report.pdf" }).click();
+        await page.getByRole("toolbar", { name: "1 selected" }).getByRole("button", { name: /^Copy/ }).click();
+        await row(page, "Movies").dblclick();
+        await expect(row(page, "Arrival.2016.1080p.mkv")).toBeVisible();
+        // Right-click empty space below the files
+        await page.mouse.click(900, 600, { button: "right" });
+        await page.getByRole("menuitem", { name: /Paste/ }).click();
+        await expect.poll(async () => (await mutations(request)).some((r) => /copy|paste/.test(r.path) && r.body.includes("/Home/Movies"))).toBe(true);
+    });
+});
+
 test.describe("player", () => {
     test("video starts on its own and stays paused when audio takes over", async ({ page }) => {
         await page.goto("/");

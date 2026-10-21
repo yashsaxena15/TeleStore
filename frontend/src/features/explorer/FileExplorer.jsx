@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
-import { useQueryClient, useQuery } from "@tanstack/react-query";
-import { useLocation, useParams, useNavigate } from "react-router-dom";
-import { isVideoItem, isPhotoItem, isAudioItem, isArchiveItem, isDocumentItem, } from "./fileTypes";
+import { useQuery } from "@tanstack/react-query";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useFiles } from "@/features/explorer/hooks/useFiles";
 import { useFileOperations } from "@/features/explorer/hooks/useFileOperations";
 import { toast } from "sonner";
@@ -16,18 +15,19 @@ import { FileGrid } from "./FileGrid";
 import { FilePagination } from "./FilePagination";
 import { DeleteDialog } from "@/features/explorer/dialogs/DeleteDialog";
 import { NewFolderDialog } from "@/features/explorer/dialogs/NewFolderDialog";
-import { getApiBaseUrl, fetchWithTimeout, api } from "@/lib/api";
+import { api } from "@/lib/api";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, } from "@/components/ui/alert-dialog";
 import logger from "@/lib/logger";
 import { SectionStatus } from "./SectionStatus";
-import { getSection, planMove } from "./lib/explorerItems";
-import { isItemStarred } from "./lib/fileCardHelpers";
-import { isSystemProtectedFolder } from "./lib/fileKeyboardNavigation";
+import { getSection } from "./lib/explorerItems";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { downloadManager } from "@/features/transfers/downloadManager";
-import { useError } from "@/contexts/ErrorHandlerContext"; // Import the error context
 import { settingsUrl } from "@/features/settings/settingsTabs";
 import { pathFromUrl, segmentsFromFilePath, viewFromPathname } from "./lib/explorerRoutes";
+import { countByType, filterAndSortItems, mapCloudItems } from "./lib/itemFilters";
+import { createClipboardActions } from "./actions/clipboardActions";
+import { createBatchActions } from "./actions/batchActions";
+import { useVaultSession } from "./hooks/useVaultSession";
+import { createItemActions } from "./actions/itemActions";
 import { useExplorerHistory } from "./hooks/useExplorerHistory";
 
 // Pages fade in (same feel as before, without a motion library)
@@ -49,8 +49,6 @@ const PanelLoading = () => (<div className="flex flex-1 items-center justify-cen
 export const FileExplorer = () => {
     const location = useLocation();
     const navigate = useNavigate(); // Add navigate hook
-    const { path } = useParams();
-    const { showError } = useError(); // Use the error context
     // Initialize currentPath from URL or localStorage or default to ["Home"]
     const [currentPath, setCurrentPath] = useState(() => {
         // A folder address wins (a saved history entry first); page addresses like /settings are not folders
@@ -129,29 +127,17 @@ export const FileExplorer = () => {
     const [folderDownloadInfo, setFolderDownloadInfo] = useState(null);
     const [showWebDAVDialog, setShowWebDAVDialog] = useState(false);
     const [showVaultModal, setShowVaultModal] = useState(false);
-    const [isVaultUnlocked, setIsVaultUnlocked] = useState(false);
-    const [vaultAutoLockMinutes, setVaultAutoLockMinutes] = useState(15);
     const [userEmail, setUserEmail] = useState("");
     const [username, setUsername] = useState("");
     const [remoteDownloadOpen, setRemoteDownloadOpen] = useState(false);
-    const queryClient = useQueryClient();
-    // Check initial Vault status and user profile
+    // The signed-in user's email (vault setup) and username (WebDAV details)
     useEffect(() => {
-        const loadVaultStatus = () => api.getVaultStatus().then(st => {
-            setIsVaultUnlocked(st.is_unlocked);
-            if (st.auto_lock_minutes)
-                setVaultAutoLockMinutes(st.auto_lock_minutes);
-        }).catch(() => { });
-        loadVaultStatus();
         api.fetchUserProfile().then(p => {
             if (p && p.email)
                 setUserEmail(p.email);
             if (p && p.username)
                 setUsername(p.username);
         }).catch(() => { });
-        // Settings › Vault announces locks, PIN changes and a new auto-lock time
-        window.addEventListener("vaultStateChanged", loadVaultStatus);
-        return () => window.removeEventListener("vaultStateChanged", loadVaultStatus);
     }, []);
     // Listen for showWebDAVMount custom events
     useEffect(() => {
@@ -192,6 +178,7 @@ export const FileExplorer = () => {
     const isStarredMode = selectedFilter === "starred" || currentFolder === "Starred";
     const isInboxMode = selectedFilter === "inbox" || currentFolder === "Telegram Inbox";
     const isVaultMode = selectedFilter === "vault" || currentFolder === "Private Vault" || currentPath[0] === "Private Vault" || currentPath[0] === "Vault";
+    const { isVaultUnlocked, setIsVaultUnlocked, autoLockMinutes: vaultAutoLockMinutes } = useVaultSession({ isVaultMode, onAutoLocked: () => handleFilterChangeRef.current?.("all") });
     // Helper to ensure clean API path even if a virtual segment exists in currentPath
     const getCleanPath = (segments) => {
         // If segments contain "Starred" but we are not at root Starred view, strip "Starred"
@@ -256,28 +243,7 @@ export const FileExplorer = () => {
         }
     }, [isCloudMode, cloudAccountId, cloudFolderId, cloudQuery.data?.account_name]);
     const cloudItems = useMemo(() => {
-        if (!isCloudMode || !cloudQuery.data?.items)
-            return [];
-        const accName = cloudQuery.data.account_name || "Google Drive";
-        return cloudQuery.data.items.map((ci) => ({
-            id: ci.id,
-            name: ci.name,
-            type: ci.type,
-            size: ci.size,
-            modified: ci.modified,
-            file_path: `/Cloud/${accName}`,
-            mime_type: ci.mimeType,
-            thumbnail_url: ci.thumbnailLink,
-            is_cloud: true,
-            cloud_account_id: cloudAccountId,
-            cloud_file_id: ci.id,
-            webViewLink: ci.webViewLink,
-            webContentLink: ci.webContentLink,
-            is_virtual: ci.is_virtual,
-            is_starred: ci.starred,
-            starred: ci.starred,
-            is_trashed: ci.trashed,
-        }));
+        return isCloudMode ? mapCloudItems(cloudQuery.data, cloudAccountId) : [];
     }, [isCloudMode, cloudQuery.data, cloudAccountId]);
     const effectivePagination = useMemo(() => {
         if (isCloudMode) {
@@ -323,153 +289,11 @@ export const FileExplorer = () => {
     }, [isCloudMode, cloudItems, files, currentFolder, selectedFilter]);
     // Compute category counts for quick filter chips
     const typeCounts = useMemo(() => {
-        const counts = {
-            all: baseItems.length,
-            folder: 0,
-            video: 0,
-            document: 0,
-            photo: 0,
-            audio: 0,
-            archive: 0,
-        };
-        for (const item of baseItems) {
-            if (!item)
-                continue;
-            if (item.type === "folder") {
-                counts.folder += 1;
-            }
-            else if (isVideoItem(item)) {
-                counts.video += 1;
-            }
-            else if (isPhotoItem(item)) {
-                counts.photo += 1;
-            }
-            else if (isAudioItem(item)) {
-                counts.audio += 1;
-            }
-            else if (isArchiveItem(item)) {
-                counts.archive += 1;
-            }
-            else if (isDocumentItem(item)) {
-                counts.document += 1;
-            }
-        }
-        return counts;
+        return countByType(baseItems);
     }, [baseItems]);
     // Filtered and sorted items
     const filteredItems = useMemo(() => {
-        let result = [...baseItems];
-        // 1. Search filter
-        if (searchQuery && searchQuery.trim()) {
-            const q = searchQuery.toLowerCase().trim();
-            result = result.filter((item) => (item?.name || "").toLowerCase().includes(q));
-        }
-        // 2. Type filter
-        if (typeFilter !== "all") {
-            result = result.filter((item) => {
-                if (!item)
-                    return false;
-                if (typeFilter === "folder")
-                    return item.type === "folder";
-                if (item.type === "folder")
-                    return false;
-                if (typeFilter === "video")
-                    return isVideoItem(item);
-                if (typeFilter === "photo")
-                    return isPhotoItem(item);
-                if (typeFilter === "audio")
-                    return isAudioItem(item);
-                if (typeFilter === "archive")
-                    return isArchiveItem(item);
-                if (typeFilter === "document")
-                    return isDocumentItem(item);
-                if (typeFilter === "other")
-                    return !isVideoItem(item) && !isPhotoItem(item) && !isAudioItem(item) && !isArchiveItem(item) && !isDocumentItem(item);
-                return true;
-            });
-        }
-        // 3. Size filter
-        if (sizeFilter !== "all") {
-            result = result.filter((item) => {
-                if (!item)
-                    return false;
-                if (item.type === "folder")
-                    return true;
-                const size = typeof item.size === "number" ? item.size : 0;
-                if (sizeFilter === "small")
-                    return size < 10 * 1024 * 1024;
-                if (sizeFilter === "medium")
-                    return size >= 10 * 1024 * 1024 && size < 100 * 1024 * 1024;
-                if (sizeFilter === "large")
-                    return size >= 100 * 1024 * 1024 && size < 1024 * 1024 * 1024;
-                if (sizeFilter === "huge")
-                    return size >= 1024 * 1024 * 1024;
-                return true;
-            });
-        }
-        // 4. Date filter
-        if (dateFilter !== "all") {
-            const now = Date.now();
-            const oneDay = 24 * 60 * 60 * 1000;
-            result = result.filter((item) => {
-                if (!item)
-                    return false;
-                const dateStr = item.trashed_at || item.modified;
-                if (!dateStr)
-                    return true;
-                const time = new Date(dateStr).getTime();
-                if (isNaN(time))
-                    return true;
-                const diff = now - time;
-                if (dateFilter === "today")
-                    return diff <= oneDay;
-                if (dateFilter === "week")
-                    return diff <= 7 * oneDay;
-                if (dateFilter === "month")
-                    return diff <= 30 * oneDay;
-                return true;
-            });
-        }
-        // 5. Sorting
-        result.sort((a, b) => {
-            if (!a || !b)
-                return 0;
-            if (foldersFirst && a.type !== b.type) {
-                return a.type === "folder" ? -1 : 1;
-            }
-            let comparison = 0;
-            if (sortField === "name") {
-                const nameA = a.name || "";
-                const nameB = b.name || "";
-                comparison = nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: "base" });
-            }
-            else if (sortField === "size") {
-                const sizeA = typeof a.size === "number" ? a.size : 0;
-                const sizeB = typeof b.size === "number" ? b.size : 0;
-                comparison = sizeA - sizeB;
-            }
-            else if (sortField === "date") {
-                const getDateScore = (item) => {
-                    if (item.trashed_at) {
-                        const t = new Date(item.trashed_at).getTime();
-                        if (!isNaN(t))
-                            return t;
-                    }
-                    if (item.modified) {
-                        const t = new Date(item.modified).getTime();
-                        if (!isNaN(t))
-                            return t;
-                    }
-                    if (typeof item.message_id === "number") {
-                        return item.message_id;
-                    }
-                    return 0;
-                };
-                comparison = getDateScore(a) - getDateScore(b);
-            }
-            return sortOrder === "asc" ? comparison : -comparison;
-        });
-        return result;
+        return filterAndSortItems(baseItems, { searchQuery, typeFilter, sizeFilter, dateFilter, sortField, sortOrder, foldersFirst });
     }, [baseItems, searchQuery, typeFilter, sizeFilter, dateFilter, sortField, sortOrder, foldersFirst]);
     const getFolderPathSegments = (folder) => {
         const parent = (folder.file_path || "/Home").trim();
@@ -564,137 +388,7 @@ export const FileExplorer = () => {
             setCurrentPath(currentPath.slice(0, index + 1));
         }
     };
-    const handleCopy = (itemsToCopy) => {
-        const itemsList = Array.isArray(itemsToCopy) ? itemsToCopy : [itemsToCopy];
-        if (itemsList.length === 0)
-            return;
-        const firstItem = itemsList[0];
-        const sourcePath = isInboxMode
-            ? "/Telegram Inbox"
-            : (firstItem.file_path || currentApiPath || (currentPath.length > 1 ? `/${currentPath.join('/')}` : "/Home"));
-        copyItem(itemsList, sourcePath);
-        if (itemsList.length === 1) {
-            toast.success(`Copied "${itemsList[0].name}"`);
-        }
-        else {
-            toast.success(`Copied ${itemsList.length} items`);
-        }
-    };
-    const handleCut = (itemsToCut) => {
-        const itemsList = Array.isArray(itemsToCut) ? itemsToCut : [itemsToCut];
-        if (itemsList.length === 0)
-            return;
-        const firstItem = itemsList[0];
-        const sourcePath = isInboxMode
-            ? "/Telegram Inbox"
-            : (firstItem.file_path || currentApiPath || (currentPath.length > 1 ? `/${currentPath.join('/')}` : "/Home"));
-        cutItem(itemsList, sourcePath);
-        if (itemsList.length === 1) {
-            toast.success(`Cut "${itemsList[0].name}"`);
-        }
-        else {
-            toast.success(`Cut ${itemsList.length} items`);
-        }
-    };
-    const handlePaste = async () => {
-        try {
-            if (isInboxMode || currentFolder === "Telegram Inbox" || currentApiPath === "/inbox") {
-                toast.error("Cannot paste items into Telegram Inbox. Inbox is reserved for incoming messages.");
-                return;
-            }
-            if (currentFolder === "Starred" || currentApiPath === "/starred") {
-                toast.error("Cannot paste items into Starred.");
-                return;
-            }
-            if (isEffectiveTrashMode || currentFolder === "Trash" || currentApiPath === "/trash") {
-                toast.error("Cannot paste items into Trash.");
-                return;
-            }
-            if (isCloudMode) {
-                if (!cloudAccountId) {
-                    toast.error("No cloud account selected.");
-                    return;
-                }
-                if (clipboard?.items && clipboard.items.length > 0) {
-                    // Check if items are from Telegram (not is_cloud)
-                    const tgItems = clipboard.items.filter((it) => !it.is_cloud);
-                    if (tgItems.length > 0) {
-                        if (!cloudFolderId || ["root", "google_drive", "trash", "starred", "shared_with_me"].includes(cloudFolderId)) {
-                            toast.error("Cannot transfer files to root level or virtual sections. Please navigate inside My Drive first.");
-                            return;
-                        }
-                        const targetFolderId = cloudFolderId;
-                        const fileIds = tgItems
-                            .filter((it) => it.type !== "folder" && !it.is_folder)
-                            .map((it) => it.id || it.file_unique_id)
-                            .filter(Boolean);
-                        const folderPaths = tgItems
-                            .filter((it) => it.type === "folder" || it.is_folder)
-                            .map((it) => it.path || it.file_path || it.name)
-                            .filter(Boolean);
-                        const res = await api.transferTelegramToCloud(cloudAccountId, fileIds, folderPaths, targetFolderId, clipboard.operation === "cut" ? "cut" : "copy");
-                        toast.success(res.message || `Queued ${tgItems.length} item(s) for transfer to Google Drive. Track in Transfers.`);
-                        clearClipboard();
-                        refetch();
-                        return;
-                    }
-                    else {
-                        // Internal Google Drive Copy / Cut (Move)
-                        const targetFolderId = cloudFolderId || "root";
-                        if (!cloudFolderId || ["root", "google_drive", "trash", "starred", "shared_with_me"].includes(targetFolderId)) {
-                            toast.error("Cannot paste items into Google Drive root, Starred, Trash, or Shared with me. Please open a folder in My Drive.");
-                            return;
-                        }
-                        const cloudFileIds = clipboard.items.map((it) => it.cloud_file_id || it.id).filter(Boolean);
-                        if (cloudFileIds.length === 0) {
-                            toast.error("No valid cloud items found in clipboard.");
-                            return;
-                        }
-                        const op = clipboard.operation === "cut" ? "cut" : "copy";
-                        const toastId = toast.loading(`${op === "cut" ? "Moving" : "Copying"} ${cloudFileIds.length} item(s) in Google Drive...`);
-                        try {
-                            const res = await api.transferCloudInternal(cloudAccountId, cloudFileIds, targetFolderId, op);
-                            toast.dismiss(toastId);
-                            toast.success(res.message || `Successfully ${op === "cut" ? "moved" : "copied"} ${cloudFileIds.length} item(s) in Google Drive!`);
-                            clearClipboard();
-                            refetch();
-                        }
-                        catch (err) {
-                            toast.dismiss(toastId);
-                            toast.error(err.message || `Failed to ${op} items in Google Drive`);
-                        }
-                        return;
-                    }
-                }
-                toast.info("Clipboard is empty.");
-                return;
-            }
-            if (clipboard?.items && clipboard.items.some((it) => it.is_cloud)) {
-                const targetPath = currentApiPath || (currentPath.length > 1 ? `/${currentPath.join('/')}` : "/Home");
-                const cloudItemsToTransfer = clipboard.items.filter((it) => it.is_cloud);
-                for (const item of cloudItemsToTransfer) {
-                    const cloudAccId = item.cloud_account_id || cloudAccountId;
-                    const cloudFileId = item.cloud_file_id || item.id;
-                    if (cloudAccId && cloudFileId) {
-                        await api.transferCloudToTelegram(cloudAccId, cloudFileId, targetPath, clipboard.operation === "cut" ? "cut" : "copy");
-                    }
-                }
-                toast.success(`Queued ${cloudItemsToTransfer.length} cloud item(s) to ${targetPath}. Track progress in Transfers.`);
-                clearClipboard();
-                refetch();
-                return;
-            }
-            // Construct the target path using current location
-            const targetPath = currentApiPath || (currentPath.length > 1 ? `/${currentPath.join('/')}` : "/Home");
-            await pasteItem(targetPath);
-            toast.success("Operation completed successfully");
-            // Refresh current location after paste
-            refetch();
-        }
-        catch (error) {
-            toast.error(error.message || "Failed to complete operation");
-        }
-    };
+    const { handleCopy, handleCut, handlePaste } = createClipboardActions({ isInboxMode, isEffectiveTrashMode, isCloudMode, currentApiPath, currentPath, currentFolder, cloudAccountId, cloudFolderId, refetch, clipboard, copyItem, cutItem, clearClipboard, pasteItem });
     const handleVaultUnlocked = () => {
         setIsVaultUnlocked(true);
         setSelectedFilter("vault");
@@ -738,22 +432,6 @@ export const FileExplorer = () => {
     // Long-lived listeners below call the latest handleFilterChange through this ref,
     // so they never use values (e.g. cloud accounts) captured on an earlier render.
     const handleFilterChangeRef = useRef(null);
-    useEffect(() => {
-        if (!isVaultUnlocked)
-            return;
-        const interval = setInterval(() => {
-            api.getVaultStatus().then(st => {
-                if (!st.is_unlocked && isVaultUnlocked) {
-                    setIsVaultUnlocked(false);
-                    if (isVaultMode) {
-                        handleFilterChangeRef.current("all");
-                        toast.info(`Vault locked after ${vaultAutoLockMinutes} minutes without activity.`);
-                    }
-                }
-            }).catch(() => { });
-        }, 45000);
-        return () => clearInterval(interval);
-    }, [isVaultUnlocked, isVaultMode, vaultAutoLockMinutes]);
     const handleFilterChange = (filter) => {
         if (filter.startsWith("cloud:")) {
             const parts = filter.split(":");
@@ -831,432 +509,8 @@ export const FileExplorer = () => {
         }
     };
     handleFilterChangeRef.current = handleFilterChange;
-    const handleSidebarDrop = async (item, targetFolderName) => {
-        try {
-            // Construct the source path correctly
-            let sourcePath = "/";
-            if (isInboxMode) {
-                sourcePath = "/Telegram Inbox";
-            }
-            else if (currentPath.length > 1) {
-                // For all folder types, we construct the path consistently
-                sourcePath = `/${currentPath.join('/')}`;
-            }
-            // Construct the target path
-            let targetPath = "/Home";
-            if (targetFolderName === "Telegram Inbox") {
-                targetPath = "/Telegram Inbox";
-            }
-            else if (targetFolderName !== "Home") {
-                // Since folders are now in the database, we can construct the path directly
-                targetPath = `/Home/${targetFolderName}`;
-            }
-            const baseUrl = getApiBaseUrl();
-            // For the default case, we need to append /api to the base URL
-            const apiUrl = baseUrl ? `${baseUrl}` : '';
-            const response = await fetchWithTimeout(`${apiUrl}/files/move`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                credentials: "include", // Add this to include cookies for authentication
-                body: JSON.stringify({
-                    file_id: item.id, // Use file_id instead of file_path
-                    target_path: targetPath,
-                }),
-            }, 3000); // 3 second timeout
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || "Failed to move file");
-            }
-            toast.success(`Moved "${item.name}" to ${targetFolderName}`);
-            // Refresh current location after drag and drop
-            refetch();
-        }
-        catch (error) {
-            toast.error(error.message || "Failed to move file");
-        }
-    };
-    const handleNewFolder = async (folderName) => {
-        try {
-            if (isInboxMode || currentFolder === "Telegram Inbox" || currentApiPath === "/inbox") {
-                toast.error("Cannot create folders in Telegram Inbox. Inbox is reserved for incoming messages.");
-                return;
-            }
-            if (currentFolder === "Starred" || currentApiPath === "/starred") {
-                toast.error("Cannot create folders in Starred.");
-                return;
-            }
-            if (isEffectiveTrashMode || currentFolder === "Trash" || currentApiPath === "/trash") {
-                toast.error("Cannot create folders in Trash.");
-                return;
-            }
-            if (isCloudMode) {
-                if (!cloudFolderId || ["root", "google_drive", "trash", "starred", "shared_with_me"].includes(cloudFolderId)) {
-                    toast.error("Cannot create folders at root level or in virtual sections. Please navigate inside My Drive first.");
-                    return;
-                }
-                const effectiveParent = cloudFolderId === "my_drive" ? "root" : cloudFolderId;
-                await api.createCloudFolder(cloudAccountId, folderName, effectiveParent);
-                toast.success(`Folder "${folderName}" created in Google Drive`);
-                setNewFolderDialogOpen(false);
-                refetch();
-                return;
-            }
-            // Use currentApiPath which correctly handles /Home and subfolders
-            const backendPath = currentApiPath;
-            const baseUrl = getApiBaseUrl();
-            // For the default case, we need to append /api to the base URL
-            const apiUrl = baseUrl ? `${baseUrl}` : '';
-            const response = await fetchWithTimeout(`${apiUrl}/folders/create`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                credentials: "include", // Add this to include cookies for authentication
-                body: JSON.stringify({
-                    folderName,
-                    currentPath: backendPath,
-                }),
-            }, 3000); // 3 second timeout
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || "Failed to create folder");
-            }
-            toast.success(`Folder "${folderName}" created successfully`);
-            setNewFolderDialogOpen(false);
-            // Refresh current location after creating folder
-            refetch();
-        }
-        catch (error) {
-            toast.error(error.message || "Failed to create folder");
-        }
-    };
-    // Add the missing functions
-    const handleDelete = (item, index) => {
-        setDeleteDialog({ item, index });
-    };
-    const handleRename = (item, index) => {
-        setRenamingItem({ item, index });
-    };
-    const handleMove = async (item, targetFolder) => {
-        try {
-            if (isCloudMode && cloudAccountId) {
-                if (targetFolder.is_virtual || ["trash", "starred", "shared_with_me"].includes(targetFolder.id)) {
-                    toast.error("Cannot move items into virtual folders.");
-                    return;
-                }
-                const fileId = item.cloud_file_id || item.id;
-                const targetId = targetFolder.cloud_file_id || targetFolder.id;
-                if (!fileId || !targetId) {
-                    toast.error("Invalid cloud items for move operation.");
-                    return;
-                }
-                const toastId = toast.loading(`Moving "${item.name}" into "${targetFolder.name}"...`);
-                try {
-                    await api.transferCloudInternal(cloudAccountId, [fileId], targetId, "cut");
-                    toast.dismiss(toastId);
-                    toast.success(`Moved "${item.name}" to "${targetFolder.name}"`);
-                    refetch();
-                }
-                catch (err) {
-                    toast.dismiss(toastId);
-                    toast.error(err.message || "Failed to move item in Google Drive");
-                }
-                return;
-            }
-            // Determine source path from item or current path
-            let sourcePath = item.file_path || (currentPath.length > 1 ? `/${currentPath.join('/')}` : "/Home");
-            // Construct the target path dynamically based on targetFolder's actual location
-            let targetPath = "/Home";
-            if (targetFolder.name === "Home") {
-                targetPath = "/Home";
-            }
-            else if (targetFolder.file_path) {
-                // Use the folder's actual parent path in the file tree
-                const parent = targetFolder.file_path.replace(/\/+$/, '');
-                targetPath = parent && parent !== "/" ? `${parent}/${targetFolder.name}` : `/${targetFolder.name}`;
-            }
-            else {
-                // Fallback using currentApiPath
-                const current = currentApiPath || (currentPath.length > 1 ? `/${currentPath.join('/')}` : "/Home");
-                targetPath = `${current.replace(/\/+$/, '')}/${targetFolder.name}`;
-            }
-            // Ensure paths are properly formatted
-            sourcePath = sourcePath.replace(/\/+/g, '/'); // Remove duplicate slashes
-            targetPath = targetPath.replace(/\/+/g, '/'); // Remove duplicate slashes
-            // Ensure targetPath doesn't end with a slash unless it's root
-            if (targetPath !== "/" && targetPath.endsWith("/")) {
-                targetPath = targetPath.slice(0, -1);
-            }
-            await moveItem(item, targetPath, sourcePath);
-            toast.success(`Moved "${item.name}" to ${targetFolder.name}`);
-            // Refresh current location after move
-            refetch();
-        }
-        catch (error) {
-            logger.error("Error moving file", { error, item, targetFolder });
-            toast.error(error.message || "Failed to move file");
-        }
-    };
-    const handleDownloadFolderPart = (part) => {
-        const baseUrl = getApiBaseUrl();
-        const downloadUrl = part.download_url.startsWith('http')
-            ? part.download_url
-            : `${baseUrl || ''}${part.download_url}`;
-        downloadManager.addDownload(downloadUrl, part.name);
-        toast.success(`Started download for ${part.name}`);
-    };
-    const handleDownloadAllFolderParts = (parts) => {
-        const baseUrl = getApiBaseUrl();
-        parts.forEach((part, index) => {
-            setTimeout(() => {
-                const downloadUrl = part.download_url.startsWith('http')
-                    ? part.download_url
-                    : `${baseUrl || ''}${part.download_url}`;
-                downloadManager.addDownload(downloadUrl, part.name);
-            }, index * 400);
-        });
-        toast.success(`Queued ${parts.length} parts for download`);
-    };
-    const handleDownload = async (item) => {
-        try {
-            if (item.is_cloud) {
-                if (item.type === "folder") {
-                    toast.info("Folder download from Google Drive is not supported directly. Please copy files to Telegram storage.");
-                    return;
-                }
-                const fileId = item.cloud_file_id || item.id;
-                const dlUrl = api.getCloudDownloadUrl(cloudAccountId || item.cloud_account_id, fileId);
-                downloadManager.addDownload(dlUrl, item.name);
-                toast.success(`Download queued: ${item.name}`);
-                return;
-            }
-            const baseUrl = getApiBaseUrl();
-            if (item.type === "folder") {
-                toast.info(`Preparing zip for "${item.name}"...`);
-                const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
-                const tokenParam = token ? `&token=${encodeURIComponent(token)}` : "";
-                const param = item.id
-                    ? `id=${encodeURIComponent(item.id)}`
-                    : `path=${encodeURIComponent(item.file_path ? `${item.file_path}/${item.name}` : (currentApiPath ? `${currentApiPath}/${item.name}` : `/Home/${item.name}`))}`;
-                const response = await fetchWithTimeout(`${baseUrl || ""}/folders/download-info?${param}${tokenParam}`, { credentials: "include" });
-                if (!response.ok) {
-                    const err = await response.json().catch(() => ({}));
-                    throw new Error(err.detail || `Failed to prepare folder download: ${response.status}`);
-                }
-                const info = await response.json();
-                if (!info.parts || info.parts.length === 0) {
-                    toast.warning("Folder is empty or has no files to download.");
-                    return;
-                }
-                if (info.parts.length === 1) {
-                    // Single part (<= 2GB), start download directly
-                    const part = info.parts[0];
-                    handleDownloadFolderPart(part);
-                }
-                else {
-                    // Multiple parts (> 2GB), show part selection dialog
-                    setFolderDownloadInfo(info);
-                }
-                return;
-            }
-            console.log('[FileExplorer] handleDownload - baseUrl:', baseUrl);
-            // Construct the download URL - for the new path structure, we just need the file name
-            // The backend will handle extracting the file name from paths like /Home/Images/filename.jpg
-            const fileName = item.name;
-            let downloadUrl = baseUrl
-                ? `${baseUrl}/dl/${fileName}`
-                : `/dl/${fileName}`;
-            console.log('[FileExplorer] handleDownload - constructed URL:', downloadUrl);
-            // Add to download manager for tracking - this will automatically start the download
-            // The download manager will handle adding auth tokens as needed
-            const downloadId = downloadManager.addDownload(downloadUrl, item.name);
-            // The download is now handled by the download manager's queue system
-            // We don't need to call downloadFile directly
-        }
-        catch (error) {
-            logger.error("Failed to download file:", error);
-            toast.error(error.message || "Failed to download file");
-        }
-    };
-    const confirmRename = async (newName) => {
-        if (!renamingItem)
-            return;
-        try {
-            const item = renamingItem.item;
-            if (isCloudMode) {
-                const fileId = item.cloud_file_id || item.id;
-                await api.renameCloudFile(cloudAccountId, fileId, newName);
-                toast.success(`Renamed "${item.name}" to "${newName}"`);
-                setRenamingItem(null);
-                refetch();
-                return;
-            }
-            const backendPath = currentApiPath;
-            const baseUrl = getApiBaseUrl();
-            // For the default case, we need to append /api to the base URL
-            const apiUrl = baseUrl ? `${baseUrl}` : '';
-            const response = await fetchWithTimeout(`${apiUrl}/files/rename`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                credentials: "include", // Add this to include cookies for authentication
-                body: JSON.stringify({
-                    file_id: item.id, // Use file_id instead of file_path
-                    new_name: newName,
-                }),
-            }, 3000); // 3 second timeout
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || "Failed to rename file");
-            }
-            toast.success(`Renamed "${item.name}" to "${newName}"`);
-            setRenamingItem(null);
-            // Refresh current location after renaming file
-            refetch();
-        }
-        catch (error) {
-            toast.error(error.message || "Failed to rename file");
-        }
-    };
-    const confirmDelete = async () => {
-        if (!deleteDialog)
-            return;
-        try {
-            const item = deleteDialog.item;
-            if (!item.id)
-                return;
-            if (isCloudMode) {
-                const fileId = item.cloud_file_id || item.id;
-                const isAlreadyTrashed = cloudFolderId === "trash" || Boolean(item.is_trashed);
-                await api.deleteCloudFile(cloudAccountId, fileId, isAlreadyTrashed);
-                toast.success(isAlreadyTrashed ? `Permanently deleted "${item.name}" from Google Drive` : `Moved "${item.name}" to Google Drive Trash`);
-                setDeleteDialog(null);
-                refetch();
-                return;
-            }
-            if (isTrashMode) {
-                await api.deleteForever(item.id);
-                toast.success(`Permanently deleted "${item.name}"`);
-            }
-            else {
-                await api.trashFile(item.id);
-                toast.success(`Moved "${item.name}" to Trash`);
-            }
-            setDeleteDialog(null);
-            // Refresh current location after deleting file
-            refetch();
-        }
-        catch (error) {
-            toast.error(error.message || "Failed to delete item");
-        }
-    };
-    const handleToggleStar = async (item) => {
-        if (!item.id)
-            return;
-        try {
-            if (isCloudMode) {
-                const fileId = item.cloud_file_id || item.id;
-                const newStarred = !(item.starred || item.is_starred);
-                await api.starCloudFile(cloudAccountId || item.cloud_account_id, fileId, newStarred);
-                toast.success(newStarred ? `Added "${item.name}" to Starred in Google Drive` : `Removed "${item.name}" from Starred in Google Drive`);
-                refetch();
-                return;
-            }
-            const newStarred = !item.starred;
-            await api.toggleStar(item.id, newStarred);
-            toast.success(newStarred ? `Added "${item.name}" to Starred` : `Removed "${item.name}" from Starred`);
-            refetch();
-        }
-        catch (error) {
-            toast.error(error.message || "Failed to update star status");
-        }
-    };
-    const handleRestoreItem = async (item) => {
-        if (!item.id)
-            return;
-        try {
-            if (isCloudMode) {
-                const fileId = item.cloud_file_id || item.id;
-                await api.restoreCloudFile(cloudAccountId || item.cloud_account_id, fileId);
-                toast.success(`Restored "${item.name}" in Google Drive`);
-                refetch();
-                return;
-            }
-            await api.restoreFile(item.id);
-            toast.success(`Restored "${item.name}"`);
-            refetch();
-        }
-        catch (error) {
-            toast.error(error.message || "Failed to restore item");
-        }
-    };
-    // Selection bar batch actions: one request per item, one summary toast, one refresh
-    const plural = (n) => `${n} item${n === 1 ? "" : "s"}`;
-    const runForEach = async (list, fn, done) => {
-        if (list.length === 0)
-            return;
-        const results = await Promise.allSettled(list.map(fn));
-        const ok = results.filter((r) => r.status === "fulfilled").length;
-        const failed = results.filter((r) => r.status === "rejected");
-        if (ok > 0) {
-            toast.success(done(ok));
-            refetch();
-        }
-        if (failed.length > 0)
-            toast.error(`${plural(failed.length)} failed: ${failed[0].reason?.message || "unknown error"}`);
-    };
-    const withoutSystemFolders = (list) => {
-        const kept = list.filter((it) => !isSystemProtectedFolder(it, currentPath));
-        if (kept.length < list.length)
-            toast.error("Default system folders can't be moved");
-        return kept;
-    };
-    const batchActions = {
-        setStarred: (list, on) => runForEach(list.filter((it) => isItemStarred(it) !== on), (it) => (isCloudMode
-            ? api.starCloudFile(cloudAccountId || it.cloud_account_id, it.cloud_file_id || it.id, on)
-            : api.toggleStar(it.id, on)), (n) => (on ? `Starred ${plural(n)}` : `Removed ${plural(n)} from Starred`)),
-        toVault: (list) => runForEach(withoutSystemFolders(list), (it) => api.moveIntoVault(it.id), (n) => `Moved ${plural(n)} to the vault`),
-        toHome: (list) => runForEach(list, (it) => api.moveOutOfVault(it.id), (n) => `Moved ${plural(n)} to Home`),
-        restore: (list) => runForEach(list, (it) => (isCloudMode
-            ? api.restoreCloudFile(cloudAccountId || it.cloud_account_id, it.cloud_file_id || it.id)
-            : api.restoreFile(it.id)), (n) => `Restored ${plural(n)}`),
-        moveTo: async (list, targetPath) => {
-            const target = (targetPath || "/Home").replace(/\/+/g, "/").replace(/(.)\/$/, "$1");
-            const { moves, skipped } = planMove(withoutSystemFolders(list), target, { fallbackPath: currentApiPath || "/Home" });
-            if (moves.length === 0) {
-                if (skipped.length > 0)
-                    toast.info(skipped.some((x) => x.reason === "into-itself") ? "A folder can't be moved into itself" : "Already in that folder");
-                return;
-            }
-            await runForEach(moves, ({ item, via }) => (via === "vault-in" ? api.moveIntoVault(item.id, target)
-                : via === "vault-out" ? api.moveOutOfVault(item.id, target)
-                    : moveItem(item, target, item.file_path || currentApiPath || "/Home")), (n) => `Moved ${plural(n)} to ${target}`);
-        },
-    };
-    const handleEmptyTrash = async () => {
-        try {
-            setIsEmptyingTrash(true);
-            if (isCloudMode) {
-                await api.emptyCloudTrash(cloudAccountId);
-                toast.success("Google Drive trash emptied successfully");
-            }
-            else {
-                const res = await api.emptyTrash();
-                toast.success(res.message || "Trash emptied successfully");
-            }
-            setEmptyTrashDialogOpen(false);
-            refetch();
-        }
-        catch (error) {
-            toast.error(error.message || "Failed to empty trash");
-        }
-        finally {
-            setIsEmptyingTrash(false);
-        }
-    };
+    const batchActions = createBatchActions({ isCloudMode, cloudAccountId, currentPath, currentApiPath, refetch, moveItem });
+    const { handleSidebarDrop, handleNewFolder, handleDelete, handleRename, handleMove, handleDownloadFolderPart, handleDownloadAllFolderParts, handleDownload, confirmRename, confirmDelete, handleToggleStar, handleRestoreItem, handleEmptyTrash } = createItemActions({ cloudAccountId, cloudFolderId, currentApiPath, currentFolder, currentPath, deleteDialog, isCloudMode, isEffectiveTrashMode, isInboxMode, isTrashMode, moveItem, refetch, renamingItem, setDeleteDialog, setEmptyTrashDialogOpen, setFolderDownloadInfo, setIsEmptyingTrash, setNewFolderDialogOpen, setRenamingItem });
     const cancelDelete = () => {
         setDeleteDialog(null);
     };
