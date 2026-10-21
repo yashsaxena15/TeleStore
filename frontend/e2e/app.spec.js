@@ -176,6 +176,36 @@ test.describe("player", () => {
     });
 });
 
+test.describe("player panels", () => {
+    test("settings, details, playlist and minimize to the dock", async ({ page }) => {
+        await page.goto("/");
+        await row(page, "Movies").dblclick();
+        await row(page, "Arrival.2016.1080p.mkv").dblclick();
+        const video = page.locator("video");
+        await expect.poll(() => video.evaluate((v) => !v.paused)).toBe(true);
+        // Settings: change speed
+        await page.getByRole("button", { name: "Settings" }).click();
+        const speed = page.getByRole("region", { name: "Playback speed" }).or(page.locator('section[aria-label="Playback speed"]'));
+        await speed.getByRole("button", { name: /1\.5/ }).click();
+        await expect.poll(() => video.evaluate((v) => v.playbackRate)).toBe(1.5);
+        await page.keyboard.press("Escape");
+        // File details
+        await page.getByRole("button", { name: "File details" }).click();
+        await expect(page.getByText("Media Details")).toBeVisible();
+        await page.getByRole("button", { name: "Close details" }).click();
+        await expect(page.getByText("Media Details")).toHaveCount(0);
+        // Playlist lists the folder's videos
+        await page.getByRole("button", { name: "Playlist" }).first().click();
+        await expect(page.getByText("Blade.Runner.2049.mkv").first()).toBeVisible();
+        await page.keyboard.press("Escape");
+        // Minimize: keeps playing in the dock, from the same position
+        const before = await video.evaluate((v) => v.currentTime);
+        await page.getByRole("button", { name: "Minimize to dock" }).click();
+        await expect(page.getByRole("button", { name: "Open video in theater mode" }).first()).toBeVisible();
+        await expect.poll(() => page.locator("video").evaluate((v) => v.currentTime)).toBeGreaterThan(before);
+    });
+});
+
 test.describe("security messages", () => {
     test("a locked-out vault shows the wait time", async ({ page }) => {
         await page.goto("/");
