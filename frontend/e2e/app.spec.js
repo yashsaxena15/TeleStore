@@ -139,6 +139,60 @@ test.describe("staying signed in", () => {
     });
 });
 
+test.describe("video and audio downloads", () => {
+    const openDialog = async (page) => {
+        await page.goto("/");
+        await page.getByRole("button", { name: "New", exact: true }).first().click();
+        await page.getByRole("menuitem", { name: /Download video or audio/ }).click();
+        const dialog = page.getByRole("dialog", { name: "Download video or audio" });
+        await expect(dialog).toBeVisible();
+        return dialog;
+    };
+    const downloadBody = async (request) => JSON.parse((await mutations(request)).find((r) => r.path === "/transfers/remote/media").body);
+
+    test("one video as MP3 into the open folder", async ({ page, request }) => {
+        const dialog = await openDialog(page);
+        await dialog.getByLabel("Link", { exact: true }).fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+        await expect(dialog.getByLabel("Link preview")).toContainText("Never Gonna Give You Up");
+        await expect(dialog.getByLabel("Link preview")).toContainText("3:33");
+        await dialog.getByRole("radio", { name: "Audio only" }).click();
+        await dialog.getByRole("button", { name: "Download", exact: true }).click();
+        await expect(page.getByText("Downloading 2 video files.")).toBeVisible();
+        expect(await downloadBody(request)).toEqual({ url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", choice: { mode: "audio", audio_format: "mp3" }, destination: { kind: "home", path: "/Home" } });
+    });
+
+    test("chosen playlist videos at 720p with subtitles", async ({ page, request }) => {
+        const dialog = await openDialog(page);
+        await dialog.getByLabel("Link", { exact: true }).fill("https://www.youtube.com/playlist?list=PL123");
+        await expect(dialog.getByLabel("Link preview")).toContainText("Playlist · 3 videos");
+        await expect(dialog.getByLabel("Playlist videos")).toContainText("1:02:05");
+        await dialog.getByRole("checkbox", { name: /Song two/ }).uncheck();
+        await dialog.getByLabel("Quality").selectOption("720");
+        await dialog.getByLabel(/English subtitles/).check();
+        await dialog.getByRole("button", { name: "Download 2 videos" }).click();
+        await expect.poll(async () => (await mutations(request)).some((r) => r.path === "/transfers/remote/media")).toBe(true);
+        const body = await downloadBody(request);
+        expect(body.items).toEqual([1, 3]);
+        expect(body.choice).toEqual({ mode: "video", quality: "720", subtitles: true });
+    });
+
+    test("a refused link says why", async ({ page }) => {
+        const dialog = await openDialog(page);
+        await dialog.getByLabel("Link", { exact: true }).fill("http://127.0.0.1:8000/admin");
+        await expect(dialog.getByRole("alert")).toHaveText("Links to private or local network addresses can't be downloaded.");
+        await expect(dialog.getByRole("button", { name: "Download", exact: true })).toBeDisabled();
+    });
+
+    test("the owner adds a cookies.txt", async ({ page }) => {
+        await page.goto("/settings?tab=integrations");
+        await expect(page.getByRole("heading", { name: "Video downloads" })).toBeVisible();
+        await expect(page.getByText("yt-dlp 2026.10.21")).toBeVisible();
+        await page.getByLabel("cookies.txt file").setInputFiles({ name: "cookies.txt", mimeType: "text/plain", buffer: Buffer.from("# Netscape HTTP Cookie File\n") });
+        await expect(page.getByText("Signed in", { exact: true })).toBeVisible();
+        await expect(page.getByText(/Using cookies for youtube.com/)).toBeVisible();
+    });
+});
+
 test.describe("import from Instagram", () => {
     const openDialog = async (page) => {
         await page.goto("/");

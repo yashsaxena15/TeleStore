@@ -27,3 +27,8 @@ google-auth-httplib2
 aiofiles==25.1.0
 gdown>=6.4.0
 instaloader==4.15.4
+yt-dlp==2026.10.21
+yt-dlp-ejs==0.8.0
+mutagen==1.48.1
+brotli==1.2.0
+pycryptodomex==3.24.1

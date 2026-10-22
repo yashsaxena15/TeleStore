@@ -41,6 +41,7 @@ const FolderDownloadDialog = lazy(() => import("@/features/explorer/dialogs/Fold
 const WebDAVMountDialog = lazy(() => import("@/features/cloud/WebDAVMountDialog").then((m) => ({ default: m.WebDAVMountDialog })));
 const VaultModal = lazy(() => import("@/features/vault/VaultModal").then((m) => ({ default: m.VaultModal })));
 const RemoteDownloadDialog = lazy(() => import("@/features/cloud/RemoteDownloadDialog").then((m) => ({ default: m.RemoteDownloadDialog })));
+const MediaDownloadDialog = lazy(() => import("@/features/cloud/MediaDownloadDialog").then((m) => ({ default: m.MediaDownloadDialog })));
 const InstagramImportDialog = lazy(() => import("@/features/cloud/InstagramImportDialog").then((m) => ({ default: m.InstagramImportDialog })));
 // Mounts a lazy dialog only while it is open
 const WhenOpen = ({ open, children }) => (open ? <Suspense fallback={null}>{children}</Suspense> : null);
@@ -132,6 +133,7 @@ export const FileExplorer = () => {
     const [username, setUsername] = useState("");
     const [remoteDownloadOpen, setRemoteDownloadOpen] = useState(false);
     const [instagramOpen, setInstagramOpen] = useState(false);
+    const [mediaOpen, setMediaOpen] = useState(false);
     // The signed-in user's email (vault setup) and username (WebDAV details)
     useEffect(() => {
         api.fetchUserProfile().then(p => {
@@ -601,8 +603,8 @@ export const FileExplorer = () => {
             return "Open My Drive, or a folder inside it, to add files.";
         return null;
     };
-    // Where "Import from Instagram" saves by default: the place that is open now
-    const instagramDefaultDestination = () => {
+    // Where server downloads (Instagram, video) save by default: the place that is open now
+    const saveDefaultDestination = () => {
         const realDriveFolder = !["root", "google_drive", "starred", "trash", "shared_with_me"].includes(cloudFolderId);
         if (isCloudMode && cloudAccountId && realDriveFolder)
             return { kind: "gdrive", accountId: cloudAccountId, folderId: cloudFolderId, folderName: cloudBreadcrumbs[cloudBreadcrumbs.length - 1]?.name || "My Drive" };
@@ -634,6 +636,9 @@ export const FileExplorer = () => {
                 return;
             case "instagram-import":
                 setInstagramOpen(true);
+                return;
+            case "media-download":
+                setMediaOpen(true);
                 return;
             case "connect-drive":
                 setConnectDriveOpen(true);
@@ -746,6 +751,8 @@ export const FileExplorer = () => {
 
       <WhenOpen open={remoteDownloadOpen}><RemoteDownloadDialog isOpen={remoteDownloadOpen} onClose={() => setRemoteDownloadOpen(false)} defaultPath={currentApiPath}/></WhenOpen>
 
-      <WhenOpen open={instagramOpen}><InstagramImportDialog open={instagramOpen} onOpenChange={setInstagramOpen} userEmail={userEmail} defaultDestination={instagramDefaultDestination()}/></WhenOpen>
+      <WhenOpen open={mediaOpen}><MediaDownloadDialog open={mediaOpen} onOpenChange={setMediaOpen} userEmail={userEmail} defaultDestination={saveDefaultDestination()}/></WhenOpen>
+
+      <WhenOpen open={instagramOpen}><InstagramImportDialog open={instagramOpen} onOpenChange={setInstagramOpen} userEmail={userEmail} defaultDestination={saveDefaultDestination()}/></WhenOpen>
     </div>);
 };

@@ -256,7 +256,7 @@ def test_workers_never_claim_instagram_tasks(client, test_secrets):
     with patch("telestore.api.routes.worker.get_remote_db", return_value={"RemoteTransfers": coll}):
         res = client.post("/api/worker/claim-task", json={"worker_id": "w1"}, headers={"X-Worker-Key": test_secrets["worker_secret"]})
     assert res.status_code == 200
-    assert coll.find_one_and_update.call_args.args[0]["source_type"] == {"$nin": ["instagram"]}
+    assert coll.find_one_and_update.call_args.args[0]["source_type"] == {"$nin": ["instagram", "media"]}
 
 
 class TestErrorMessages:
