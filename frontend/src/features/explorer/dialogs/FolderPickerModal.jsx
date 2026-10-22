@@ -5,7 +5,14 @@ import { Input } from "@/components/ui/input";
 import { Folder, FolderOpen, FolderPlus, ChevronRight, ArrowLeft, Check, Loader2, ShieldCheck, Inbox, HardDrive } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-export const FolderPickerModal = ({ isOpen, onClose, currentSelectedPath, onSelectPath, }) => {
+const ROOTS = [
+    { path: "/Home", key: "Home", label: "Home", icon: HardDrive },
+    { path: "/Vault", key: "Vault", label: "Private Vault", icon: ShieldCheck },
+    { path: "/inbox", key: "inbox", label: "Telegram Inbox", icon: Inbox },
+];
+/** `roots` limits the places offered (e.g. ["Home"]); all three by default. */
+export const FolderPickerModal = ({ isOpen, onClose, currentSelectedPath, onSelectPath, roots }) => {
+    const shownRoots = roots ? ROOTS.filter((r) => roots.includes(r.key)) : ROOTS;
     // Path being browsed inside the picker modal
     const [navPath, setNavPath] = useState("/Home");
     const [folders, setFolders] = useState([]);
@@ -123,26 +130,14 @@ export const FolderPickerModal = ({ isOpen, onClose, currentSelectedPath, onSele
           </div>
 
           {/* Root Quick Switchers */}
-          <div className="flex items-center gap-1.5 pt-3">
-            <button type="button" onClick={() => handleRootSwitch("/Home")} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${currentRoot === "Home"
-            ? "bg-primary text-primary-foreground shadow-xs"
-            : "bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground"}`}>
-              <HardDrive className="w-3.5 h-3.5"/>
-              Home
-            </button>
-            <button type="button" onClick={() => handleRootSwitch("/Vault")} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${currentRoot === "Vault"
-            ? "bg-primary text-primary-foreground shadow-xs"
-            : "bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground"}`}>
-              <ShieldCheck className="w-3.5 h-3.5"/>
-              Private Vault
-            </button>
-            <button type="button" onClick={() => handleRootSwitch("/inbox")} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${currentRoot === "inbox"
-            ? "bg-primary text-primary-foreground shadow-xs"
-            : "bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground"}`}>
-              <Inbox className="w-3.5 h-3.5"/>
-              Telegram Inbox
-            </button>
-          </div>
+          {shownRoots.length > 1 && (<div className="flex items-center gap-1.5 pt-3">
+            {shownRoots.map(({ path, key, label, icon: Icon }) => (<button key={key} type="button" onClick={() => handleRootSwitch(path)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${currentRoot === key
+                ? "bg-primary text-primary-foreground shadow-xs"
+                : "bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground"}`}>
+                <Icon className="w-3.5 h-3.5"/>
+                {label}
+              </button>))}
+          </div>)}
         </DialogHeader>
 
         {/* Breadcrumb Navigation & Action Bar */}

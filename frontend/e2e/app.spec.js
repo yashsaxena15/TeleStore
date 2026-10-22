@@ -109,6 +109,61 @@ test.describe("users and connection", () => {
     });
 });
 
+test.describe("import from Instagram", () => {
+    const openDialog = async (page) => {
+        await page.goto("/");
+        await page.getByRole("button", { name: "New", exact: true }).first().click();
+        await page.getByRole("menuitem", { name: /Import from Instagram/ }).click();
+        const dialog = page.getByRole("dialog", { name: "Import from Instagram" });
+        await expect(dialog).toBeVisible();
+        return dialog;
+    };
+    const importBody = async (request) => JSON.parse((await mutations(request)).find((r) => r.path === "/transfers/remote/instagram").body);
+
+    test("a carousel goes to the open Home folder", async ({ page, request }) => {
+        const dialog = await openDialog(page);
+        await expect(dialog.getByRole("button", { name: /^Import/ })).toBeDisabled();
+        await dialog.getByLabel("Instagram link").fill("https://www.instagram.com/p/ABCdef12345/?igsh=x");
+        await expect(dialog.getByLabel("Post preview")).toContainText("@nasa");
+        await expect(dialog.getByLabel("Post preview")).toContainText("Carousel · 2 items");
+        await dialog.getByRole("button", { name: "Import 2 items" }).click();
+        await expect(page.getByText("Importing 2 items from @nasa.")).toBeVisible();
+        expect(await importBody(request)).toEqual({ url: "https://www.instagram.com/p/ABCdef12345/?igsh=x", destination: { kind: "home", path: "/Home" } });
+    });
+
+    test("a Google Drive folder can be picked", async ({ page, request }) => {
+        const dialog = await openDialog(page);
+        await dialog.getByLabel("Instagram link").fill("https://www.instagram.com/reel/ABCdef12345/");
+        await dialog.getByRole("radio", { name: "Google Drive" }).click();
+        await dialog.getByRole("button", { name: /Folder: My Drive \/ My Drive/ }).click();
+        await page.getByRole("button", { name: "Open Instagram saves" }).click();
+        await page.getByRole("button", { name: "Save here" }).click();
+        await expect(dialog.getByRole("button", { name: /Folder: My Drive \/ Instagram saves/ })).toBeVisible();
+        await dialog.getByRole("button", { name: "Import 2 items" }).click();
+        await expect.poll(async () => (await mutations(request)).some((r) => r.path === "/transfers/remote/instagram")).toBe(true);
+        expect((await importBody(request)).destination).toEqual({ kind: "gdrive", account_id: "acc1", folder_id: "fold9", folder_name: "Instagram saves" });
+    });
+
+    test("the vault must be unlocked; a missing post shows why", async ({ page }) => {
+        const dialog = await openDialog(page);
+        await dialog.getByRole("radio", { name: "Private Vault" }).click();
+        await expect(dialog.getByText("Your vault is locked.")).toBeVisible();
+        await dialog.getByRole("button", { name: "Unlock" }).click();
+        await expect(page.getByRole("dialog").filter({ hasText: /PIN/i }).first()).toBeVisible();
+        await page.keyboard.press("Escape");
+        await dialog.getByLabel("Instagram link").fill("https://www.instagram.com/p/MISSING123/");
+        await expect(dialog.getByRole("alert")).toHaveText("This post is private or was removed.");
+        await expect(dialog.getByRole("button", { name: /^Import/ })).toBeDisabled();
+    });
+
+    test("the owner sees the Instagram sign-in in Integrations", async ({ page }) => {
+        await page.goto("/settings?tab=integrations");
+        await expect(page.getByRole("heading", { name: "Instagram" })).toBeVisible();
+        await page.getByRole("button", { name: "Connect" }).last().click();
+        await expect(page.getByLabel("Instagram username")).toBeVisible();
+    });
+});
+
 test.describe("sign-in and passwords", () => {
     test("login trims the username; Google is hidden when not set up", async ({ page, request }) => {
         await page.goto("/login");

@@ -1,15 +1,16 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Cloud, Plus, Unlink, FolderOpen, Laptop, BookOpen } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Cloud, Plus, Unlink, FolderOpen, Laptop, BookOpen, Instagram } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { ConnectCloudModal } from "@/features/cloud/ConnectCloudModal";
 import { WebDAVMountDialog } from "@/features/cloud/WebDAVMountDialog";
-import { useCloudAccounts, useUserProfile } from "@/hooks/useShellData";
+import { useCloudAccounts, useIsOwner, useUserProfile } from "@/hooks/useShellData";
 import { api } from "@/lib/api";
 import { formatBytes } from "@/lib/utils";
-import { SettingsPanel, Field, CopyValue } from "../SettingsUi";
+import { SettingsPanel, Field, CopyValue, StatusPill } from "../SettingsUi";
 import { defaultBackendUrl, savedBackendUrl } from "../connection";
 
 const DriveRow = ({ account, onOpen, onUnlink }) => {
@@ -40,9 +41,65 @@ const DriveRow = ({ account, onOpen, onUnlink }) => {
     </li>);
 };
 
+// The owner signs in one Instagram account; the server uses it for every "Import from Instagram"
+const InstagramPanel = () => {
+    const queryClient = useQueryClient();
+    const { data: session } = useQuery({ queryKey: ["instagramSession"], queryFn: api.getInstagramSession, staleTime: 60000 });
+    const [form, setForm] = useState(null); // { username, password, code, needsCode }
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState("");
+    const refresh = () => queryClient.invalidateQueries({ queryKey: ["instagramSession"] });
+    const submit = async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        setError("");
+        try {
+            const res = form.needsCode ? await api.instagramTwoFactor(form.code) : await api.instagramLogin(form.username, form.password);
+            if (res.needs_2fa) {
+                setForm({ ...form, password: "", needsCode: true, code: "" });
+                return;
+            }
+            toast.success(`Instagram connected as @${res.username}`);
+            setForm(null);
+            refresh();
+        }
+        catch (err) {
+            setError(err.message);
+        }
+        finally {
+            setBusy(false);
+        }
+    };
+    const disconnect = async () => {
+        try {
+            await api.instagramLogout();
+            toast.success("Instagram disconnected");
+            refresh();
+        }
+        catch (err) {
+            toast.error(err.message);
+        }
+    };
+    const connected = Boolean(session?.connected);
+    return (<SettingsPanel icon={Instagram} title="Instagram" description="Instagram only lets signed-in accounts download posts, so imports use the account connected here" actions={connected ? (<Button variant="outline" size="sm" className="h-8" onClick={disconnect}><Unlink className="w-3.5 h-3.5 mr-1.5"/>Disconnect</Button>) : !form && (<Button size="sm" className="h-8" onClick={() => { setForm({ username: "", password: "" }); setError(""); }}><Plus className="w-3.5 h-3.5 mr-1.5"/>Connect</Button>)}>
+      {connected ? (<p className="text-sm flex flex-wrap items-center gap-2"><StatusPill tone="success">Connected</StatusPill>Imports use <span className="font-medium">@{session.username}</span>.</p>) : !form ? (<p className="text-sm text-muted-foreground">Not connected. Use a spare Instagram account rather than your personal one: Instagram can limit accounts that download a lot.</p>) : (<form onSubmit={submit} className="grid gap-3 max-w-sm">
+          {form.needsCode ? (<Field label="Code from your authenticator app or SMS" htmlFor="ig-code"><Input id="ig-code" autoFocus inputMode="numeric" autoComplete="one-time-code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })}/></Field>) : (<>
+              <Field label="Instagram username" htmlFor="ig-user"><Input id="ig-user" autoFocus autoComplete="off" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })}/></Field>
+              <Field label="Password" htmlFor="ig-pass" hint="Used once to sign in. TeleStore keeps only Instagram's sign-in session, never the password."><Input id="ig-pass" type="password" autoComplete="off" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}/></Field>
+            </>)}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          <div className="flex gap-2">
+            <Button type="submit" size="sm" disabled={busy || (form.needsCode ? !form.code.trim() : !form.username.trim() || !form.password)}>{busy ? "Signing in…" : form.needsCode ? "Confirm code" : "Sign in"}</Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setForm(null)}>Cancel</Button>
+          </div>
+        </form>)}
+    </SettingsPanel>);
+};
+
 export const IntegrationsSection = ({ onOpenDrive }) => {
     const accounts = useCloudAccounts();
     const profile = useUserProfile();
+    const isOwner = useIsOwner();
     const [connectOpen, setConnectOpen] = useState(false);
     const [guidesOpen, setGuidesOpen] = useState(false);
     const [unlinking, setUnlinking] = useState(null);
@@ -66,6 +123,8 @@ export const IntegrationsSection = ({ onOpenDrive }) => {
             {accounts.map((account) => (<DriveRow key={account.id} account={account} onOpen={() => onOpenDrive(account.id)} onUnlink={() => setUnlinking(account)}/>))}
           </ul>)}
       </SettingsPanel>
+
+      {isOwner && <InstagramPanel/>}
 
       <SettingsPanel icon={Laptop} title="Mount as a drive (WebDAV)" description="Open TeleStore in Windows Explorer, Finder or an Android file manager" actions={<Button variant="outline" size="sm" className="h-8" onClick={() => setGuidesOpen(true)}><BookOpen className="w-3.5 h-3.5 mr-1.5"/>Setup guides</Button>}>
         <div className="grid sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-3">

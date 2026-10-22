@@ -302,6 +302,14 @@ export const api = {
     getMediaCacheStats: () => request('/media/cache/stats', { soft: null }),
     clearMediaCache: () => post('/media/cache/clear', undefined, { fallback: 'Failed to clear media cache' }),
 
+    // ── Import from Instagram ──────────────────────────────────────────
+    instagramPreview: (url) => post('/transfers/remote/instagram/preview', { url }, { timeout: 60000, fallback: "Couldn't read this Instagram link" }),
+    importInstagram: (url, destination) => post('/transfers/remote/instagram', { url, destination }, { timeout: 60000, fallback: "Couldn't start the Instagram import" }),
+    getInstagramSession: () => request('/transfers/remote/instagram/session', { soft: { connected: false } }),
+    instagramLogin: (username, password) => post('/transfers/remote/instagram/session/login', { username, password }, { timeout: 60000, fallback: "Couldn't sign in to Instagram" }),
+    instagramTwoFactor: (code) => post('/transfers/remote/instagram/session/2fa', { code }, { timeout: 60000, fallback: "Couldn't confirm the code" }),
+    instagramLogout: () => request('/transfers/remote/instagram/session', { method: 'DELETE', fallback: "Couldn't disconnect Instagram" }),
+
     // ── Google Drive ───────────────────────────────────────────────────
     fetchCloudAccounts: () => request('/cloud/accounts', { fallback: 'Failed to fetch cloud accounts' }),
     getGoogleAuthUrl: (customClientId, customClientSecret, redirectUri) => post('/cloud/gdrive/auth-url', { custom_client_id: customClientId, custom_client_secret: customClientSecret, redirect_uri: redirectUri }, { fallback: 'Failed to generate Google Drive auth URL' }),

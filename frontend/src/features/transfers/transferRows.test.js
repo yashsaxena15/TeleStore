@@ -42,6 +42,8 @@ describe("row helpers", () => {
         expect(statusInfo({ status: "uploading_tg" }).label).toBe("To Telegram");
         expect(kindLabel({ type: "remote", source_type: "magnet" })).toBe("Magnet");
         expect(kindLabel({ isGroup: true, group_type: "folder" })).toBe("Folder leech");
+        expect(kindLabel({ type: "remote", source_type: "instagram" })).toBe("Instagram");
+        expect(kindLabel({ isGroup: true, group_type: "instagram" })).toBe("Instagram");
     });
     it("offers the right buttons", () => {
         expect(rowActions({ type: "upload", status: "uploading" })).toMatchObject({ pause: true, cancel: true, retry: false });
