@@ -423,6 +423,22 @@ test.describe("player", () => {
 });
 
 test.describe("player panels", () => {
+    test("a long audio queue scrolls and opens at the playing song", async ({ page }) => {
+        await page.goto("/");
+        await row(page, "Music").dblclick();
+        await row(page, "Song 14.mp3").dblclick();
+        await page.getByRole("button", { name: "Queue" }).click();
+        const list = page.getByLabel("Queue list");
+        const playing = list.locator('[aria-current="true"]');
+        await expect(playing).toContainText("Song 14");
+        await expect(playing).toBeInViewport();
+        // Every song can be reached
+        await list.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+        await expect(list.getByRole("button", { name: /Song 20/ })).toBeInViewport();
+        await list.getByRole("button", { name: /Song 20/ }).click();
+        await expect(page.getByText(/track 20 of 20/)).toBeVisible();
+    });
+
     test("settings, details, playlist and minimize to the dock", async ({ page }) => {
         await page.goto("/");
         await row(page, "Movies").dblclick();

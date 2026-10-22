@@ -5,7 +5,6 @@ import { Slider } from "@/components/ui/slider";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useDockPresence } from "@/components/layout/dock/useDock";
 import { Popover, PopoverContent, PopoverTrigger, } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { downloadManager } from "@/features/transfers/downloadManager";
 import { cn } from "@/lib/utils";
 function formatTime(seconds) {
@@ -281,6 +280,11 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
         </div>
         <span className="w-10">{formatTime(duration)}</span>
       </div>);
+    // Opening a queue shows the song that is playing (once, so scrolling by hand isn't undone)
+    const showCurrentTrack = useCallback((list) => {
+        if (list)
+            requestAnimationFrame(() => list.querySelector('[aria-current="true"]')?.scrollIntoView({ block: "nearest" }));
+    }, []);
     const queueList = (onPick) => (<div className="p-1.5">
         {playlist.map((track, idx) => {
             const isCur = idx === currentIndex;
@@ -335,7 +339,8 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
             </PopoverTrigger>
             <PopoverContent side="top" align="end" sideOffset={10} className="w-80 p-0 overflow-hidden">
               {queueHeader}
-              <ScrollArea className="max-h-72">{queueList(() => setIsPlaylistOpen(false))}</ScrollArea>
+              {/* A plain scrolling box: a Radix ScrollArea with only a max height never scrolls */}
+              <div ref={showCurrentTrack} className="max-h-72 overflow-y-auto overscroll-contain" aria-label="Queue list">{queueList(() => setIsPlaylistOpen(false))}</div>
             </PopoverContent>
           </Popover>
           <button onClick={download} className={cn(iconBtn, "hidden md:flex")} aria-label="Download this track" title="Download this track"><Download className="w-4 h-4"/></button>
@@ -378,7 +383,7 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
           </div>
           <div className="mt-4 rounded-lg border border-border overflow-hidden">
             {queueHeader}
-            <div className="max-h-64 overflow-y-auto">{queueList()}</div>
+            <div ref={showCurrentTrack} className="max-h-64 overflow-y-auto overscroll-contain" aria-label="Queue list">{queueList()}</div>
           </div>
         </SheetContent>
       </Sheet>
