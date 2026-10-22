@@ -23,6 +23,10 @@ from telestore.services.remote_transfer_manager.common import logger
 from telestore.services.remote_transfer_manager.helpers import GoogleDriveQuotaExceededError, MODERN_USER_AGENT, finalize_multipart_group_if_ready, get_file_type, get_remote_db, is_gdrive_quota_error, probe_resource_for_range
 from telestore.services.remote_transfer_manager.pipeline import PipelinedStreamWriter
 
+# Largest piece sent to Telegram as one message; bigger files go up in parts of this size
+TELEGRAM_PART_SIZE = 1950 * 1024 * 1024
+
+
 class RemoteTransferManager:
     """
     Manages background cloud-to-cloud server transfers (Google Drive, direct URLs).
@@ -737,10 +741,11 @@ class RemoteTransferManager:
                 raise InterruptedError("Cancelled by user")
 
             if task_doc.get("cloud_account_id"):
-                await self._instagram_to_drive(task_doc, local_path, size, cancel_event)
+                await self._save_file_to_drive(task_doc, local_path, size, cancel_event)
                 where = "Google Drive"
             else:
-                await self._instagram_to_telegram(task_doc, local_path, size)
+                caption = f"{task_doc.get('instagram_caption') or filename}\n\n{task_doc.get('source_url') or ''}".strip()
+                await self._save_file_to_telegram(task_doc, local_path, size, caption)
                 where = "Private Vault" if task_doc.get("is_vault") else "TeleStore"
 
             self._update_task(task_id, {
@@ -756,11 +761,125 @@ class RemoteTransferManager:
         finally:
             shutil.rmtree(tg_dir, ignore_errors=True)
 
-    async def _instagram_to_telegram(self, task_doc: dict, local_path: str, size: int):
+    def enqueue_media(
+        self,
+        user_id: str,
+        info: Dict[str, Any],
+        entries: List[Dict[str, Any]],
+        choice: Dict[str, Any],
+        destination: Dict[str, Any],
+        chat_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """One queued task per video of a link read by yt-dlp (a playlist shares one group)."""
+        coll = get_remote_db()["RemoteTransfers"]
+        now = datetime.now(timezone.utc)
+        job_id = f"media_{secrets.token_hex(6)}"
+        group_id = f"grp_{secrets.token_hex(6)}" if info.get("kind") == "playlist" else None
+        ext = "." + (choice.get("audio_format") or "mp3") if choice.get("mode") == "audio" else ".mp4"
+        docs = []
+        for entry in entries:
+            doc = {
+                "task_id": f"rt_{secrets.token_hex(6)}",
+                "user_id": str(user_id),
+                "chat_id": chat_id or 0,
+                "source_url": entry["url"],
+                "source_type": "media",
+                "media_job_id": job_id,
+                "media_choice": choice,
+                "media_site": info.get("site"),
+                # The real name is known once yt-dlp has the file
+                "filename": re.sub(r'[\\/:*?"<>|]+', "_", entry.get("title") or "video")[:150] + ext,
+                "filesize": 0,
+                "transferred_bytes": 0,
+                "speed_bps": 0,
+                "progress": 0,
+                "eta_seconds": 0,
+                "status": "queued",
+                "phase": "Queued",
+                "error_message": None,
+                "created_at": now,
+                "updated_at": now,
+            }
+            if destination["kind"] == "gdrive":
+                doc.update({
+                    "cloud_account_id": destination["account_id"],
+                    "cloud_account_user_ids": destination["account_user_ids"],
+                    "target_gdrive_folder_id": destination["folder_id"],
+                    "destination_path": destination.get("label") or "Google Drive",
+                    "is_vault": False,
+                })
+            else:
+                doc.update({"destination_path": destination["path"], "is_vault": destination["kind"] == "vault"})
+            if group_id:
+                doc.update({"group_id": group_id, "group_name": info.get("title") or "Playlist", "group_type": "media", "group_total_items": len(entries)})
+            coll.insert_one(doc)
+            doc["_id"] = str(doc["_id"])
+            docs.append(doc)
+        return docs
+
+    async def _execute_media(self, task_doc: dict, cancel_event: threading.Event):
+        from telestore.services import media_download_service as media
+
         task_id = task_doc["task_id"]
-        filename = task_doc.get("filename") or "instagram.bin"
+        tg_dir = os.path.join(os.getcwd(), "tg_files", f"remote_{task_id}")
+        shutil.rmtree(tg_dir, ignore_errors=True)
+        os.makedirs(tg_dir, exist_ok=True)
+
+        free = shutil.disk_usage(tg_dir).free
+        if free < 3 * 1024 ** 3:
+            raise RuntimeError("The server is almost out of disk space. Try again after other downloads finish.")
+
+        def on_progress(done: int, total: int, speed: int):
+            self._update_task(task_id, {
+                "status": "downloading",
+                "transferred_bytes": done,
+                "filesize": total or done,
+                "progress": min(90.0, round(done / total * 90, 1)) if total else 0,
+                "speed_bps": speed,
+                "eta_seconds": int((total - done) / speed) if speed and total > done else 0,
+                "phase": "Downloading",
+            })
+
+        try:
+            self._update_task(task_id, {"status": "downloading", "phase": "Reading the link", "speed_bps": 0})
+            path = await media.download(task_doc["source_url"], task_doc.get("media_choice") or {}, tg_dir, on_progress, cancel_event.is_set)
+            if cancel_event.is_set():
+                raise InterruptedError("Cancelled by user")
+            size = os.path.getsize(path)
+            file_name = os.path.basename(path)
+            self._update_task(task_id, {"filename": file_name, "filesize": size, "transferred_bytes": size})
+
+            if task_doc.get("cloud_account_id"):
+                await self._save_file_to_drive(task_doc, path, size, cancel_event, file_name)
+                where = "Google Drive"
+            else:
+                await self._save_file_to_telegram(task_doc, path, size, f"{os.path.splitext(file_name)[0]}\n\n{task_doc['source_url']}", file_name)
+                where = "Private Vault" if task_doc.get("is_vault") else "TeleStore"
+
+            self._update_task(task_id, {
+                "status": "completed",
+                "progress": 100.0,
+                "speed_bps": 0,
+                "eta_seconds": 0,
+                "phase": f"Saved to {where}",
+            })
+            logger.info(f"[MEDIA] {file_name} ({size} bytes) saved to {where} for user {task_doc['user_id']}")
+        finally:
+            shutil.rmtree(tg_dir, ignore_errors=True)
+
+    async def _save_file_to_telegram(self, task_doc: dict, local_path: str, size: int, caption: str, file_name: Optional[str] = None):
+        """Uploads a finished local file to the user's index chat and adds it to their library.
+
+        Files over Telegram's limit go up in 1.95 GB parts, cut one at a time so the disk only
+        ever holds the file plus one part.
+        """
+        task_id = task_doc["task_id"]
+        filename = file_name or task_doc.get("filename") or os.path.basename(local_path)
         destination_path = task_doc.get("destination_path") or "/Home"
         user_id = task_doc["user_id"]
+        chat_id = task_doc["chat_id"]
+        caption = caption[:1000]  # Telegram captions stop at 1024 characters
+        file_type = get_file_type(filename)
         self._update_task(task_id, {"status": "uploading_tg", "phase": "Saving to Telegram", "progress": 92.0, "speed_bps": 0})
 
         bot_manager = self._bot_manager
@@ -768,38 +887,53 @@ class RemoteTransferManager:
         if not bot:
             raise RuntimeError("No Telegram bot is available right now. Try again in a minute.")
 
-        caption = f"{task_doc.get('instagram_caption') or filename}\n\n{task_doc.get('source_url') or ''}".strip()
-        file_type = get_file_type(filename)
-        res = await upload_part_task(
-            part_file_path=local_path,
-            part_index=1,
-            file_name=filename,
-            start_byte=0,
-            part_size=size,
-            chat_id=task_doc["chat_id"],
-            bot_manager=bot_manager,
-            fallback_client=bot,
-            caption=caption[:1000],  # Telegram captions stop at 1024 characters
-            semaphore=None,
-            is_single_part=True,
-            file_type=file_type,
-        )
+        part_max = TELEGRAM_PART_SIZE
         database.Files.create_folder_path(destination_path, owner_id=str(user_id))
-        database.Files.add_file(
-            chat_id=task_doc["chat_id"],
-            message_id=res["message_id"],
-            thumbnail=res.get("thumbnail"),
-            file_type=file_type,
-            file_unique_id=res["file_unique_id"],
-            file_size=size,
-            file_name=filename,
-            file_caption=caption[:1000],
-            file_path=destination_path,
-            owner_id=str(user_id),
-            is_vault=bool(task_doc.get("is_vault")),
+        if size <= part_max:
+            res = await upload_part_task(
+                part_file_path=local_path, part_index=1, file_name=filename, start_byte=0, part_size=size,
+                chat_id=chat_id, bot_manager=bot_manager, fallback_client=bot, caption=caption,
+                semaphore=None, is_single_part=True, file_type=file_type,
+            )
+            database.Files.add_file(
+                chat_id=chat_id, message_id=res["message_id"], thumbnail=res.get("thumbnail"), file_type=file_type,
+                file_unique_id=res["file_unique_id"], file_size=size, file_name=filename, file_caption=caption,
+                file_path=destination_path, owner_id=str(user_id), is_vault=bool(task_doc.get("is_vault")),
+            )
+            return
+
+        total_parts = math.ceil(size / part_max)
+        parts = []
+        with open(local_path, "rb") as source:
+            for index in range(1, total_parts + 1):
+                start = (index - 1) * part_max
+                part_path = f"{local_path}.part{index}"
+                with open(part_path, "wb") as out:
+                    remaining = min(part_max, size - start)
+                    while remaining > 0:
+                        chunk = source.read(min(8 * 1024 * 1024, remaining))
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        remaining -= len(chunk)
+                part_size = os.path.getsize(part_path)
+                self._update_task(task_id, {"phase": f"Saving to Telegram (part {index} of {total_parts})", "progress": round(92 + 7 * (index - 1) / total_parts, 1)})
+                res = await upload_part_task(
+                    part_file_path=part_path, part_index=index, file_name=filename, start_byte=start, part_size=part_size,
+                    chat_id=chat_id, bot_manager=bot_manager, fallback_client=bot, caption=f"{filename} (Part {index})",
+                    semaphore=None, is_single_part=False, file_type=file_type,
+                )
+                parts.append({
+                    "part_index": index, "chat_id": chat_id, "message_id": res["message_id"], "file_unique_id": res["file_unique_id"],
+                    "part_size": part_size, "start_byte": start, "end_byte": start + part_size, "thumbnail": res.get("thumbnail"),
+                })
+        database.Files.add_multipart_file(
+            chat_id=chat_id, thumbnail=parts[0].get("thumbnail"), file_type=file_type, file_unique_id=parts[0]["file_unique_id"],
+            file_size=size, file_name=filename, file_caption=caption, parts=parts, file_path=destination_path,
+            owner_id=str(user_id), part_size=part_max, is_vault=bool(task_doc.get("is_vault")),
         )
 
-    async def _instagram_to_drive(self, task_doc: dict, local_path: str, size: int, cancel_event: threading.Event):
+    async def _save_file_to_drive(self, task_doc: dict, local_path: str, size: int, cancel_event: threading.Event, file_name: Optional[str] = None):
         import aiofiles
         from telestore.services.google_drive_manager import GoogleDriveManager
 
@@ -814,7 +948,7 @@ class RemoteTransferManager:
         access_token = await GoogleDriveManager.get_valid_access_token(account)
         session_url = await GoogleDriveManager.initiate_resumable_upload(
             access_token=access_token,
-            file_name=task_doc.get("filename") or "instagram.bin",
+            file_name=file_name or task_doc.get("filename") or os.path.basename(local_path),
             file_size=size,
             parent_id=task_doc.get("target_gdrive_folder_id") or "root",
         )
@@ -1211,6 +1345,10 @@ class RemoteTransferManager:
 
         if task_doc.get("source_type") == "instagram":
             await self._execute_instagram(task_doc, cancel_event)
+            return
+
+        if task_doc.get("source_type") == "media":
+            await self._execute_media(task_doc, cancel_event)
             return
 
         if task_doc.get("is_range_part"):

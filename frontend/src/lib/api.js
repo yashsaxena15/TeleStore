@@ -311,6 +311,17 @@ export const api = {
     instagramTwoFactor: (code) => post('/transfers/remote/instagram/session/2fa', { code }, { timeout: 60000, fallback: "Couldn't confirm the code" }),
     instagramLogout: () => request('/transfers/remote/instagram/session', { method: 'DELETE', fallback: "Couldn't disconnect Instagram" }),
 
+    // ── Video and audio downloads (yt-dlp) ─────────────────────────────
+    mediaPreview: (url) => post('/transfers/remote/media/preview', { url }, { timeout: 90000, fallback: "Couldn't read this link" }),
+    downloadMedia: (url, choice, destination, items) => post('/transfers/remote/media', { url, choice, destination, items }, { timeout: 90000, fallback: "Couldn't start the download" }),
+    getMediaSettings: () => request('/transfers/remote/media/settings', { soft: null }),
+    uploadMediaCookies(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+        return request('/transfers/remote/media/cookies', { method: 'POST', body: formData, fallback: "Couldn't save the cookies" });
+    },
+    removeMediaCookies: () => request('/transfers/remote/media/cookies', { method: 'DELETE', fallback: "Couldn't remove the cookies" }),
+
     // ── Google Drive ───────────────────────────────────────────────────
     fetchCloudAccounts: () => request('/cloud/accounts', { fallback: 'Failed to fetch cloud accounts' }),
     getGoogleAuthUrl: (customClientId, customClientSecret, redirectUri) => post('/cloud/gdrive/auth-url', { custom_client_id: customClientId, custom_client_secret: customClientSecret, redirect_uri: redirectUri }, { fallback: 'Failed to generate Google Drive auth URL' }),

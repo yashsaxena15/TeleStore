@@ -12,6 +12,8 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get install -y gcc libffi-dev build-essential ffmpeg p7zip-full aria2 && \
     rm -rf /var/lib/apt/lists/*
+# Deno: the JavaScript runtime yt-dlp needs for YouTube
+COPY --from=denoland/deno:bin-2.5.6 /deno /usr/local/bin/deno
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .

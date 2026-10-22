@@ -234,7 +234,7 @@ def _index_chat(user: User) -> int:
     return user_data["index_chat_id"]
 
 
-def _instagram_destination(request: Request, dest: InstagramDestinationModel, user: User) -> tuple:
+def _save_destination(request: Request, dest: InstagramDestinationModel, user: User) -> tuple:
     """(destination dict for the manager, index chat ID or None); raises 4xx for places that can't take files."""
     from telestore.api.routes.vault import is_vault_unlocked
 
@@ -277,7 +277,7 @@ async def preview_instagram(body: InstagramUrlModel, user: User = Depends(requir
 @router.post("/instagram")
 async def import_instagram(request: Request, body: InstagramImportModel, user: User = Depends(require_upload)):
     """Queues every photo and video of a post or reel, saved to Home, the Private Vault or a Google Drive."""
-    destination, chat_id = _instagram_destination(request, body.destination, user)
+    destination, chat_id = _save_destination(request, body.destination, user)
     user_id = str(user.telegram_user_id or user.username)
 
     from telestore.services.remote_transfer_manager.helpers import get_remote_db
@@ -300,9 +300,13 @@ async def import_instagram(request: Request, body: InstagramImportModel, user: U
     }
 
 
-def _require_owner(user: User) -> None:
+def _is_owner(user: User) -> bool:
     from telestore.security.credentials import is_owner_account
-    if not is_owner_account(user.username, {"telegram_user_id": user.telegram_user_id}):
+    return is_owner_account(user.username, {"telegram_user_id": user.telegram_user_id})
+
+
+def _require_owner(user: User) -> None:
+    if not _is_owner(user):
         raise HTTPException(status_code=403, detail="Only the owner can connect an Instagram account.")
 
 
@@ -349,3 +353,109 @@ async def instagram_logout(user: User = Depends(require_auth)):
     _require_owner(user)
     get_client().logout()
     return {"connected": False, "username": None}
+
+
+# ── Video and audio downloads (yt-dlp) ─────────────────────────────────────────────────────
+MAX_MEDIA_JOBS = 3  # links waiting or running per user
+
+
+class MediaChoiceModel(BaseModel):
+    mode: Literal["video", "audio"] = "video"
+    quality: Literal["best", "1080", "720", "480"] = "best"
+    audio_format: Literal["mp3", "m4a"] = "mp3"
+    subtitles: bool = False
+
+
+class MediaDownloadModel(BaseModel):
+    url: str
+    choice: MediaChoiceModel
+    destination: InstagramDestinationModel
+    items: Optional[list[int]] = None  # playlist entries to download (1-based); all when missing
+
+
+async def _probe_media(url: str) -> dict:
+    from telestore.services.media_download_service import MediaError, probe
+    try:
+        return await probe(url)
+    except MediaError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/media/preview")
+async def preview_media(body: InstagramUrlModel, user: User = Depends(require_upload)):
+    """What a link holds: one video, or a playlist and its videos."""
+    from telestore.services.media_download_service import thumbnail
+    info = await _probe_media(body.url)
+    return {
+        "kind": info["kind"],
+        "title": info["title"],
+        "uploader": info.get("uploader"),
+        "site": info.get("site"),
+        "duration": info.get("duration"),
+        "count": info["count"],
+        "thumbnail": await thumbnail(info.get("thumbnail_url")),
+        "entries": [{"index": e["index"], "title": e["title"], "duration": e.get("duration")} for e in info["entries"]],
+    }
+
+
+@router.post("/media")
+async def download_media(request: Request, body: MediaDownloadModel, user: User = Depends(require_upload)):
+    """Queues the video, its audio, or the chosen videos of a playlist."""
+    destination, chat_id = _save_destination(request, body.destination, user)
+    user_id = str(user.telegram_user_id or user.username)
+
+    from telestore.services.remote_transfer_manager.helpers import get_remote_db
+    running = get_remote_db()["RemoteTransfers"].distinct("media_job_id", {
+        "user_id": user_id, "source_type": "media", "status": {"$in": ["queued", "downloading", "uploading_tg"]},
+    })
+    if len(running) >= MAX_MEDIA_JOBS:
+        raise HTTPException(status_code=429, detail=f"You already have {len(running)} downloads running. Wait for one to finish.")
+
+    info = await _probe_media(body.url)
+    entries = info["entries"]
+    if body.items is not None:
+        wanted = set(body.items)
+        entries = [e for e in entries if e["index"] in wanted]
+        if not entries:
+            raise HTTPException(status_code=400, detail="Pick at least one video.")
+
+    remote_transfer_manager.start_worker(request.app)
+    tasks = remote_transfer_manager.enqueue_media(user_id, info, entries, body.choice.model_dump(), destination, chat_id)
+    count = len(tasks)
+    what = "audio" if body.choice.mode == "audio" else "video"
+    return {
+        "success": True,
+        "message": f"Downloading {count} {what} {'file' if count == 1 else 'files'}." if count > 1 or what == "audio" else "Downloading the video.",
+        "count": count,
+        "group_id": tasks[0].get("group_id"),
+        "tasks": tasks,
+    }
+
+
+@router.get("/media/settings")
+async def media_settings(user: User = Depends(require_auth)):
+    from telestore.services.media_download_service import settings
+    return settings()
+
+
+@router.post("/media/cookies")
+async def upload_media_cookies(file: UploadFile = File(...), user: User = Depends(require_auth)):
+    """The owner's cookies.txt export of a signed-in browser, used for every download."""
+    from telestore.services.media_download_service import MediaError, save_cookies
+    if not _is_owner(user):
+        raise HTTPException(status_code=403, detail="Only the owner can add cookies.")
+    data = await file.read(2 * 1024 * 1024 + 1)
+    if len(data) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="That file is too big for a cookies.txt.")
+    try:
+        return save_cookies(data)
+    except MediaError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/media/cookies")
+async def remove_media_cookies(user: User = Depends(require_auth)):
+    from telestore.services.media_download_service import remove_cookies
+    if not _is_owner(user):
+        raise HTTPException(status_code=403, detail="Only the owner can remove cookies.")
+    return remove_cookies()

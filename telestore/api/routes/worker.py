@@ -24,7 +24,7 @@ def get_file_type(fname: str) -> str:
 
 logger = logging.getLogger("worker_routes")
 
-LOCAL_ONLY_SOURCES = ("instagram",)
+LOCAL_ONLY_SOURCES = ("instagram", "media")
 
 router = APIRouter(prefix="/api/worker", tags=["Distributed Workers"])
 
@@ -151,7 +151,7 @@ async def claim_task(
         {
             "status": "queued",
             "claimed_by": {"$exists": False},
-            # Instagram imports need the server's Instagram session, so only the main server runs them
+            # Instagram and video downloads need the server's sign-in sessions, so only the main server runs them
             "source_type": {"$nin": list(LOCAL_ONLY_SOURCES)},
         },
         {

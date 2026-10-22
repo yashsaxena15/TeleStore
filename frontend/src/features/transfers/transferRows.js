@@ -64,8 +64,8 @@ export function formatEta(seconds) {
 
 // Kind label shown under the name ("Magnet", "Folder leech", "Upload"…)
 export function kindLabel(item) {
-    if (item.isGroup) return item.group_type === "torrent" ? "Torrent" : item.group_type === "file" ? "Multi-part leech" : item.group_type === "instagram" ? "Instagram" : "Folder leech";
-    if (item.type === "remote") return { magnet: "Magnet", torrent_file: "Torrent", instagram: "Instagram" }[item.source_type] || "Cloud leech";
+    if (item.isGroup) return item.group_type === "torrent" ? "Torrent" : item.group_type === "file" ? "Multi-part leech" : item.group_type === "instagram" ? "Instagram" : item.group_type === "media" ? "Playlist" : "Folder leech";
+    if (item.type === "remote") return { magnet: "Magnet", torrent_file: "Torrent", instagram: "Instagram", media: "Video download" }[item.source_type] || "Cloud leech";
     return item.type === "upload" ? "Upload" : "Download";
 }
 

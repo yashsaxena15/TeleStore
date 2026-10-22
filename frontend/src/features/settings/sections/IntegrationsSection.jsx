@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Cloud, Plus, Unlink, FolderOpen, Laptop, BookOpen, Instagram } from "lucide-react";
+import { Cloud, Plus, Unlink, FolderOpen, Laptop, BookOpen, Instagram, Clapperboard, Upload, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -107,6 +107,66 @@ const InstagramPanel = () => {
     </SettingsPanel>);
 };
 
+// yt-dlp downloads: the version, and an optional cookies.txt of a signed-in browser (owner)
+const MediaDownloadsPanel = () => {
+    const queryClient = useQueryClient();
+    const { data: settings } = useQuery({ queryKey: ["mediaSettings"], queryFn: api.getMediaSettings, staleTime: 60000 });
+    const fileRef = useRef(null);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState("");
+    const [showHow, setShowHow] = useState(false);
+    const refresh = (data) => queryClient.setQueryData(["mediaSettings"], data);
+    const upload = async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        if (!file)
+            return;
+        setBusy(true);
+        setError("");
+        try {
+            refresh(await api.uploadMediaCookies(file));
+            toast.success("Cookies saved. Downloads now use that sign-in.");
+        }
+        catch (err) {
+            setError(err.message);
+        }
+        finally {
+            setBusy(false);
+        }
+    };
+    const remove = async () => {
+        try {
+            refresh(await api.removeMediaCookies());
+            toast.success("Cookies removed");
+        }
+        catch (err) {
+            toast.error(err.message);
+        }
+    };
+    const has = Boolean(settings?.has_cookies);
+    return (<SettingsPanel icon={Clapperboard} title="Video downloads" description="YouTube, YouTube Music and other sites, downloaded by the server with yt-dlp" actions={<>
+        <input ref={fileRef} type="file" accept=".txt,text/plain" className="hidden" aria-label="cookies.txt file" onChange={upload}/>
+        <Button size="sm" variant={has ? "outline" : "default"} className="h-8" disabled={busy} onClick={() => fileRef.current?.click()}><Upload className="w-3.5 h-3.5 mr-1.5"/>{busy ? "Saving…" : has ? "Replace cookies" : "Add cookies"}</Button>
+      </>}>
+      <div className="grid gap-2 text-sm">
+        <p className="flex flex-wrap items-center gap-2">
+          {has ? <StatusPill tone="success">Signed in</StatusPill> : <StatusPill tone="muted">No cookies</StatusPill>}
+          {has ? (<span className="text-muted-foreground">Using cookies for {settings.cookie_sites?.length ? settings.cookie_sites.join(", ") : "your sites"}{settings.cookies_updated_at ? `, added ${new Date(settings.cookies_updated_at).toLocaleDateString()}` : ""}.</span>) : (<span className="text-muted-foreground">Most videos download without them. YouTube sometimes asks servers to prove they aren't a bot, and age-restricted videos need a sign-in: cookies fix both.</span>)}
+        </p>
+        {has && <button type="button" onClick={remove} className="justify-self-start text-sm text-destructive hover:underline flex items-center gap-1"><Trash2 className="w-3.5 h-3.5"/>Remove cookies</button>}
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        <button type="button" className="justify-self-start text-sm text-primary hover:underline" aria-expanded={showHow} onClick={() => setShowHow(!showHow)}>How to get a cookies.txt</button>
+        {showHow && (<ol className="text-sm text-muted-foreground list-decimal pl-5 grid gap-1">
+            <li>Use a spare Google account, not your main one: heavy downloading can get an account flagged.</li>
+            <li>Install the <span className="font-medium text-foreground">Get cookies.txt LOCALLY</span> extension (Chrome, Edge, or Firefox on Android).</li>
+            <li>Open youtube.com in a private window, sign in, then use the extension to export cookies for youtube.com.</li>
+            <li>Close the private window without signing out (signing out ends the cookies), then press Add cookies here.</li>
+          </ol>)}
+        {settings?.version && <p className="text-xs text-muted-foreground">yt-dlp {settings.version}. Sites change often; if downloads start failing, the server needs a newer yt-dlp.</p>}
+      </div>
+    </SettingsPanel>);
+};
+
 export const IntegrationsSection = ({ onOpenDrive }) => {
     const accounts = useCloudAccounts();
     const profile = useUserProfile();
@@ -134,6 +194,8 @@ export const IntegrationsSection = ({ onOpenDrive }) => {
             {accounts.map((account) => (<DriveRow key={account.id} account={account} onOpen={() => onOpenDrive(account.id)} onUnlink={() => setUnlinking(account)}/>))}
           </ul>)}
       </SettingsPanel>
+
+      {isOwner && <MediaDownloadsPanel/>}
 
       {isOwner && <InstagramPanel/>}
 

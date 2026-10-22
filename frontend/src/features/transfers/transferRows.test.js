@@ -44,6 +44,8 @@ describe("row helpers", () => {
         expect(kindLabel({ isGroup: true, group_type: "folder" })).toBe("Folder leech");
         expect(kindLabel({ type: "remote", source_type: "instagram" })).toBe("Instagram");
         expect(kindLabel({ isGroup: true, group_type: "instagram" })).toBe("Instagram");
+        expect(kindLabel({ type: "remote", source_type: "media" })).toBe("Video download");
+        expect(kindLabel({ isGroup: true, group_type: "media" })).toBe("Playlist");
     });
     it("offers the right buttons", () => {
         expect(rowActions({ type: "upload", status: "uploading" })).toMatchObject({ pause: true, cancel: true, retry: false });
