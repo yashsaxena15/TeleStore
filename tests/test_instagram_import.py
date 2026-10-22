@@ -257,3 +257,19 @@ def test_workers_never_claim_instagram_tasks(client, test_secrets):
         res = client.post("/api/worker/claim-task", json={"worker_id": "w1"}, headers={"X-Worker-Key": test_secrets["worker_secret"]})
     assert res.status_code == 200
     assert coll.find_one_and_update.call_args.args[0]["source_type"] == {"$nin": ["instagram"]}
+
+
+class TestErrorMessages:
+    def _error(self, text):
+        from instaloader import exceptions as ig_errors
+        return ig_errors.ConnectionException(text)
+
+    def test_signed_out_block_asks_for_an_account(self):
+        from telestore.services.instagram_service import LOGIN_NEEDED, _friendly
+        err = self._error('JSON Query to graphql/query: 401 Unauthorized - "fail" status, message "Please wait a few minutes before you try again."')
+        assert str(_friendly(err, signed_in=False)) == LOGIN_NEEDED
+
+    def test_signed_in_wait_is_a_real_slow_down(self):
+        from telestore.services.instagram_service import RATE_LIMITED, _friendly
+        err = self._error('429 Too Many Requests - "Please wait a few minutes before you try again."')
+        assert str(_friendly(err, signed_in=True)) == RATE_LIMITED
