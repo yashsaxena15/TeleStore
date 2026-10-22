@@ -22,6 +22,9 @@ const Login = () => {
     const [notice, setNotice] = useState("");
     const navigate = useNavigate();
     const { showError } = useError(); // Use the error context
+    // Only the desktop app talks to a server of the user's choosing; the website is the server
+    const isDesktop = authService.isTauri();
+    const configureBackend = isDesktop ? () => setShowBackendConfig(true) : undefined;
     const handleCredentialResponse = async (credential) => {
         setIsLoading(true);
         setError("");
@@ -59,8 +62,7 @@ const Login = () => {
             // Use our error dialog instead of showing backend config
             showError("Connection Error", "Unable to connect to the backend server. Please check your connection and try again.", "network", undefined, // No retry for now
             undefined, // Default dismiss behavior
-            () => setShowBackendConfig(true) // On configure backend, show config
-            );
+            configureBackend);
         }
         finally {
             setIsLoading(false);
@@ -108,8 +110,7 @@ const Login = () => {
             // Use our error dialog instead of showing backend config
             showError("Connection Error", "Unable to connect to the backend server. Please check your connection and try again.", "network", undefined, // No retry for now
             undefined, // Default dismiss behavior
-            () => setShowBackendConfig(true) // On configure backend, show config
-            );
+            configureBackend);
         }
         finally {
             setIsLoading(false);
@@ -123,7 +124,7 @@ const Login = () => {
         window.location.reload();
     };
     return (<div className="min-h-screen flex items-center justify-center bg-muted/30 p-4">
-      {!showBackendConfig ? (<Card className="w-full max-w-md shadow-2xl rounded-3xl border border-border bg-card/95 backdrop-blur-xl">
+      {!(isDesktop && showBackendConfig) ? (<Card className="w-full max-w-md shadow-2xl rounded-3xl border border-border bg-card/95 backdrop-blur-xl">
           <CardHeader className="space-y-2 text-center pt-8 pb-2">
             <div className="flex justify-center mb-1">
               <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-lg border border-border bg-muted">
@@ -203,11 +204,11 @@ const Login = () => {
               </div>
             </div>
           </CardContent>
-          <CardFooter className="pb-8 px-8">
+          {isDesktop && (<CardFooter className="pb-8 px-8">
             <Button variant="ghost" className="w-full text-muted-foreground hover:text-foreground" onClick={() => setShowBackendConfig(true)}>
               Configure Backend URL
             </Button>
-          </CardFooter>
+          </CardFooter>)}
         </Card>) : (<div className="w-full max-w-md">
           <BackendUrlUpdater onErrorUpdate={setError} onSuccess={handleBackendConfigSuccess}/>
           {error && (<div className="mt-4 bg-destructive/10 border border-destructive/20 text-destructive p-3 rounded-lg text-sm">

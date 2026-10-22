@@ -76,6 +76,9 @@ test.describe("users and connection", () => {
     test("owner turns a user off and uploads off, and adds a user", async ({ page, request }) => {
         await page.goto("/settings?tab=users");
         await expect(page.getByText("Needs Telegram")).toBeVisible();
+        // Linked by Telegram ID without a username still reads as connected
+        await expect(page.getByRole("row", { name: /admin/ })).toContainText("Connected");
+        await expect(page.getByRole("row", { name: /family/ })).toContainText("Not connected");
         // The owner's own switches are locked
         await expect(page.getByRole("switch", { name: "admin is active" })).toBeDisabled();
         await page.getByRole("switch", { name: "family is active" }).click();
@@ -111,6 +114,8 @@ test.describe("sign-in and passwords", () => {
         await page.goto("/login");
         await expect(page.getByText("Forgot password?")).toBeVisible();
         await expect(page.getByText("Or continue with")).toHaveCount(0);
+        // The website is the server; only the desktop app picks one
+        await expect(page.getByText("Configure Backend URL")).toHaveCount(0);
         await page.getByLabel("Username").fill("yashsaxena15 ");
         await page.getByLabel("Password", { exact: true }).fill("right");
         await page.getByRole("button", { name: "Sign In" }).click();
