@@ -113,6 +113,9 @@ const mutation = (req, res, url, body) => {
             ? send(res, 400, { detail: "This post is private or was removed." })
             : send(res, 200, { shortcode: "ABCdef12345", owner: "nasa", caption: "Earth from orbit", thumbnail: null, items: [{ index: 1, is_video: false }, { index: 2, is_video: true }] });
     }
+    if (url.pathname === "/transfers/remote/instagram/session/browser") {
+        return send(res, 200, { connected: true, username: "spare.account" });
+    }
     if (url.pathname === "/transfers/remote/instagram") {
         return send(res, 200, { success: true, message: "Importing 2 items from @nasa.", count: 2, tasks: [] });
     }

@@ -10,6 +10,7 @@ import asyncio
 import base64
 import os
 import re
+import secrets
 import threading
 import urllib.parse
 from typing import Callable, Optional
@@ -135,8 +136,37 @@ class InstagramClient:
         except ig_errors.BadCredentialsException:
             raise InstagramError("Wrong Instagram username or password.")
         except Exception as e:
-            logger.warning(f"Instagram login failed for @{username}: {type(e).__name__}")
-            raise InstagramError("Instagram didn't accept the sign-in. Open Instagram on your phone, approve the sign-in if it asks, then try again.")
+            reason = str(e)
+            logger.warning(f"Instagram login failed for @{username}: {type(e).__name__}: {reason[:300]}")
+            if "Checkpoint required" in reason:
+                raise InstagramError("Instagram wants to confirm it's you. Sign in at instagram.com in your browser, approve the alert if one shows, or use \"Use my browser's sign-in\" below.")
+            raise InstagramError("Instagram blocks password sign-in from servers. Use \"Use my browser's sign-in\" below instead.")
+        self._save_session(loader, username)
+        return {"connected": True, "username": username}
+
+    def login_with_browser_session(self, sessionid: str) -> dict:
+        """Reuses the sign-in of a browser where the account is open (its "sessionid" cookie).
+
+        Instagram refuses password sign-ins from most servers, but accepts requests carrying a
+        session that was started in a normal browser.
+        """
+        sessionid = urllib.parse.unquote(sessionid.strip().strip('"').removeprefix("sessionid="))
+        if not re.fullmatch(r"\d+:[^:\s]+:\d+(:\S+)?", sessionid):
+            raise InstagramError("That doesn't look like a sessionid value. Copy only the Value of the sessionid cookie.")
+        loader = self._new_loader()
+        loader.context.load_session("", {
+            "sessionid": sessionid,
+            "ds_user_id": sessionid.split(":", 1)[0],
+            "csrftoken": secrets.token_hex(16),
+        })
+        try:
+            username = loader.context.test_login()
+        except Exception as e:
+            logger.warning(f"Instagram browser sign-in check failed: {type(e).__name__}: {str(e)[:300]}")
+            username = None
+        if not username:
+            raise InstagramError("Instagram didn't accept that session. Sign in at instagram.com again, copy a fresh sessionid and try again.")
+        loader.context.username = username
         self._save_session(loader, username)
         return {"connected": True, "username": username}
 
