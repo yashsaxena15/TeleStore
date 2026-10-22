@@ -7,7 +7,6 @@ import { DockProvider } from "@/components/layout/dock/DockContext";
 import logger from "@/lib/logger";
 // Import the new backend connection hook
 import { useBackendConnection } from "@/hooks/useViteConnection";
-import authService from "@/features/auth/authService";
 // Import the error provider
 import { ErrorProvider } from "@/contexts/ErrorHandlerContext";
 import { MediaPlayerProvider } from "@/features/player/MediaPlayerContext";
@@ -46,19 +45,6 @@ const App = () => {
     logger.info("Initializing App component");
     // Use the backend connection hook to monitor connection status
     useBackendConnection();
-    // Check authentication status
-    useEffect(() => {
-        const checkAuth = async () => {
-            try {
-                const isAuthenticated = await authService.isAuthenticated();
-                logger.info("Authentication status:", isAuthenticated);
-            }
-            catch (error) {
-                logger.error("Failed to check authentication status:", error);
-            }
-        };
-        checkAuth();
-    }, []);
     useEffect(() => {
         // Initialize theme preference (dark / light / system) with listener cleanup
         return initTheme();
