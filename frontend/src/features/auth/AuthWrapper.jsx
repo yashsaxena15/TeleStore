@@ -1,101 +1,72 @@
-import { useState, useEffect } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { getApiBaseUrl, fetchWithTimeout } from "@/lib/api";
 import logger from "@/lib/logger";
 import authService from "./authService";
-import { useError } from "@/contexts/ErrorHandlerContext"; // Import the error context
+import { useError } from "@/contexts/ErrorHandlerContext";
+
+// Generous: the browser may queue this behind streams and thumbnails (six connections per site)
+const CHECK_TIMEOUT_MS = 15000;
+const RETRY_DELAY_MS = 1500;
+
+const checkOnce = async () => {
+    const response = await fetchWithTimeout(`${getApiBaseUrl() || ""}/auth/check`, { method: "GET", headers: { ...authService.getAuthHeaders() } }, CHECK_TIMEOUT_MS);
+    if (!response.ok)
+        return { status: response.status };
+    return { status: response.status, data: await response.json() };
+};
+
+/**
+ * Shows the app once the server confirms the sign-in. The check runs when the app opens (and
+ * after signing in), not on every page change: moving between pages keeps the user signed in.
+ * A request that later finds the session gone is handled where it is made.
+ * A dropped connection is retried and never signs the user out.
+ */
 export const AuthWrapper = ({ children }) => {
     const [isAuthenticated, setIsAuthenticated] = useState(null);
-    const [isLoading, setIsLoading] = useState(true);
-    const [backendError, setBackendError] = useState(false);
     const navigate = useNavigate();
-    const location = useLocation();
-    const { showError } = useError(); // Use the error context
-    useEffect(() => {
-        logger.info("AuthWrapper mounted, checking authentication...");
-        // Skip auth check on login page
-        if (location.pathname === "/login") {
-            logger.info("On login page, skipping auth check");
-            setIsLoading(false);
-            setIsAuthenticated(false);
-            return;
-        }
-        const checkAuth = async () => {
-            logger.info("Running authentication check");
+    const { showError } = useError();
+    // Both change identity as pages change; refs keep the check from re-running with them
+    const showErrorRef = useRef(showError);
+    showErrorRef.current = showError;
+    const navigateRef = useRef(navigate);
+    navigateRef.current = navigate;
+
+    const checkAuth = useCallback(async () => {
+        let result = null;
+        for (let attempt = 0; attempt < 2 && !result; attempt++) {
             try {
-                const baseUrl = getApiBaseUrl();
-                const apiUrl = baseUrl ? `${baseUrl}` : '';
-                logger.info("Checking authentication", { url: `${apiUrl}/auth/check`, baseUrl });
-                // Prepare fetch options using authService
-                const fetchOptions = {
-                    method: 'GET',
-                    headers: {
-                        ...authService.getAuthHeaders()
-                    }
-                };
-                const response = await fetchWithTimeout(`${apiUrl}/auth/check`, fetchOptions, 3000);
-                logger.info("Auth check response", { status: response.status, headers: [...response.headers.entries()] });
-                if (response.ok) {
-                    const data = await response.json();
-                    logger.info("Auth check response data", data);
-                    setIsAuthenticated(data.authenticated);
-                    setBackendError(false);
-                    // If not authenticated, redirect to login
-                    if (!data.authenticated) {
-                        logger.info("Not authenticated, redirecting to login");
-                        // Clear auth token
-                        localStorage.removeItem('auth_token');
-                        navigate("/login");
-                        return;
-                    }
-                    else {
-                        logger.info("User is authenticated, showing content");
-                    }
-                }
-                else {
-                    logger.warn("Auth check failed with status", response.status);
-                    // Handle 401 specifically with our error dialog
-                    if (response.status === 401) {
-                        showError("Authentication Required", "Your session has expired or you're not logged in. Please log in again.", "auth", undefined, // No retry
-                        () => navigate("/login"), // On dismiss, go to login
-                        authService.isTauri() ? () => navigate("/login") : undefined // Desktop app: pick another server
-                        );
-                    }
-                    else {
-                        // For other errors, redirect to login but indicate there might be a backend issue
-                        setIsAuthenticated(false);
-                        // Clear auth token on failure
-                        localStorage.removeItem('auth_token');
-                        setBackendError(response.status !== 401 && response.status !== 403);
-                        navigate("/login");
-                    }
-                    return;
-                }
+                result = await checkOnce();
             }
             catch (error) {
-                logger.error("Auth check failed with error", error);
-                // Handle network errors with our error dialog
-                showError("Connection Error", "Failed to connect to the backend server. Please check your connection and try again.", "network", undefined, // No retry for now
-                () => navigate("/login"), // On dismiss, go to login
-                authService.isTauri() ? () => navigate("/login") : undefined // Desktop app: pick another server
-                );
-                // Redirect to login and indicate there's a backend connectivity issue
-                setIsAuthenticated(false);
-                // Clear auth token on error
-                localStorage.removeItem('auth_token');
-                setBackendError(true);
-                navigate("/login");
-                return;
+                logger.warn("Auth check could not reach the server", { attempt, message: error?.message });
+                if (attempt === 0)
+                    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
             }
-            finally {
-                setIsLoading(false);
-            }
-        };
+        }
+        if (!result) {
+            // The server didn't answer: keep the sign-in and offer to try again
+            showErrorRef.current("Connection Error", "Couldn't reach TeleStore. Check your internet connection and try again.", "network", () => checkAuth());
+            return;
+        }
+        if (result.data?.authenticated) {
+            setIsAuthenticated(true);
+            return;
+        }
+        if (result.status === 401 || result.data) {
+            localStorage.removeItem("auth_token");
+            setIsAuthenticated(false);
+            navigateRef.current("/login");
+            return;
+        }
+        showErrorRef.current("Server Error", `TeleStore answered with an error (${result.status}). Try again in a moment.`, "server", () => checkAuth());
+    }, []);
+
+    useEffect(() => {
         checkAuth();
-    }, [navigate, location.pathname, showError]);
-    // Show loading state while checking authentication
-    if (isLoading || isAuthenticated === null) {
-        logger.info("Showing loading state");
+    }, [checkAuth]);
+
+    if (!isAuthenticated) {
         return (<div className="flex min-h-screen items-center justify-center">
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary"></div>
@@ -103,7 +74,5 @@ export const AuthWrapper = ({ children }) => {
         </div>
       </div>);
     }
-    logger.info("Rendering children", { isAuthenticated });
-    // If authenticated, render children; otherwise, redirect handled by useEffect
-    return isAuthenticated ? <>{children}</> : null;
+    return <>{children}</>;
 };

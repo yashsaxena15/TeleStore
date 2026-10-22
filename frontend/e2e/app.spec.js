@@ -109,6 +109,36 @@ test.describe("users and connection", () => {
     });
 });
 
+test.describe("staying signed in", () => {
+    test("moving between pages doesn't re-check the sign-in", async ({ page }) => {
+        let checks = 0;
+        page.on("request", (r) => { if (new URL(r.url()).pathname === "/auth/check") checks++; });
+        await page.goto("/");
+        await expect(row(page, "Movies")).toBeVisible();
+        const sidebar = page.getByRole("complementary").first();
+        for (const name of ["Transfers", "Storage", "Home", "Transfers", "Home"])
+            await sidebar.getByRole("button", { name }).click();
+        await expect(row(page, "Movies")).toBeVisible();
+        expect(checks).toBe(1);
+    });
+
+    test("a slow or dropped check doesn't sign you out", async ({ page }) => {
+        await page.addInitScript(() => localStorage.setItem("auth_token", "kept-token"));
+        let calls = 0;
+        await page.route("**/auth/check", async (route) => {
+            calls++;
+            if (calls === 1)
+                return route.abort("connectionreset");
+            await new Promise((r) => setTimeout(r, 4000)); // slower than the old 3-second limit
+            return route.continue();
+        });
+        await page.goto("/");
+        await expect(row(page, "Movies")).toBeVisible({ timeout: 15000 });
+        await expect(page).not.toHaveURL(/\/login/);
+        expect(await page.evaluate(() => localStorage.getItem("auth_token"))).toBe("kept-token");
+    });
+});
+
 test.describe("import from Instagram", () => {
     const openDialog = async (page) => {
         await page.goto("/");
