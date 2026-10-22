@@ -91,13 +91,29 @@ class TestFormats:
 
 
 class TestCookies:
-    def test_saves_a_netscape_file(self, tmp_path, monkeypatch):
+    @pytest.fixture
+    def cookie_dir(self, tmp_path, monkeypatch):
         monkeypatch.setattr(media, "SETTINGS_DIR", str(tmp_path))
         monkeypatch.setattr(media, "COOKIES_FILE", str(tmp_path / "cookies.txt"))
-        res = media.save_cookies(b"# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t1999999999\tSID\tabc\n")
-        assert res["has_cookies"] and res["cookie_sites"] == ["youtube.com"]
-        assert oct((tmp_path / "cookies.txt").stat().st_mode)[-3:] == "600"
+        monkeypatch.setattr(media, "COOKIES_STATUS_FILE", str(tmp_path / "cookies-status.json"))
+        monkeypatch.setattr(media, "_pot_running", lambda: False)
+        return tmp_path
+
+    def _file(self, *names):
+        return ("# Netscape HTTP Cookie File\n" + "".join(f".youtube.com\tTRUE\t/\tTRUE\t1999999999\t{n}\tabc\n" for n in names)).encode()
+
+    def test_saves_a_signed_in_export(self, cookie_dir):
+        with patch.object(media, "_check_youtube_sign_in", return_value="signed_in"):
+            res = media.save_cookies(self._file("SID", "LOGIN_INFO", "SAPISID"))
+        assert res["has_cookies"] and res["cookie_sites"] == ["youtube.com"] and res["youtube_sign_in"] == "signed_in"
+        assert oct((cookie_dir / "cookies.txt").stat().st_mode)[-3:] == "600"
         assert not media.remove_cookies()["has_cookies"]
+
+    def test_refuses_a_signed_out_export(self, cookie_dir):
+        # What a browser that isn't signed in exports: only side cookies
+        with pytest.raises(MediaError, match="aren't from a signed-in YouTube"):
+            media.save_cookies(self._file("__Secure-3PSID", "__Secure-3PAPISID", "VISITOR_INFO1_LIVE"))
+        assert not (cookie_dir / "cookies.txt").exists()
 
     def test_refuses_other_files(self, tmp_path, monkeypatch):
         monkeypatch.setattr(media, "COOKIES_FILE", str(tmp_path / "cookies.txt"))
@@ -173,10 +189,10 @@ class TestTransfer:
 
     def _fake_download(self, size):
         async def download(url, choice, dest_dir, progress, should_stop):
-            path = f"{dest_dir}/Song 1 [v1].mp3"
+            path = f"{dest_dir}/Song 1.mp3"
             with open(path, "wb") as f:
                 f.truncate(size)
-            return path
+            return path, "v1"
         return download
 
     def test_small_file_is_one_telegram_message(self, tmp_path, monkeypatch):
@@ -188,7 +204,7 @@ class TestTransfer:
                 patch.object(mgr, "_update_task") as update:
             asyncio.run(mgr._run_download_and_upload(self._task(), MagicMock(is_set=lambda: False)))
         kwargs = database.Files.add_file.call_args.kwargs
-        assert kwargs["file_name"] == "Song 1 [v1].mp3" and kwargs["file_path"] == "/Home/Music" and kwargs["file_type"] == "audio"
+        assert kwargs["file_name"] == "Song 1.mp3" and kwargs["file_path"] == "/Home/Music" and kwargs["file_type"] == "audio"
         assert update.call_args.args[1]["status"] == "completed"
         assert not (tmp_path / "tg_files" / "remote_rt_9").exists()
 
@@ -222,3 +238,138 @@ class TestTransfer:
             with pytest.raises(RuntimeError):
                 asyncio.run(mgr._run_download_and_upload(self._task(), MagicMock(is_set=lambda: False)))
         download.assert_not_called()
+
+
+class TestPhaseTwo:
+    def test_text_pasted_with_the_link_is_dropped(self):
+        assert media.clean_link("https://music.youtube.com/playlist?list=PLabc 05:23 PM") == "https://music.youtube.com/playlist?list=PLabc"
+        assert media.clean_link("Check this: https://youtu.be/x).") == "https://youtu.be/x"
+
+    def test_channel_page_opens_its_videos(self):
+        with patch("socket.getaddrinfo", return_value=[(None, None, None, None, ("142.250.1.1", 443))]):
+            assert check_public_url("https://www.youtube.com/@mkbhd") == "https://www.youtube.com/@mkbhd/videos"
+            assert check_public_url("https://www.youtube.com/@mkbhd/shorts") == "https://www.youtube.com/@mkbhd/shorts"
+
+    def test_broken_playlist_link(self):
+        msg = str(media._friendly(Exception("ERROR: [youtube:tab] PLx05:23 PM: Unable to download API page: HTTP Error 400: Bad Request")))
+        assert "looks broken or incomplete" in msg
+
+    def test_bot_check_is_a_block(self):
+        assert isinstance(media._friendly(Exception("Sign in to confirm you're not a bot")), media.MediaBlocked)
+
+    @pytest.mark.parametrize("value, langs, automatic", [
+        ("hi", ["hi", "hi-orig", "hi-IN"], True),
+        ("all", ["all", "-live_chat"], False),  # automatic captions exist in ~100 languages
+        (True, ["en", "en-orig", "en-US", "en-GB", "en-IN"], True),
+    ])
+    def test_subtitle_languages(self, value, langs, automatic):
+        opts = format_options({"mode": "video", "subtitles": value})
+        assert opts["subtitleslangs"] == langs and opts["writeautomaticsub"] is automatic
+        assert not any(lang.endswith(".*") for lang in langs)  # no machine translations
+
+    def test_rate_limited_subtitles_keep_the_video(self, tmp_path):
+        tried = []
+
+        class FakeYDL:
+            def __init__(self, opts):
+                self.opts = opts
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def extract_info(self, url, download):
+                tried.append(bool(self.opts.get("writesubtitles")))
+                if self.opts.get("writesubtitles"):
+                    raise Exception("ERROR: Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests")
+                path = tmp_path / "Song.mp4"
+                path.write_bytes(b"x")
+                return {"id": "v1", "requested_downloads": [{"filepath": str(path)}]}
+        with patch.object(media.yt_dlp, "YoutubeDL", FakeYDL), patch.object(media, "check_public_url", lambda u: u):
+            path, vid = asyncio.run(media.download("https://youtu.be/v1", {"mode": "video", "subtitles": "en"}, str(tmp_path)))
+        assert tried == [True, False] and path.endswith("Song.mp4") and vid == "v1"
+
+    def test_chapters_and_cover_in_videos(self):
+        opts = format_options({"mode": "video"})
+        assert opts["postprocessors"][0]["add_chapters"] and any(p["key"] == "EmbedThumbnail" for p in opts["postprocessors"])
+
+    def test_po_token_helper_is_used(self):
+        assert media._base_options()["extractor_args"]["youtubepot-bgutilhttp"]["base_url"] == [media.POT_PROVIDER_URL]
+
+    def test_same_name_in_the_folder_gets_the_id(self):
+        mgr = manager_module.RemoteTransferManager()
+        task = {"user_id": "42", "destination_path": "/Home/Music"}
+        database.Files.find_one.return_value = None
+        assert mgr._media_file_name(task, "Song.mp3", "abc") == "Song.mp3"
+        database.Files.find_one.return_value = {"file_name": "Song.mp3"}
+        assert mgr._media_file_name(task, "Song.mp3", "abc") == "Song [abc].mp3"
+        assert mgr._media_file_name({**task, "cloud_account_id": "acc"}, "Song.mp3", "abc") == "Song.mp3"
+
+    def test_a_block_pauses_the_rest_of_the_playlist(self, tasks_db):
+        mgr = manager_module.RemoteTransferManager()
+        task = {"task_id": "rt_1", "user_id": "42", "group_id": "grp_1", "source_type": "media"}
+        assert mgr._pause_blocked_media(task, media.MediaBlocked("bot"))
+        query, update = tasks_db.update_many.call_args.args
+        assert query["group_id"] == "grp_1" and update["$set"]["status"] == "paused_quota" and update["$set"]["cooldown_until"]
+        assert tasks_db.update_one.call_args.args[1]["$inc"] == {"block_retries": 1}
+        # After three waits the video fails instead of waiting again
+        assert not mgr._pause_blocked_media({**task, "block_retries": 3}, media.MediaBlocked("bot"))
+        assert not mgr._pause_blocked_media(task, MediaError("private"))
+
+    def test_update_installs_into_the_cache(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(media, "LIB_DIR", str(tmp_path / "lib"))
+        calls = []
+
+        def run(cmd, **kw):
+            calls.append(cmd)
+            (tmp_path / "lib.new" / "yt_dlp").mkdir(parents=True)
+            return MagicMock(returncode=0)
+        with patch("subprocess.run", run), patch.object(media, "_reload_yt_dlp"), patch.object(media, "settings", return_value={"ok": True}):
+            assert asyncio.run(media.update_yt_dlp()) == {"ok": True}
+        assert "--target" in calls[0] and "yt-dlp" in calls[0]
+        assert (tmp_path / "lib" / "yt_dlp").is_dir()
+
+    def test_only_the_owner_updates(self, client, as_user):
+        as_user()
+        assert client.post("/api/transfers/remote/media/update").status_code == 403
+
+
+class TestSync:
+    @pytest.fixture
+    def syncs(self):
+        coll = MagicMock()
+        coll.count_documents.return_value = 0
+        coll.find_one.return_value = None
+        coll.insert_one.side_effect = lambda doc: doc.setdefault("_id", "oid")
+        from telestore.services import media_sync
+        with patch.object(media_sync, "_coll", return_value=coll):
+            yield coll
+
+    def test_sync_with_the_download(self, client, as_user, tasks_db, index_chat, syncs):
+        as_user()
+        info = {**PLAYLIST, "url": "https://www.youtube.com/playlist?list=x"}
+        with probing(info):
+            res = client.post("/api/transfers/remote/media", json={"url": "https://www.youtube.com/playlist?list=x", "items": [], "sync": True,
+                                                                   "choice": {"mode": "audio"}, "destination": {"kind": "home", "path": "/Home/Music"}})
+        assert res.status_code == 200, res.text
+        assert res.json()["message"] == "Synced: new videos will download by themselves."
+        tasks_db.insert_one.assert_not_called()
+        doc = syncs.insert_one.call_args.args[0]
+        assert doc["seen_urls"] == [e["url"] for e in PLAYLIST["entries"]] and doc["destination_label"] == "/Home/Music"
+
+    def test_ten_at_most(self, client, as_user, tasks_db, index_chat, syncs):
+        as_user()
+        syncs.count_documents.return_value = 10
+        res = client.post("/api/transfers/remote/media", json={"url": "https://y/x", "sync": True, "choice": {}, "destination": {"kind": "home", "path": "/Home"}})
+        assert res.status_code == 429
+
+    def test_check_queues_only_new_videos(self, syncs):
+        from telestore.services import media_sync
+        doc = {"sync_id": "sync_1", "user_id": "42", "url": "https://www.youtube.com/playlist?list=x", "choice": {"mode": "audio"},
+               "destination": {"kind": "home", "path": "/Home"}, "chat_id": -100, "seen_urls": [PLAYLIST["entries"][0]["url"]]}
+        with probing({**PLAYLIST, "url": doc["url"]}), patch.object(remote_transfer_manager, "enqueue_media") as enqueue:
+            assert asyncio.run(media_sync.check(doc)) == 2
+        assert [e["index"] for e in enqueue.call_args.args[2]] == [2, 3]
+        assert syncs.update_one.call_args.args[1]["$set"]["last_new_count"] == 2

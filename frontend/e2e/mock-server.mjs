@@ -49,7 +49,10 @@ const ROUTES = {
     "/api/health": { status: "healthy" },
     "/auth/google/config": { client_id: null },
     "/transfers/remote/instagram/session": { connected: false, username: null },
-    "/transfers/remote/media/settings": { version: "2026.10.21", has_cookies: false, cookie_sites: [], cookies_updated_at: null },
+    "/transfers/remote/media/settings": { version: "2026.10.21", builtin_version: "2026.10.21", updated: false, has_cookies: false, cookie_sites: [], cookies_updated_at: null, youtube_sign_in: null, pot_helper: true },
+    "/transfers/remote/media/syncs": { every_hours: 6, syncs: [
+        { id: "sync_1", title: "Daily mix", url: "https://www.youtube.com/playlist?list=PLmix", is_channel: false, choice: { mode: "audio", audio_format: "mp3" }, destination_label: "/Home/Music", enabled: true, known_count: 40, last_checked: "2026-10-22T08:00:00Z", last_new_count: 2, last_error: null },
+    ] },
     "/cloud/acc1/files": { files: [{ id: "fold9", name: "Instagram saves", is_folder: true }, { id: "doc1", name: "notes.txt", is_folder: false }] },
     "/files/analytics": {
         total_bytes: 214_000_000_000, total_files: 1843, total_folders: 96, starred_count: 12, trash_count: 7, trash_bytes: 3_400_000_000,
@@ -123,7 +126,13 @@ const mutation = (req, res, url, body) => {
         return send(res, 200, { kind: "video", title: "Never Gonna Give You Up", uploader: "Rick Astley", site: "Youtube", duration: 213, count: 1, thumbnail: null, entries: [{ index: 1, title: "Never Gonna Give You Up", duration: 213 }] });
     }
     if (url.pathname === "/transfers/remote/media/cookies" && req.method === "POST") {
-        return send(res, 200, { version: "2026.10.21", has_cookies: true, cookie_sites: ["youtube.com"], cookies_updated_at: "2026-10-22T10:00:00Z" });
+        return send(res, 200, { version: "2026.10.21", builtin_version: "2026.10.21", updated: false, has_cookies: true, cookie_sites: ["youtube.com"], cookies_updated_at: "2026-10-22T10:00:00Z", youtube_sign_in: "signed_in", pot_helper: true });
+    }
+    if (url.pathname === "/transfers/remote/media/update") {
+        return send(res, 200, { version: "2026.11.03", builtin_version: "2026.10.21", updated: true, has_cookies: false, cookie_sites: [], youtube_sign_in: null, pot_helper: true });
+    }
+    if (url.pathname === "/transfers/remote/media/syncs/sync_1/check") {
+        return send(res, 200, { new: 3, sync: {} });
     }
     if (url.pathname === "/transfers/remote/media") {
         return send(res, 200, { success: true, message: "Downloading 2 video files.", count: 2, tasks: [] });

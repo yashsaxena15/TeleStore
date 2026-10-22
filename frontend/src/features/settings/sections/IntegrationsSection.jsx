@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Cloud, Plus, Unlink, FolderOpen, Laptop, BookOpen, Instagram, Clapperboard, Upload, Trash2 } from "lucide-react";
+import { Cloud, Plus, Unlink, FolderOpen, Laptop, BookOpen, Instagram, Clapperboard, Upload, Trash2, RefreshCw, ListVideo } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -107,63 +107,134 @@ const InstagramPanel = () => {
     </SettingsPanel>);
 };
 
-// yt-dlp downloads: the version, and an optional cookies.txt of a signed-in browser (owner)
+// yt-dlp downloads (owner): cookies of a signed-in browser, the bot-check helper and updates
 const MediaDownloadsPanel = () => {
     const queryClient = useQueryClient();
     const { data: settings } = useQuery({ queryKey: ["mediaSettings"], queryFn: api.getMediaSettings, staleTime: 60000 });
     const fileRef = useRef(null);
-    const [busy, setBusy] = useState(false);
+    const [busy, setBusy] = useState(""); // "cookies" | "update" | "builtin"
     const [error, setError] = useState("");
     const [showHow, setShowHow] = useState(false);
     const refresh = (data) => queryClient.setQueryData(["mediaSettings"], data);
-    const upload = async (e) => {
-        const file = e.target.files?.[0];
-        e.target.value = "";
-        if (!file)
-            return;
-        setBusy(true);
+    const run = async (what, action, done) => {
+        setBusy(what);
         setError("");
         try {
-            refresh(await api.uploadMediaCookies(file));
-            toast.success("Cookies saved. Downloads now use that sign-in.");
+            const data = await action();
+            refresh(data);
+            done?.(data);
         }
         catch (err) {
             setError(err.message);
         }
         finally {
-            setBusy(false);
+            setBusy("");
         }
     };
-    const remove = async () => {
+    const upload = (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        if (file)
+            run("cookies", () => api.uploadMediaCookies(file), (data) => toast.success(data.youtube_sign_in === "signed_in" ? "Cookies saved. YouTube confirmed the sign-in." : "Cookies saved."));
+    };
+    const has = Boolean(settings?.has_cookies);
+    const signIn = settings?.youtube_sign_in;
+    return (<SettingsPanel icon={Clapperboard} title="Video downloads" description="YouTube, YouTube Music and other sites, downloaded by the server with yt-dlp" actions={<>
+        <input ref={fileRef} type="file" accept=".txt,text/plain" className="hidden" aria-label="cookies.txt file" onChange={upload}/>
+        <Button size="sm" variant={has ? "outline" : "default"} className="h-8" disabled={Boolean(busy)} onClick={() => fileRef.current?.click()}><Upload className="w-3.5 h-3.5 mr-1.5"/>{busy === "cookies" ? "Checking…" : has ? "Replace cookies" : "Add cookies"}</Button>
+      </>}>
+      <div className="grid gap-3 text-sm">
+        <div className="grid gap-1.5">
+          <p className="flex flex-wrap items-center gap-2">
+            {!has ? <StatusPill tone="muted">No cookies</StatusPill> : signIn === "signed_in" ? <StatusPill tone="success">Signed in</StatusPill> : signIn === "signed_out" ? <StatusPill tone="destructive">Not signed in</StatusPill> : <StatusPill tone="warning">Cookies added</StatusPill>}
+            <span className="text-muted-foreground min-w-0">
+              {!has ? "Most videos download without them. YouTube sometimes asks servers to prove they aren't a bot, and age-restricted videos and your own private playlists need a sign-in: cookies fix these."
+                : signIn === "signed_in" ? `YouTube confirmed the sign-in${settings.cookies_updated_at ? ` (added ${new Date(settings.cookies_updated_at).toLocaleDateString()})` : ""}.`
+                    : signIn === "signed_out" ? "YouTube says these cookies aren't signed in. Export them again while signed in."
+                        : `Using cookies for ${settings.cookie_sites?.length ? settings.cookie_sites.join(", ") : "your sites"}. YouTube couldn't be asked to confirm the sign-in just now.`}
+            </span>
+          </p>
+          {has && <button type="button" onClick={() => run("cookies", api.removeMediaCookies, () => toast.success("Cookies removed"))} className="justify-self-start text-sm text-destructive hover:underline flex items-center gap-1"><Trash2 className="w-3.5 h-3.5"/>Remove cookies</button>}
+          <button type="button" className="justify-self-start text-sm text-primary hover:underline" aria-expanded={showHow} onClick={() => setShowHow(!showHow)}>How to get a cookies.txt</button>
+          {showHow && (<ol className="text-sm text-muted-foreground list-decimal pl-5 grid gap-1">
+              <li>Use a spare Google account, not your main one: heavy downloading can get an account flagged.</li>
+              <li>Install the <span className="font-medium text-foreground">Get cookies.txt LOCALLY</span> extension (Chrome, Edge, or Firefox on Android).</li>
+              <li>In a private window, open <span className="font-medium text-foreground">youtube.com</span> (not music.youtube.com) and sign in, until your picture shows at the top right.</li>
+              <li>On that tab, open the extension and export the cookies for the current site.</li>
+              <li>Close the private window without signing out (signing out ends the cookies), then press Add cookies here.</li>
+            </ol>)}
+        </div>
+
+        <p className="flex flex-wrap items-center gap-2">
+          {settings?.pot_helper ? <StatusPill tone="success">Bot-check helper running</StatusPill> : <StatusPill tone="warning">Bot-check helper not running</StatusPill>}
+          <span className="text-muted-foreground">{settings?.pot_helper ? "It answers YouTube's \"prove you're not a bot\" checks for the server." : "Start the pot service from docker-compose; YouTube blocks the server more often without it."}</span>
+        </p>
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <span className="text-muted-foreground">yt-dlp {settings?.version || "…"}{settings?.updated && settings?.builtin_version ? ` (updated; built-in ${settings.builtin_version})` : ""}</span>
+          <Button size="sm" variant="outline" className="h-8" disabled={Boolean(busy)} onClick={() => run("update", api.updateMediaDownloader, (data) => toast.success(`yt-dlp is now ${data.version}`))}>
+            <RefreshCw className={`w-3.5 h-3.5 mr-1.5${busy === "update" ? " animate-spin" : ""}`}/>{busy === "update" ? "Updating…" : "Update yt-dlp"}
+          </Button>
+          {settings?.updated && <button type="button" disabled={Boolean(busy)} onClick={() => run("builtin", api.useBuiltinMediaDownloader, (data) => toast.success(`Back to the built-in yt-dlp ${data.version}`))} className="text-sm text-primary hover:underline">Use the built-in version</button>}
+        </div>
+        <p className="text-xs text-muted-foreground -mt-1">Sites change often. When downloads start failing everywhere, update yt-dlp; downloads that are running finish first.</p>
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      </div>
+    </SettingsPanel>);
+};
+
+const describeChoice = (choice) => {
+    if (!choice)
+        return "";
+    if (choice.mode === "audio")
+        return (choice.audio_format || "mp3").toUpperCase();
+    return choice.quality && choice.quality !== "best" ? `${choice.quality}p video` : "Best video";
+};
+
+// Playlists and channels that download their new videos by themselves (every user, their own)
+const SyncedPlaylistsPanel = () => {
+    const queryClient = useQueryClient();
+    const { data } = useQuery({ queryKey: ["mediaSyncs"], queryFn: api.getMediaSyncs, staleTime: 30000 });
+    const [busy, setBusy] = useState(null);
+    const syncs = data?.syncs || [];
+    const refresh = () => queryClient.invalidateQueries({ queryKey: ["mediaSyncs"] });
+    const act = async (id, action, message) => {
+        setBusy(id);
         try {
-            refresh(await api.removeMediaCookies());
-            toast.success("Cookies removed");
+            const res = await action();
+            if (message)
+                toast.success(typeof message === "function" ? message(res) : message);
+            if (res?.new)
+                window.dispatchEvent(new CustomEvent("remoteTransferAdded"));
+            refresh();
         }
         catch (err) {
             toast.error(err.message);
         }
+        finally {
+            setBusy(null);
+        }
     };
-    const has = Boolean(settings?.has_cookies);
-    return (<SettingsPanel icon={Clapperboard} title="Video downloads" description="YouTube, YouTube Music and other sites, downloaded by the server with yt-dlp" actions={<>
-        <input ref={fileRef} type="file" accept=".txt,text/plain" className="hidden" aria-label="cookies.txt file" onChange={upload}/>
-        <Button size="sm" variant={has ? "outline" : "default"} className="h-8" disabled={busy} onClick={() => fileRef.current?.click()}><Upload className="w-3.5 h-3.5 mr-1.5"/>{busy ? "Saving…" : has ? "Replace cookies" : "Add cookies"}</Button>
-      </>}>
-      <div className="grid gap-2 text-sm">
-        <p className="flex flex-wrap items-center gap-2">
-          {has ? <StatusPill tone="success">Signed in</StatusPill> : <StatusPill tone="muted">No cookies</StatusPill>}
-          {has ? (<span className="text-muted-foreground">Using cookies for {settings.cookie_sites?.length ? settings.cookie_sites.join(", ") : "your sites"}{settings.cookies_updated_at ? `, added ${new Date(settings.cookies_updated_at).toLocaleDateString()}` : ""}.</span>) : (<span className="text-muted-foreground">Most videos download without them. YouTube sometimes asks servers to prove they aren't a bot, and age-restricted videos need a sign-in: cookies fix both.</span>)}
-        </p>
-        {has && <button type="button" onClick={remove} className="justify-self-start text-sm text-destructive hover:underline flex items-center gap-1"><Trash2 className="w-3.5 h-3.5"/>Remove cookies</button>}
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-        <button type="button" className="justify-self-start text-sm text-primary hover:underline" aria-expanded={showHow} onClick={() => setShowHow(!showHow)}>How to get a cookies.txt</button>
-        {showHow && (<ol className="text-sm text-muted-foreground list-decimal pl-5 grid gap-1">
-            <li>Use a spare Google account, not your main one: heavy downloading can get an account flagged.</li>
-            <li>Install the <span className="font-medium text-foreground">Get cookies.txt LOCALLY</span> extension (Chrome, Edge, or Firefox on Android).</li>
-            <li>Open youtube.com in a private window, sign in, then use the extension to export cookies for youtube.com.</li>
-            <li>Close the private window without signing out (signing out ends the cookies), then press Add cookies here.</li>
-          </ol>)}
-        {settings?.version && <p className="text-xs text-muted-foreground">yt-dlp {settings.version}. Sites change often; if downloads start failing, the server needs a newer yt-dlp.</p>}
-      </div>
+    if (!syncs.length)
+        return null;
+    return (<SettingsPanel icon={ListVideo} title="Synced playlists" description={`New videos are downloaded by themselves; each one is checked every ${data?.every_hours || 6} hours`}>
+      <ul className="divide-y divide-border">
+        {syncs.map((s) => (<li key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3 first:pt-0 last:pb-0">
+            <div className="min-w-0 flex-1 basis-56 grid gap-0.5">
+              <p className="text-sm font-medium truncate">{s.title || s.url}</p>
+              <p className="text-xs text-muted-foreground truncate">{s.is_channel ? "Channel" : "Playlist"} · {describeChoice(s.choice)} · to {s.destination_label}</p>
+              <p className={`text-xs ${s.last_error ? "text-destructive" : "text-muted-foreground"}`}>
+                {s.last_error ? s.last_error : s.last_checked ? `Checked ${new Date(s.last_checked).toLocaleString()}${s.last_new_count ? `, ${s.last_new_count} new` : ""}` : "Not checked yet"}
+                {!s.enabled && " · Paused"}
+              </p>
+            </div>
+            <div className="flex gap-1.5">
+              <Button variant="outline" size="sm" className="h-8" disabled={busy === s.id || !s.enabled} onClick={() => act(s.id, () => api.checkMediaSync(s.id), (r) => (r.new ? `${r.new} new video${r.new === 1 ? "" : "s"} queued` : "No new videos"))}>Check now</Button>
+              <Button variant="outline" size="sm" className="h-8" disabled={busy === s.id} onClick={() => act(s.id, () => api.setMediaSyncEnabled(s.id, !s.enabled))}>{s.enabled ? "Pause" : "Resume"}</Button>
+              <Button variant="outline" size="sm" className="h-8 text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive" aria-label={`Stop syncing ${s.title}`} disabled={busy === s.id} onClick={() => act(s.id, () => api.removeMediaSync(s.id), "Stopped syncing")}><Trash2 className="w-3.5 h-3.5"/></Button>
+            </div>
+          </li>))}
+      </ul>
     </SettingsPanel>);
 };
 
@@ -196,6 +267,8 @@ export const IntegrationsSection = ({ onOpenDrive }) => {
       </SettingsPanel>
 
       {isOwner && <MediaDownloadsPanel/>}
+
+      <SyncedPlaylistsPanel/>
 
       {isOwner && <InstagramPanel/>}
 

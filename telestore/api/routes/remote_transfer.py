@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
 import asyncio
 import posixpath
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 from telestore.security.credentials import require_auth, require_upload, User
 from telestore.services.remote_transfer_manager import remote_transfer_manager
@@ -363,7 +363,8 @@ class MediaChoiceModel(BaseModel):
     mode: Literal["video", "audio"] = "video"
     quality: Literal["best", "1080", "720", "480"] = "best"
     audio_format: Literal["mp3", "m4a"] = "mp3"
-    subtitles: bool = False
+    # Subtitle language: "en", "hi" or "all"; None or False for none (True means English)
+    subtitles: Optional[Union[Literal["en", "hi", "all"], bool]] = None
 
 
 class MediaDownloadModel(BaseModel):
@@ -371,6 +372,11 @@ class MediaDownloadModel(BaseModel):
     choice: MediaChoiceModel
     destination: InstagramDestinationModel
     items: Optional[list[int]] = None  # playlist entries to download (1-based); all when missing
+    sync: bool = False  # keep downloading the playlist's or channel's new videos
+
+
+class MediaSyncUpdateModel(BaseModel):
+    enabled: bool
 
 
 async def _probe_media(url: str) -> dict:
@@ -388,6 +394,7 @@ async def preview_media(body: InstagramUrlModel, user: User = Depends(require_up
     info = await _probe_media(body.url)
     return {
         "kind": info["kind"],
+        "is_channel": info.get("is_channel", False),
         "title": info["title"],
         "uploader": info.get("uploader"),
         "site": info.get("site"),
@@ -411,31 +418,103 @@ async def download_media(request: Request, body: MediaDownloadModel, user: User 
     if len(running) >= MAX_MEDIA_JOBS:
         raise HTTPException(status_code=429, detail=f"You already have {len(running)} downloads running. Wait for one to finish.")
 
+    from telestore.services import media_sync
+    if body.sync and media_sync.count_for(user_id) >= media_sync.MAX_SYNCS_PER_USER:
+        raise HTTPException(status_code=429, detail=f"You can keep up to {media_sync.MAX_SYNCS_PER_USER} playlists in sync. Remove one in Settings › Integrations first.")
+
     info = await _probe_media(body.url)
+    if body.sync and info["kind"] != "playlist":
+        raise HTTPException(status_code=400, detail="Only playlists and channels can be kept in sync.")
     entries = info["entries"]
     if body.items is not None:
         wanted = set(body.items)
         entries = [e for e in entries if e["index"] in wanted]
-        if not entries:
+        # Syncing with nothing picked means: only the videos that come out from now on
+        if not entries and not body.sync:
             raise HTTPException(status_code=400, detail="Pick at least one video.")
 
     remote_transfer_manager.start_worker(request.app)
-    tasks = remote_transfer_manager.enqueue_media(user_id, info, entries, body.choice.model_dump(), destination, chat_id)
+    choice = body.choice.model_dump()
+    tasks = remote_transfer_manager.enqueue_media(user_id, info, entries, choice, destination, chat_id) if entries else []
+    sync = media_sync.create(user_id, info, choice, destination, chat_id) if body.sync else None
     count = len(tasks)
     what = "audio" if body.choice.mode == "audio" else "video"
+    message = f"Downloading {count} {what} {'file' if count == 1 else 'files'}." if count > 1 or what == "audio" else "Downloading the video."
+    if sync:
+        message = (message + " New videos will download by themselves.") if count else "Synced: new videos will download by themselves."
     return {
         "success": True,
-        "message": f"Downloading {count} {what} {'file' if count == 1 else 'files'}." if count > 1 or what == "audio" else "Downloading the video.",
+        "message": message,
         "count": count,
-        "group_id": tasks[0].get("group_id"),
+        "group_id": tasks[0].get("group_id") if tasks else None,
         "tasks": tasks,
+        "sync": sync,
     }
 
 
 @router.get("/media/settings")
 async def media_settings(user: User = Depends(require_auth)):
-    from telestore.services.media_download_service import settings
-    return settings()
+    from telestore.services.media_download_service import get_settings
+    return await get_settings()
+
+
+@router.post("/media/update")
+async def update_media_downloader(user: User = Depends(require_auth)):
+    """Installs the newest yt-dlp on the server (owner); downloads that are running finish first."""
+    from telestore.services.media_download_service import MediaError, update_yt_dlp
+    if not _is_owner(user):
+        raise HTTPException(status_code=403, detail="Only the owner can update the downloader.")
+    try:
+        return await update_yt_dlp()
+    except MediaError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/media/use-builtin")
+async def use_builtin_media_downloader(user: User = Depends(require_auth)):
+    from telestore.services.media_download_service import use_builtin_yt_dlp
+    if not _is_owner(user):
+        raise HTTPException(status_code=403, detail="Only the owner can change the downloader.")
+    return await asyncio.to_thread(use_builtin_yt_dlp)
+
+
+def _sync_user(user: User) -> str:
+    return str(user.telegram_user_id or user.username)
+
+
+@router.get("/media/syncs")
+async def list_media_syncs(user: User = Depends(require_auth)):
+    from telestore.services import media_sync
+    return {"syncs": media_sync.list_for(_sync_user(user)), "every_hours": media_sync.CHECK_EVERY.total_seconds() / 3600}
+
+
+@router.post("/media/syncs/{sync_id}")
+async def update_media_sync(sync_id: str, body: MediaSyncUpdateModel, user: User = Depends(require_upload)):
+    from telestore.services import media_sync
+    sync = media_sync.set_enabled(_sync_user(user), sync_id, body.enabled)
+    if not sync:
+        raise HTTPException(status_code=404, detail="That synced playlist wasn't found.")
+    return sync
+
+
+@router.post("/media/syncs/{sync_id}/check")
+async def check_media_sync(request: Request, sync_id: str, user: User = Depends(require_upload)):
+    """Looks for new videos now instead of waiting for the next check."""
+    from telestore.services import media_sync
+    doc = media_sync._coll().find_one({"user_id": _sync_user(user), "sync_id": sync_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="That synced playlist wasn't found.")
+    remote_transfer_manager.start_worker(request.app)
+    found = await media_sync.check(doc)
+    return {"new": found, "sync": media_sync._public(media_sync._coll().find_one({"sync_id": sync_id}))}
+
+
+@router.delete("/media/syncs/{sync_id}")
+async def delete_media_sync(sync_id: str, user: User = Depends(require_auth)):
+    from telestore.services import media_sync
+    if not media_sync.remove(_sync_user(user), sync_id):
+        raise HTTPException(status_code=404, detail="That synced playlist wasn't found.")
+    return {"success": True}
 
 
 @router.post("/media/cookies")

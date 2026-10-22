@@ -46,6 +46,8 @@ describe("row helpers", () => {
         expect(kindLabel({ isGroup: true, group_type: "instagram" })).toBe("Instagram");
         expect(kindLabel({ type: "remote", source_type: "media" })).toBe("Video download");
         expect(kindLabel({ isGroup: true, group_type: "media" })).toBe("Playlist");
+        expect(statusInfo({ status: "paused_quota", source_type: "media" }).label).toBe("Waiting");
+        expect(statusInfo({ status: "paused_quota", source_type: "gdrive_file" }).label).toBe("Quota pause");
     });
     it("offers the right buttons", () => {
         expect(rowActions({ type: "upload", status: "uploading" })).toMatchObject({ pause: true, cancel: true, retry: false });

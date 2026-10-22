@@ -11,6 +11,19 @@ import { useSaveDestination } from "./SaveDestination";
 
 const LINK = /^(https?:\/\/)?[^\s/]+\.[^\s/]+\/\S+/i;
 
+// Only the link: chat apps often copy the message time or text along with it
+const cleanLink = (text) => {
+    const match = /https?:\/\/\S+/i.exec(text);
+    return match ? match[0].replace(/[.,;)\]>"']+$/, "") : text;
+};
+
+const SUBTITLES = [
+    { value: "", label: "No subtitles" },
+    { value: "en", label: "English subtitles" },
+    { value: "hi", label: "Hindi subtitles" },
+    { value: "all", label: "All subtitle languages" },
+];
+
 const QUALITIES = [
     { value: "best", label: "Best available" },
     { value: "1080", label: "1080p" },
@@ -47,7 +60,8 @@ export const MediaDownloadDialog = ({ open, onOpenChange, defaultDestination, us
     const [mode, setMode] = useState("video");
     const [quality, setQuality] = useState("best");
     const [audioFormat, setAudioFormat] = useState("mp3");
-    const [subtitles, setSubtitles] = useState(false);
+    const [subtitles, setSubtitles] = useState("");
+    const [sync, setSync] = useState(false);
     const [picked, setPicked] = useState(new Set());
     const lastPreviewed = useRef("");
     const save = useSaveDestination({ open, defaultDestination, userEmail, onChange: () => setError("") });
@@ -58,6 +72,7 @@ export const MediaDownloadDialog = ({ open, onOpenChange, defaultDestination, us
         setUrl("");
         setPreview(null);
         setError("");
+        setSync(false);
         lastPreviewed.current = "";
     }, [open]);
 
@@ -107,14 +122,14 @@ export const MediaDownloadDialog = ({ open, onOpenChange, defaultDestination, us
 
     const submit = async (e) => {
         e.preventDefault();
-        if (!preview || save.blocked || count === 0)
+        if (!preview || save.blocked || (count === 0 && !sync))
             return;
         setBusy(true);
         setError("");
         try {
-            const choice = mode === "audio" ? { mode, audio_format: audioFormat } : { mode, quality, subtitles };
+            const choice = mode === "audio" ? { mode, audio_format: audioFormat } : { mode, quality, subtitles: subtitles || null };
             const items = isPlaylist ? [...picked].sort((a, b) => a - b) : undefined;
-            const res = await api.downloadMedia(url.trim(), choice, save.destination, items);
+            const res = await api.downloadMedia(url.trim(), choice, save.destination, items, isPlaylist && sync);
             toast.success(res.message || "Download started", { description: "Follow it in Transfers." });
             window.dispatchEvent(new CustomEvent("remoteTransferAdded"));
             onOpenChange(false);
@@ -141,7 +156,7 @@ export const MediaDownloadDialog = ({ open, onOpenChange, defaultDestination, us
 
           <div className="grid gap-1.5">
             <Label htmlFor="media-url">Link</Label>
-            <Input id="media-url" autoFocus inputMode="url" autoComplete="off" placeholder="https://www.youtube.com/watch?v=…" value={url} onChange={(e) => { setUrl(e.target.value); setError(""); }} disabled={busy}/>
+            <Input id="media-url" autoFocus inputMode="url" autoComplete="off" placeholder="https://www.youtube.com/watch?v=…" value={url} onChange={(e) => { setUrl(cleanLink(e.target.value)); setError(""); }} disabled={busy}/>
           </div>
 
           {previewing && (<div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin"/>Reading the link…</div>)}
@@ -153,7 +168,7 @@ export const MediaDownloadDialog = ({ open, onOpenChange, defaultDestination, us
                   <p className="text-sm font-semibold line-clamp-2 break-words">{preview.title}</p>
                   {preview.uploader && <p className="text-xs text-muted-foreground truncate">{preview.uploader}</p>}
                   <p className="text-xs text-muted-foreground">
-                    {isPlaylist ? `Playlist · ${preview.count} ${preview.count === 1 ? "video" : "videos"}` : formatDuration(preview.duration)}
+                    {isPlaylist ? `${preview.is_channel ? "Channel" : "Playlist"} · ${preview.count} ${preview.count === 1 ? "video" : "videos"}${preview.is_channel ? ", newest first" : ""}` : formatDuration(preview.duration)}
                   </p>
                 </div>
               </div>
@@ -186,10 +201,9 @@ export const MediaDownloadDialog = ({ open, onOpenChange, defaultDestination, us
                 <select aria-label="Quality" value={quality} onChange={(e) => setQuality(e.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-sm">
                   {QUALITIES.map((q) => <option key={q.value} value={q.value}>{q.label}</option>)}
                 </select>
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" className="accent-primary" checked={subtitles} onChange={(e) => setSubtitles(e.target.checked)}/>
-                  English subtitles, when there are any
-                </label>
+                <select aria-label="Subtitles" value={subtitles} onChange={(e) => setSubtitles(e.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-sm">
+                  {SUBTITLES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
               </div>) : (<select aria-label="Audio format" value={audioFormat} onChange={(e) => setAudioFormat(e.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-sm justify-self-start">
                 <option value="mp3">MP3 (plays everywhere)</option>
                 <option value="m4a">M4A (smaller, same quality)</option>
@@ -198,14 +212,22 @@ export const MediaDownloadDialog = ({ open, onOpenChange, defaultDestination, us
 
           {save.field}
 
+          {isPlaylist && (<label className="flex items-start gap-2.5 text-sm cursor-pointer">
+              <input type="checkbox" className="accent-primary mt-0.5" checked={sync} onChange={(e) => setSync(e.target.checked)}/>
+              <span className="grid gap-0.5">
+                <span>Also download new videos automatically</span>
+                <span className="text-xs text-muted-foreground">The server checks this {preview.is_channel ? "channel" : "playlist"} every few hours and saves new videos the same way. Manage it in Settings › Integrations.</span>
+              </span>
+            </label>)}
+
           {error && (<div role="alert" className="flex items-start gap-2 p-2.5 rounded-lg border border-destructive/25 bg-destructive/10 text-destructive text-sm">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5"/><span className="min-w-0 break-words">{error}</span>
             </div>)}
 
           <DialogFooter className="gap-2 sm:gap-0">
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button>
-            <Button type="submit" disabled={busy || !preview || save.blocked || count === 0}>
-              {busy ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin"/>Starting…</> : count > 1 ? `Download ${count} ${noun}` : "Download"}
+            <Button type="submit" disabled={busy || !preview || save.blocked || (count === 0 && !(isPlaylist && sync))}>
+              {busy ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin"/>Starting…</> : count === 0 && isPlaylist && sync ? "Sync new videos only" : count > 1 ? `Download ${count} ${noun}` : "Download"}
             </Button>
           </DialogFooter>
         </form>

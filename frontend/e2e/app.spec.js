@@ -152,13 +152,15 @@ test.describe("video and audio downloads", () => {
 
     test("one video as MP3 into the open folder", async ({ page, request }) => {
         const dialog = await openDialog(page);
-        await dialog.getByLabel("Link", { exact: true }).fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+        // Copied from a chat with the message time stuck to it
+        await dialog.getByLabel("Link", { exact: true }).fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ 05:23 PM");
+        await expect(dialog.getByLabel("Link", { exact: true })).toHaveValue("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
         await expect(dialog.getByLabel("Link preview")).toContainText("Never Gonna Give You Up");
         await expect(dialog.getByLabel("Link preview")).toContainText("3:33");
         await dialog.getByRole("radio", { name: "Audio only" }).click();
         await dialog.getByRole("button", { name: "Download", exact: true }).click();
         await expect(page.getByText("Downloading 2 video files.")).toBeVisible();
-        expect(await downloadBody(request)).toEqual({ url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", choice: { mode: "audio", audio_format: "mp3" }, destination: { kind: "home", path: "/Home" } });
+        expect(await downloadBody(request)).toEqual({ url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", choice: { mode: "audio", audio_format: "mp3" }, destination: { kind: "home", path: "/Home" }, sync: false });
     });
 
     test("chosen playlist videos at 720p with subtitles", async ({ page, request }) => {
@@ -168,12 +170,14 @@ test.describe("video and audio downloads", () => {
         await expect(dialog.getByLabel("Playlist videos")).toContainText("1:02:05");
         await dialog.getByRole("checkbox", { name: /Song two/ }).uncheck();
         await dialog.getByLabel("Quality").selectOption("720");
-        await dialog.getByLabel(/English subtitles/).check();
+        await dialog.getByLabel("Subtitles").selectOption("hi");
+        await dialog.getByRole("checkbox", { name: /Also download new videos automatically/ }).check();
         await dialog.getByRole("button", { name: "Download 2 videos" }).click();
         await expect.poll(async () => (await mutations(request)).some((r) => r.path === "/transfers/remote/media")).toBe(true);
         const body = await downloadBody(request);
         expect(body.items).toEqual([1, 3]);
-        expect(body.choice).toEqual({ mode: "video", quality: "720", subtitles: true });
+        expect(body.sync).toBe(true);
+        expect(body.choice).toEqual({ mode: "video", quality: "720", subtitles: "hi" });
     });
 
     test("a refused link says why", async ({ page }) => {
@@ -189,7 +193,27 @@ test.describe("video and audio downloads", () => {
         await expect(page.getByText("yt-dlp 2026.10.21")).toBeVisible();
         await page.getByLabel("cookies.txt file").setInputFiles({ name: "cookies.txt", mimeType: "text/plain", buffer: Buffer.from("# Netscape HTTP Cookie File\n") });
         await expect(page.getByText("Signed in", { exact: true })).toBeVisible();
-        await expect(page.getByText(/Using cookies for youtube.com/)).toBeVisible();
+        await expect(page.getByText(/YouTube confirmed the sign-in/).first()).toBeVisible();
+        await expect(page.getByText("Bot-check helper running")).toBeVisible();
+    });
+
+    test("the owner updates yt-dlp", async ({ page }) => {
+        await page.goto("/settings?tab=integrations");
+        await page.getByRole("button", { name: "Update yt-dlp" }).click();
+        await expect(page.getByText("yt-dlp is now 2026.11.03")).toBeVisible();
+        await expect(page.getByText(/yt-dlp 2026.11.03 \(updated; built-in 2026.10.21\)/)).toBeVisible();
+        await expect(page.getByRole("button", { name: "Use the built-in version" })).toBeVisible();
+    });
+
+    test("synced playlists can be checked, paused and removed", async ({ page, request }) => {
+        await page.goto("/settings?tab=integrations");
+        const panel = page.locator("section").filter({ has: page.getByRole("heading", { name: "Synced playlists" }) });
+        await expect(panel).toContainText("Daily mix");
+        await expect(panel).toContainText("Playlist · MP3 · to /Home/Music");
+        await panel.getByRole("button", { name: "Check now" }).click();
+        await expect(page.getByText("3 new videos queued")).toBeVisible();
+        await panel.getByRole("button", { name: "Pause" }).click();
+        await expect.poll(async () => (await mutations(request)).find((r) => r.path === "/transfers/remote/media/syncs/sync_1")?.body).toBe('{"enabled":false}');
     });
 });
 

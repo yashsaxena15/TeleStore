@@ -32,3 +32,5 @@ yt-dlp-ejs==0.8.0
 mutagen==1.48.1
 brotli==1.2.0
 pycryptodomex==3.24.1
+bgutil-ytdlp-pot-provider==2.0.2
+curl-cffi==0.16.3

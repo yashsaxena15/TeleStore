@@ -313,7 +313,13 @@ export const api = {
 
     // ── Video and audio downloads (yt-dlp) ─────────────────────────────
     mediaPreview: (url) => post('/transfers/remote/media/preview', { url }, { timeout: 90000, fallback: "Couldn't read this link" }),
-    downloadMedia: (url, choice, destination, items) => post('/transfers/remote/media', { url, choice, destination, items }, { timeout: 90000, fallback: "Couldn't start the download" }),
+    downloadMedia: (url, choice, destination, items, sync = false) => post('/transfers/remote/media', { url, choice, destination, items, sync }, { timeout: 90000, fallback: "Couldn't start the download" }),
+    updateMediaDownloader: () => post('/transfers/remote/media/update', undefined, { timeout: 330000, fallback: "Couldn't update the downloader" }),
+    useBuiltinMediaDownloader: () => post('/transfers/remote/media/use-builtin', undefined, { fallback: "Couldn't switch the downloader" }),
+    getMediaSyncs: () => request('/transfers/remote/media/syncs', { soft: { syncs: [] } }),
+    setMediaSyncEnabled: (id, enabled) => post(`/transfers/remote/media/syncs/${enc(id)}`, { enabled }, { fallback: "Couldn't change the sync" }),
+    checkMediaSync: (id) => post(`/transfers/remote/media/syncs/${enc(id)}/check`, undefined, { timeout: 120000, fallback: "Couldn't check for new videos" }),
+    removeMediaSync: (id) => request(`/transfers/remote/media/syncs/${enc(id)}`, { method: 'DELETE', fallback: "Couldn't remove the sync" }),
     getMediaSettings: () => request('/transfers/remote/media/settings', { soft: null }),
     uploadMediaCookies(file) {
         const formData = new FormData();
