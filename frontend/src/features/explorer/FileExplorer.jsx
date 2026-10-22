@@ -41,6 +41,7 @@ const FolderDownloadDialog = lazy(() => import("@/features/explorer/dialogs/Fold
 const WebDAVMountDialog = lazy(() => import("@/features/cloud/WebDAVMountDialog").then((m) => ({ default: m.WebDAVMountDialog })));
 const VaultModal = lazy(() => import("@/features/vault/VaultModal").then((m) => ({ default: m.VaultModal })));
 const RemoteDownloadDialog = lazy(() => import("@/features/cloud/RemoteDownloadDialog").then((m) => ({ default: m.RemoteDownloadDialog })));
+const InstagramImportDialog = lazy(() => import("@/features/cloud/InstagramImportDialog").then((m) => ({ default: m.InstagramImportDialog })));
 // Mounts a lazy dialog only while it is open
 const WhenOpen = ({ open, children }) => (open ? <Suspense fallback={null}>{children}</Suspense> : null);
 const SettingsContent = lazy(() => import("@/features/settings/SettingsContent").then((m) => ({ default: m.SettingsContent })));
@@ -130,6 +131,7 @@ export const FileExplorer = () => {
     const [userEmail, setUserEmail] = useState("");
     const [username, setUsername] = useState("");
     const [remoteDownloadOpen, setRemoteDownloadOpen] = useState(false);
+    const [instagramOpen, setInstagramOpen] = useState(false);
     // The signed-in user's email (vault setup) and username (WebDAV details)
     useEffect(() => {
         api.fetchUserProfile().then(p => {
@@ -599,6 +601,15 @@ export const FileExplorer = () => {
             return "Open My Drive, or a folder inside it, to add files.";
         return null;
     };
+    // Where "Import from Instagram" saves by default: the place that is open now
+    const instagramDefaultDestination = () => {
+        const realDriveFolder = !["root", "google_drive", "starred", "trash", "shared_with_me"].includes(cloudFolderId);
+        if (isCloudMode && cloudAccountId && realDriveFolder)
+            return { kind: "gdrive", accountId: cloudAccountId, folderId: cloudFolderId, folderName: cloudBreadcrumbs[cloudBreadcrumbs.length - 1]?.name || "My Drive" };
+        if (isVaultMode)
+            return { kind: "vault", path: "/Vault" };
+        return { kind: "home", path: currentApiPath.startsWith("/Home") ? currentApiPath : "/Home" };
+    };
     // Actions from the New menu, the phone + button, the account menu and the command palette
     const runShellAction = (id) => {
         switch (id) {
@@ -620,6 +631,9 @@ export const FileExplorer = () => {
             }
             case "remote-leech":
                 setRemoteDownloadOpen(true);
+                return;
+            case "instagram-import":
+                setInstagramOpen(true);
                 return;
             case "connect-drive":
                 setConnectDriveOpen(true);
@@ -731,5 +745,7 @@ export const FileExplorer = () => {
       <WhenOpen open={showVaultModal}><VaultModal isOpen={showVaultModal} onClose={() => setShowVaultModal(false)} onSuccess={handleVaultUnlocked} userEmail={userEmail}/></WhenOpen>
 
       <WhenOpen open={remoteDownloadOpen}><RemoteDownloadDialog isOpen={remoteDownloadOpen} onClose={() => setRemoteDownloadOpen(false)} defaultPath={currentApiPath}/></WhenOpen>
+
+      <WhenOpen open={instagramOpen}><InstagramImportDialog open={instagramOpen} onOpenChange={setInstagramOpen} userEmail={userEmail} defaultDestination={instagramDefaultDestination()}/></WhenOpen>
     </div>);
 };

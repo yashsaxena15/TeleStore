@@ -2,7 +2,9 @@
 
 from fastapi import APIRouter, Request, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
-from typing import Optional
+import asyncio
+import posixpath
+from typing import Literal, Optional
 
 from telestore.security.credentials import require_auth, require_upload, User
 from telestore.services.remote_transfer_manager import remote_transfer_manager
@@ -178,3 +180,158 @@ async def clear_completed_remote_tasks(
     user_id = str(user.telegram_user_id or user.username)
     deleted_count = remote_transfer_manager.clear_completed(user_id)
     return {"success": True, "cleared_count": deleted_count}
+
+
+# ── Import from Instagram ──────────────────────────────────────────────────────────────────
+MAX_INSTAGRAM_JOBS = 3  # posts waiting or running per user
+
+
+class InstagramUrlModel(BaseModel):
+    url: str
+
+
+class InstagramDestinationModel(BaseModel):
+    kind: Literal["home", "vault", "gdrive"]
+    path: Optional[str] = None
+    account_id: Optional[str] = None
+    folder_id: Optional[str] = None
+    folder_name: Optional[str] = None
+
+
+class InstagramImportModel(BaseModel):
+    url: str
+    destination: InstagramDestinationModel
+
+
+class InstagramLoginModel(BaseModel):
+    username: str
+    password: str
+
+
+class InstagramCodeModel(BaseModel):
+    code: str
+
+
+async def _read_instagram_post(url: str) -> dict:
+    from telestore.services.instagram_service import InstagramError, get_client, parse_instagram_url
+    try:
+        _, shortcode = parse_instagram_url(url)
+        return await get_client().get_post(shortcode)
+    except InstagramError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+def _index_chat(user: User) -> int:
+    if not user.telegram_user_id:
+        raise HTTPException(status_code=400, detail="TELEGRAM_NOT_VERIFIED: Connect your Telegram account in Settings › Account first.")
+    user_data = database.Users.find_one({"telegram_user_id": user.telegram_user_id})
+    if not user_data or user_data.get("index_chat_id") is None:
+        raise HTTPException(status_code=400, detail="Set your index chat in Settings › Connection first.")
+    return user_data["index_chat_id"]
+
+
+def _instagram_destination(request: Request, dest: InstagramDestinationModel, user: User) -> tuple:
+    """(destination dict for the manager, index chat ID or None); raises 4xx for places that can't take files."""
+    from telestore.api.routes.vault import is_vault_unlocked
+
+    if dest.kind == "gdrive":
+        ids = [user.username] + ([str(user.telegram_user_id)] if user.telegram_user_id else [])
+        account = database.CloudAccounts.get_account_raw(account_id=dest.account_id or "", user_id=ids) if dest.account_id else None
+        if not account:
+            raise HTTPException(status_code=404, detail="Google Drive account not found.")
+        folder_id = dest.folder_id or "my_drive"
+        if folder_id in ("root", "google_drive", "starred", "trash", "shared_with_me"):
+            raise HTTPException(status_code=400, detail="Pick a folder in My Drive.")
+        folder_id = "root" if folder_id == "my_drive" else folder_id
+        label = f"{account.get('account_name') or 'Google Drive'} / {dest.folder_name or 'My Drive'}"
+        return {"kind": "gdrive", "account_id": dest.account_id, "account_user_ids": ids, "folder_id": folder_id, "label": label}, None
+
+    path = posixpath.normpath("/" + (dest.path or "").strip().strip("/"))
+    root = "/Vault" if dest.kind == "vault" else "/Home"
+    if path != root and not path.startswith(root + "/"):
+        raise HTTPException(status_code=400, detail=f"Pick a folder inside {'Private Vault' if dest.kind == 'vault' else 'Home'}.")
+    if dest.kind == "vault" and not is_vault_unlocked(request):
+        raise HTTPException(status_code=403, detail="Unlock your Private Vault first.")
+    return {"kind": dest.kind, "path": path}, _index_chat(user)
+
+
+@router.post("/instagram/preview")
+async def preview_instagram(body: InstagramUrlModel, user: User = Depends(require_upload)):
+    """What an Instagram link holds: the account, caption and each photo or video."""
+    from telestore.services.instagram_service import get_client
+    post = await _read_instagram_post(body.url)
+    return {
+        "shortcode": post["shortcode"],
+        "owner": post["owner"],
+        "caption": post["caption"],
+        "date": post["date"],
+        "thumbnail": await get_client().thumbnail(post["items"][0]["thumbnail"]),
+        "items": [{"index": it["index"], "is_video": it["is_video"]} for it in post["items"]],
+    }
+
+
+@router.post("/instagram")
+async def import_instagram(request: Request, body: InstagramImportModel, user: User = Depends(require_upload)):
+    """Queues every photo and video of a post or reel, saved to Home, the Private Vault or a Google Drive."""
+    destination, chat_id = _instagram_destination(request, body.destination, user)
+    user_id = str(user.telegram_user_id or user.username)
+
+    from telestore.services.remote_transfer_manager.helpers import get_remote_db
+    waiting = get_remote_db()["RemoteTransfers"].distinct("instagram_shortcode", {
+        "user_id": user_id, "source_type": "instagram", "status": {"$in": ["queued", "downloading", "uploading_tg"]},
+    })
+    if len(waiting) >= MAX_INSTAGRAM_JOBS:
+        raise HTTPException(status_code=429, detail=f"You already have {len(waiting)} Instagram imports running. Wait for one to finish.")
+
+    post = await _read_instagram_post(body.url)
+    remote_transfer_manager.start_worker(request.app)
+    tasks = remote_transfer_manager.enqueue_instagram(user_id, post, body.url.strip(), destination, chat_id)
+    count = len(tasks)
+    return {
+        "success": True,
+        "message": f"Importing {count} {'item' if count == 1 else 'items'} from @{post['owner']}.",
+        "count": count,
+        "group_id": tasks[0].get("group_id"),
+        "tasks": tasks,
+    }
+
+
+def _require_owner(user: User) -> None:
+    from telestore.security.credentials import is_owner_account
+    if not is_owner_account(user.username, {"telegram_user_id": user.telegram_user_id}):
+        raise HTTPException(status_code=403, detail="Only the owner can connect an Instagram account.")
+
+
+@router.get("/instagram/session")
+async def instagram_session(user: User = Depends(require_auth)):
+    from telestore.services.instagram_service import get_client
+    username = get_client().connected_username()
+    return {"connected": bool(username), "username": username}
+
+
+@router.post("/instagram/session/login")
+async def instagram_login(body: InstagramLoginModel, user: User = Depends(require_auth)):
+    from telestore.services.instagram_service import InstagramError, get_client
+    _require_owner(user)
+    try:
+        return await asyncio.to_thread(get_client().login, body.username, body.password)
+    except InstagramError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/instagram/session/2fa")
+async def instagram_two_factor(body: InstagramCodeModel, user: User = Depends(require_auth)):
+    from telestore.services.instagram_service import InstagramError, get_client
+    _require_owner(user)
+    try:
+        return await asyncio.to_thread(get_client().finish_two_factor, body.code)
+    except InstagramError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/instagram/session")
+async def instagram_logout(user: User = Depends(require_auth)):
+    from telestore.services.instagram_service import get_client
+    _require_owner(user)
+    get_client().logout()
+    return {"connected": False, "username": None}

@@ -627,6 +627,210 @@ class RemoteTransferManager:
         doc["_id"] = str(doc["_id"])
         return doc
 
+    def enqueue_instagram(
+        self,
+        user_id: str,
+        post: Dict[str, Any],
+        source_url: str,
+        destination: Dict[str, Any],
+        chat_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """One queued task per photo or video of an Instagram post.
+
+        destination is {"kind": "home"|"vault", "path"} or {"kind": "gdrive", "account_id",
+        "account_user_ids", "folder_id", "label"}. A carousel shares one group in Transfers.
+        """
+        from telestore.services.instagram_service import file_name_for
+
+        coll = get_remote_db()["RemoteTransfers"]
+        now = datetime.now(timezone.utc)
+        items = post["items"]
+        is_drive = destination["kind"] == "gdrive"
+        group_id = f"grp_{secrets.token_hex(6)}" if len(items) > 1 else None
+        caption = (post.get("caption") or "").strip()
+        docs = []
+        for item in items:
+            doc = {
+                "task_id": f"rt_{secrets.token_hex(6)}",
+                "user_id": str(user_id),
+                "chat_id": chat_id or 0,
+                "source_url": source_url,
+                "source_type": "instagram",
+                "instagram_shortcode": post["shortcode"],
+                "instagram_index": item["index"],
+                "instagram_media_url": item["url"],
+                "instagram_caption": caption,
+                "filename": file_name_for(post.get("owner"), post["shortcode"], item, len(items)),
+                "filesize": 0,
+                "transferred_bytes": 0,
+                "speed_bps": 0,
+                "progress": 0,
+                "eta_seconds": 0,
+                "status": "queued",
+                "phase": "Queued",
+                "error_message": None,
+                "created_at": now,
+                "updated_at": now,
+            }
+            if is_drive:
+                doc.update({
+                    "cloud_account_id": destination["account_id"],
+                    "cloud_account_user_ids": destination["account_user_ids"],
+                    "target_gdrive_folder_id": destination["folder_id"],
+                    "destination_path": destination.get("label") or "Google Drive",
+                    "is_vault": False,
+                })
+            else:
+                doc.update({"destination_path": destination["path"], "is_vault": destination["kind"] == "vault"})
+            if group_id:
+                doc.update({"group_id": group_id, "group_name": f"@{post.get('owner')} · {post['shortcode']}", "group_type": "instagram", "group_total_items": len(items)})
+            coll.insert_one(doc)
+            doc["_id"] = str(doc["_id"])
+            docs.append(doc)
+        return docs
+
+    async def _execute_instagram(self, task_doc: dict, cancel_event: threading.Event):
+        from telestore.services.instagram_service import InstagramError, get_client
+
+        task_id = task_doc["task_id"]
+        user_id = task_doc["user_id"]
+        filename = task_doc.get("filename") or "instagram.bin"
+        client = get_client()
+
+        tg_dir = os.path.join(os.getcwd(), "tg_files", f"remote_{task_id}")
+        os.makedirs(tg_dir, exist_ok=True)
+        local_path = os.path.join(tg_dir, filename)
+
+        last_report = [0.0]
+        started = time.time()
+
+        def on_progress(done: int, total: int):
+            now_t = time.time()
+            if now_t - last_report[0] < 0.8 and done != total:
+                return
+            last_report[0] = now_t
+            speed = int(done / max(0.1, now_t - started))
+            self._update_task(task_id, {
+                "status": "downloading",
+                "transferred_bytes": done,
+                "filesize": total or done,
+                "progress": min(90.0, round(done / total * 90, 1)) if total else 0,
+                "speed_bps": speed,
+                "eta_seconds": int((total - done) / speed) if speed and total > done else 0,
+                "phase": "Downloading from Instagram",
+            })
+
+        try:
+            self._update_task(task_id, {"status": "downloading", "phase": "Downloading from Instagram", "speed_bps": 0})
+            try:
+                size = await client.download(task_doc["instagram_media_url"], local_path, on_progress, cancel_event.is_set)
+            except InstagramError:
+                # Instagram's media links expire after a few hours (e.g. a retry the next day): read the post again
+                post = await client.get_post(task_doc["instagram_shortcode"])
+                fresh = next((it for it in post["items"] if it["index"] == task_doc.get("instagram_index")), None)
+                if not fresh:
+                    raise InstagramError("This photo or video is no longer in the post.")
+                self._update_task(task_id, {"instagram_media_url": fresh["url"]})
+                size = await client.download(fresh["url"], local_path, on_progress, cancel_event.is_set)
+
+            if cancel_event.is_set():
+                raise InterruptedError("Cancelled by user")
+
+            if task_doc.get("cloud_account_id"):
+                await self._instagram_to_drive(task_doc, local_path, size, cancel_event)
+                where = "Google Drive"
+            else:
+                await self._instagram_to_telegram(task_doc, local_path, size)
+                where = "Private Vault" if task_doc.get("is_vault") else "TeleStore"
+
+            self._update_task(task_id, {
+                "status": "completed",
+                "progress": 100.0,
+                "speed_bps": 0,
+                "eta_seconds": 0,
+                "filesize": size,
+                "transferred_bytes": size,
+                "phase": f"Saved to {where}",
+            })
+            logger.info(f"[INSTAGRAM] {filename} ({size} bytes) saved to {where} for user {user_id}")
+        finally:
+            shutil.rmtree(tg_dir, ignore_errors=True)
+
+    async def _instagram_to_telegram(self, task_doc: dict, local_path: str, size: int):
+        task_id = task_doc["task_id"]
+        filename = task_doc.get("filename") or "instagram.bin"
+        destination_path = task_doc.get("destination_path") or "/Home"
+        user_id = task_doc["user_id"]
+        self._update_task(task_id, {"status": "uploading_tg", "phase": "Saving to Telegram", "progress": 92.0, "speed_bps": 0})
+
+        bot_manager = self._bot_manager
+        bot = bot_manager.get_least_busy_client() if bot_manager else None
+        if not bot:
+            raise RuntimeError("No Telegram bot is available right now. Try again in a minute.")
+
+        caption = f"{task_doc.get('instagram_caption') or filename}\n\n{task_doc.get('source_url') or ''}".strip()
+        file_type = get_file_type(filename)
+        res = await upload_part_task(
+            part_file_path=local_path,
+            part_index=1,
+            file_name=filename,
+            start_byte=0,
+            part_size=size,
+            chat_id=task_doc["chat_id"],
+            bot_manager=bot_manager,
+            fallback_client=bot,
+            caption=caption[:1000],  # Telegram captions stop at 1024 characters
+            semaphore=None,
+            is_single_part=True,
+            file_type=file_type,
+        )
+        database.Files.create_folder_path(destination_path, owner_id=str(user_id))
+        database.Files.add_file(
+            chat_id=task_doc["chat_id"],
+            message_id=res["message_id"],
+            thumbnail=res.get("thumbnail"),
+            file_type=file_type,
+            file_unique_id=res["file_unique_id"],
+            file_size=size,
+            file_name=filename,
+            file_caption=caption[:1000],
+            file_path=destination_path,
+            owner_id=str(user_id),
+            is_vault=bool(task_doc.get("is_vault")),
+        )
+
+    async def _instagram_to_drive(self, task_doc: dict, local_path: str, size: int, cancel_event: threading.Event):
+        import aiofiles
+        from telestore.services.google_drive_manager import GoogleDriveManager
+
+        task_id = task_doc["task_id"]
+        self._update_task(task_id, {"status": "uploading_tg", "phase": "Saving to Google Drive", "progress": 92.0, "speed_bps": 0})
+        account = database.CloudAccounts.get_account_raw(
+            account_id=task_doc["cloud_account_id"],
+            user_id=task_doc.get("cloud_account_user_ids") or task_doc["user_id"],
+        )
+        if not account:
+            raise ValueError("That Google Drive account is no longer connected.")
+        access_token = await GoogleDriveManager.get_valid_access_token(account)
+        session_url = await GoogleDriveManager.initiate_resumable_upload(
+            access_token=access_token,
+            file_name=task_doc.get("filename") or "instagram.bin",
+            file_size=size,
+            parent_id=task_doc.get("target_gdrive_folder_id") or "root",
+        )
+
+        async def read_file():
+            async with aiofiles.open(local_path, "rb") as f:
+                while chunk := await f.read(1024 * 1024):
+                    yield chunk
+
+        await GoogleDriveManager.upload_resumable_stream(
+            upload_session_url=session_url,
+            async_stream_gen=read_file(),
+            total_size=size,
+            cancel_event=cancel_event,
+        )
+
     async def _ensure_gdrive_subfolders(self, access_token: str, base_folder_id: str, rel_path: str) -> str:
         from telestore.services.google_drive_manager import GoogleDriveManager
         segments = [s.strip() for s in rel_path.replace("\\", "/").split("/") if s.strip()]
@@ -1003,6 +1207,10 @@ class RemoteTransferManager:
     async def _run_download_and_upload(self, task_doc: dict, cancel_event: threading.Event):
         if task_doc.get("source_type") == "telegram_to_gdrive":
             await self._execute_telegram_to_gdrive(task_doc, cancel_event)
+            return
+
+        if task_doc.get("source_type") == "instagram":
+            await self._execute_instagram(task_doc, cancel_event)
             return
 
         if task_doc.get("is_range_part"):

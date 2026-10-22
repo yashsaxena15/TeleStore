@@ -48,6 +48,8 @@ const ROUTES = {
     "/vault/status": { is_setup: true, is_unlocked: false, email: "ow***er@example.com", remaining_seconds: 0, auto_lock_minutes: 15 },
     "/api/health": { status: "healthy" },
     "/auth/google/config": { client_id: null },
+    "/transfers/remote/instagram/session": { connected: false, username: null },
+    "/cloud/acc1/files": { files: [{ id: "fold9", name: "Instagram saves", is_folder: true }, { id: "doc1", name: "notes.txt", is_folder: false }] },
     "/files/analytics": {
         total_bytes: 214_000_000_000, total_files: 1843, total_folders: 96, starred_count: 12, trash_count: 7, trash_bytes: 3_400_000_000,
         by_category: { video: { count: 312, bytes: 168_000_000_000 }, audio: { count: 640, bytes: 9_800_000_000 }, photo: { count: 702, bytes: 6_100_000_000 }, document: { count: 151, bytes: 1_900_000_000 }, archive: { count: 31, bytes: 26_000_000_000 }, other: { count: 7, bytes: 2_200_000_000 } },
@@ -105,6 +107,14 @@ const mutation = (req, res, url, body) => {
     }
     if (url.pathname === "/auth/forgot-password/request") {
         return send(res, 200, { message: "If that account has an email address, we've sent a 6-digit code to it." });
+    }
+    if (url.pathname === "/transfers/remote/instagram/preview") {
+        return body.includes("/p/MISSING")
+            ? send(res, 400, { detail: "This post is private or was removed." })
+            : send(res, 200, { shortcode: "ABCdef12345", owner: "nasa", caption: "Earth from orbit", thumbnail: null, items: [{ index: 1, is_video: false }, { index: 2, is_video: true }] });
+    }
+    if (url.pathname === "/transfers/remote/instagram") {
+        return send(res, 200, { success: true, message: "Importing 2 items from @nasa.", count: 2, tasks: [] });
     }
     if (url.pathname === "/vault/unlock") {
         return send(res, 429, { detail: "Too many wrong attempts. Try again in 1 minute." }, "application/json");
