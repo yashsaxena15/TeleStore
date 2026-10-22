@@ -229,12 +229,12 @@ export const UsersSection = () => {
                     <td className="px-4 py-2.5 max-w-0 w-full">
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="font-medium truncate">{name}</span>
-                        <span className={cn("shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded", user.userType === "google" ? "bg-info/15 text-info" : "bg-muted text-muted-foreground")}>{user.userType === "google" ? "Google" : "Local"}</span>
+                        <span className={cn("shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded", user.userType === "google" ? "bg-info/15 text-info" : "bg-muted text-muted-foreground")}>{user.userType === "google" ? "Google" : "Password"}</span>
                       </div>
                       {user.email && user.email !== name && <p className="text-xs text-muted-foreground truncate">{user.email}</p>}
                       <p className={cn("text-[11px] mt-0.5", setup.ready ? "text-success" : "text-warning")} title={setup.hint}>{setup.label}</p>
                     </td>
-                    <td className="px-2 py-2.5 hidden md:table-cell whitespace-nowrap text-muted-foreground">{user.telegramUsername ? `@${user.telegramUsername}` : "Not connected"}</td>
+                    <td className="px-2 py-2.5 hidden md:table-cell whitespace-nowrap text-muted-foreground">{user.telegramUsername ? `@${user.telegramUsername}` : user.hasTelegram ? "Connected" : "Not connected"}</td>
                     <td className="px-2 py-2.5 text-center" title={locked ? "The owner account can't be turned off" : undefined}><Switch checked={user.active} disabled={locked} onCheckedChange={(v) => saveUser(user, { active: v })} aria-label={`${name} is active`}/></td>
                     <td className="px-2 py-2.5 text-center" title={locked ? "The owner account can always upload" : undefined}><Switch checked={user.canUpload} disabled={locked} onCheckedChange={(v) => saveUser(user, { canUpload: v })} aria-label={`${name} can upload`}/></td>
                     <td className="pr-3 py-2.5 text-right">

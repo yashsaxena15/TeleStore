@@ -39,7 +39,7 @@ const ROUTES = {
     "/user/profile": { username: "admin", email: "owner@example.com", telegram_first_name: "Yash" },
     "/user/is-owner": { is_owner: true },
     "/user": { users: [
-        { id: "1", username: "admin", email: "owner@example.com", telegram_username: "yash", active: true, can_upload: true, is_owner: true, has_telegram: true, has_index_chat: true, user_type: "local" },
+        { id: "1", username: "admin", email: "owner@example.com", active: true, can_upload: true, is_owner: true, has_telegram: true, has_index_chat: true, user_type: "local" },
         { id: "u2", username: "family", email: "family@example.com", active: true, can_upload: true, has_telegram: false, has_index_chat: false, user_type: "local" },
     ] },
     "/user/index-chat": { index_chat_id: -1004314578828 },

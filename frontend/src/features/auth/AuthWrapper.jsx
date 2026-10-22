@@ -58,7 +58,7 @@ export const AuthWrapper = ({ children }) => {
                     if (response.status === 401) {
                         showError("Authentication Required", "Your session has expired or you're not logged in. Please log in again.", "auth", undefined, // No retry
                         () => navigate("/login"), // On dismiss, go to login
-                        () => navigate("/login") // On configure backend, go to login
+                        authService.isTauri() ? () => navigate("/login") : undefined // Desktop app: pick another server
                         );
                     }
                     else {
@@ -77,7 +77,7 @@ export const AuthWrapper = ({ children }) => {
                 // Handle network errors with our error dialog
                 showError("Connection Error", "Failed to connect to the backend server. Please check your connection and try again.", "network", undefined, // No retry for now
                 () => navigate("/login"), // On dismiss, go to login
-                () => navigate("/login") // On configure backend, go to login
+                authService.isTauri() ? () => navigate("/login") : undefined // Desktop app: pick another server
                 );
                 // Redirect to login and indicate there's a backend connectivity issue
                 setIsAuthenticated(false);
