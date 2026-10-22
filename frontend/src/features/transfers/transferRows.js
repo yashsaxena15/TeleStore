@@ -72,6 +72,7 @@ export function kindLabel(item) {
 /** Short status text and its colour tone (a theme token name). */
 export function statusInfo(item) {
     const s = item.status;
+    if ((s === "paused_quota" || item.isPausedQuota) && (item.source_type === "media" || item.group_type === "media")) return { label: "Waiting", tone: "warning" };
     if (s === "paused_quota" || item.isPausedQuota) return { label: "Quota pause", tone: "warning" };
     if (s === "discovering" || item.isDiscovering) return { label: "Scanning", tone: "info" };
     if (s === "completed") return { label: "Done", tone: "success" };

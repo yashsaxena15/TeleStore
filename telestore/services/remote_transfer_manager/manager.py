@@ -25,6 +25,10 @@ from telestore.services.remote_transfer_manager.pipeline import PipelinedStreamW
 
 # Largest piece sent to Telegram as one message; bigger files go up in parts of this size
 TELEGRAM_PART_SIZE = 1950 * 1024 * 1024
+# Video downloads: pause between videos, and how long to wait (and how often) when YouTube blocks
+MEDIA_GAP_S = 5
+MEDIA_BLOCK_COOLDOWN = timedelta(minutes=30)
+MEDIA_BLOCK_RETRIES = 3
 
 
 class RemoteTransferManager:
@@ -39,7 +43,9 @@ class RemoteTransferManager:
         self.cancel_events: Dict[str, threading.Event] = {}
         self._running = False
         self._queue_worker_task: Optional[asyncio.Task] = None
+        self._sync_task: Optional[asyncio.Task] = None
         self._bot_manager = None
+        self._last_media_at = 0.0
 
     def set_bot_manager(self, bot_manager):
         self._bot_manager = bot_manager
@@ -71,6 +77,8 @@ class RemoteTransferManager:
             self._running = True
             self.init_db()
             self._queue_worker_task = asyncio.create_task(self._process_queue_loop())
+            from telestore.services.media_sync import run_forever as run_media_syncs
+            self._sync_task = asyncio.create_task(run_media_syncs())
             logger.info("Remote Transfer Manager background worker loop started.")
 
     async def _process_queue_loop(self):
@@ -841,12 +849,20 @@ class RemoteTransferManager:
             })
 
         try:
+            # A short pause between the videos of a playlist, so the site doesn't see a burst
+            wait = MEDIA_GAP_S - (time.time() - self._last_media_at)
+            if wait > 0:
+                self._update_task(task_id, {"status": "downloading", "phase": "Waiting a moment before the next video", "speed_bps": 0})
+                await asyncio.sleep(wait)
             self._update_task(task_id, {"status": "downloading", "phase": "Reading the link", "speed_bps": 0})
-            path = await media.download(task_doc["source_url"], task_doc.get("media_choice") or {}, tg_dir, on_progress, cancel_event.is_set)
+            try:
+                path, video_id = await media.download(task_doc["source_url"], task_doc.get("media_choice") or {}, tg_dir, on_progress, cancel_event.is_set)
+            finally:
+                self._last_media_at = time.time()
             if cancel_event.is_set():
                 raise InterruptedError("Cancelled by user")
             size = os.path.getsize(path)
-            file_name = os.path.basename(path)
+            file_name = self._media_file_name(task_doc, os.path.basename(path), video_id)
             self._update_task(task_id, {"filename": file_name, "filesize": size, "transferred_bytes": size})
 
             if task_doc.get("cloud_account_id"):
@@ -866,6 +882,19 @@ class RemoteTransferManager:
             logger.info(f"[MEDIA] {file_name} ({size} bytes) saved to {where} for user {task_doc['user_id']}")
         finally:
             shutil.rmtree(tg_dir, ignore_errors=True)
+
+    def _media_file_name(self, task_doc: dict, name: str, video_id: Optional[str]) -> str:
+        """The title as the name; the video ID is added only when that folder already has the name."""
+        if task_doc.get("cloud_account_id") or not video_id:
+            return name
+        try:
+            taken = database.Files.find_one({"file_name": name, "file_path": task_doc.get("destination_path") or "/Home", "owner_id": str(task_doc["user_id"])})
+        except Exception:
+            taken = None
+        if not taken:
+            return name
+        stem, ext = os.path.splitext(name)
+        return f"{stem} [{video_id}]{ext}"
 
     async def _save_file_to_telegram(self, task_doc: dict, local_path: str, size: int, caption: str, file_name: Optional[str] = None):
         """Uploads a finished local file to the user's index chat and adds it to their library.
@@ -1142,6 +1171,8 @@ class RemoteTransferManager:
                 self._update_task(task_id, {"status": "cancelled", "phase": "Cancelled by user", "speed_bps": 0})
             except Exception as e:
                 err_text = str(e)
+                if self._pause_blocked_media(task_doc, e):
+                    return
                 if is_gdrive_quota_error(e):
                     logger.warning(f"Google Drive quota exceeded for task {task_id}: {err_text}")
                     cooldown_until = datetime.now(timezone.utc) + timedelta(hours=24)
@@ -1177,6 +1208,41 @@ class RemoteTransferManager:
             finally:
                 self.active_tasks.pop(task_id, None)
                 self.cancel_events.pop(task_id, None)
+
+    def _pause_blocked_media(self, task_doc: dict, error: Exception) -> bool:
+        """When YouTube blocks the server, this video and the rest of its playlist wait and retry later.
+
+        Returns False (the task simply fails) once a video has been retried MEDIA_BLOCK_RETRIES times.
+        """
+        from telestore.services.media_download_service import MediaBlocked
+        if not isinstance(error, MediaBlocked):
+            return False
+        retries = int(task_doc.get("block_retries") or 0)
+        if retries >= MEDIA_BLOCK_RETRIES:
+            return False
+        now = datetime.now(timezone.utc)
+        until = now + MEDIA_BLOCK_COOLDOWN
+        target = {"user_id": str(task_doc["user_id"]), "source_type": "media", "status": {"$in": ["queued", "downloading"]}}
+        if task_doc.get("group_id"):
+            target["group_id"] = task_doc["group_id"]
+        else:
+            target["task_id"] = task_doc["task_id"]
+        coll = get_remote_db()["RemoteTransfers"]
+        update = {
+            "$set": {
+                "status": "paused_quota",
+                "cooldown_until": until,
+                "phase": f"YouTube is blocking the server for now. Tries again at {until.strftime('%H:%M')} UTC",
+                "error_message": str(error),
+                "speed_bps": 0,
+                "updated_at": now,
+            },
+            "$unset": {"claimed_by": "", "claimed_at": ""},
+        }
+        coll.update_many(target, update)
+        coll.update_one({"task_id": task_doc["task_id"]}, {**update, "$inc": {"block_retries": 1}})
+        logger.warning(f"[MEDIA] YouTube blocked task {task_doc['task_id']}; paused until {until.isoformat()} (retry {retries + 1})")
+        return True
 
     async def _run_range_part_transfer(self, task_doc: dict, cancel_event: threading.Event):
         task_id = task_doc["task_id"]
