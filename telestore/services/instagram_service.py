@@ -31,7 +31,7 @@ USERNAME_FILE = os.path.join(SESSION_DIR, "username")
 
 NOT_FOUND = "This post is private or was removed."
 RATE_LIMITED = "Instagram is asking us to slow down. Try again in a few minutes."
-LOGIN_NEEDED = "Instagram needs a signed-in account for this post. The owner can connect one in Settings › Integrations."
+LOGIN_NEEDED = "Instagram only lets signed-in accounts download from this server. The owner can connect one in Settings › Integrations › Instagram."
 
 
 class InstagramError(ValueError):
@@ -54,21 +54,23 @@ def parse_instagram_url(url: str) -> tuple:
     return kind, match.group(2)
 
 
-def _friendly(error: Exception) -> InstagramError:
+def _friendly(error: Exception, signed_in: bool = True) -> InstagramError:
     if isinstance(error, InstagramError):
         return error
-    if isinstance(error, ig_errors.TooManyRequestsException):
+    text = str(error)
+    blocked = any(code in text for code in ("401", "403")) or "Please wait a few minutes" in text
+    # Signed out, Instagram turns cloud servers away with 401 "Please wait a few minutes"; no wait helps
+    if not signed_in and (blocked or isinstance(error, (ig_errors.LoginRequiredException, ig_errors.QueryReturnedForbiddenException, ig_errors.TooManyRequestsException))):
+        logger.info(f"Instagram refused a signed-out request: {text[:200]}")
+        return InstagramError(LOGIN_NEEDED)
+    if isinstance(error, ig_errors.TooManyRequestsException) or "429" in text or "Please wait a few minutes" in text:
         return InstagramError(RATE_LIMITED)
     if isinstance(error, (ig_errors.LoginRequiredException, ig_errors.QueryReturnedForbiddenException)):
         return InstagramError(LOGIN_NEEDED)
     if isinstance(error, (ig_errors.QueryReturnedNotFoundException, ig_errors.BadResponseException,
                           ig_errors.PrivateProfileNotFollowedException)):
         return InstagramError(NOT_FOUND)
-    text = str(error)
-    if "429" in text or "Please wait a few minutes" in text:
-        return InstagramError(RATE_LIMITED)
-    # Instagram answers 401/403 to visitors who aren't signed in (always, from most cloud servers)
-    if "401" in text or "403" in text or "login" in text.lower():
+    if blocked or "login" in text.lower():
         return InstagramError(LOGIN_NEEDED)
     logger.warning(f"Instagram request failed: {error}")
     return InstagramError("Couldn't read this post from Instagram. Check the link and try again.")
@@ -180,7 +182,7 @@ class InstagramClient:
                     "date": post.date_utc.isoformat() if post.date_utc else None,
                 }
             except Exception as e:
-                raise _friendly(e)
+                raise _friendly(e, signed_in=self._loader.context.is_logged_in)
         items = [it for it in items if it["url"]]
         if not items:
             raise InstagramError(NOT_FOUND)
