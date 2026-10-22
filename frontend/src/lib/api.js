@@ -307,6 +307,7 @@ export const api = {
     importInstagram: (url, destination) => post('/transfers/remote/instagram', { url, destination }, { timeout: 60000, fallback: "Couldn't start the Instagram import" }),
     getInstagramSession: () => request('/transfers/remote/instagram/session', { soft: { connected: false } }),
     instagramLogin: (username, password) => post('/transfers/remote/instagram/session/login', { username, password }, { timeout: 60000, fallback: "Couldn't sign in to Instagram" }),
+    instagramBrowserSession: (sessionid) => post('/transfers/remote/instagram/session/browser', { sessionid }, { timeout: 60000, fallback: "Couldn't use that session" }),
     instagramTwoFactor: (code) => post('/transfers/remote/instagram/session/2fa', { code }, { timeout: 60000, fallback: "Couldn't confirm the code" }),
     instagramLogout: () => request('/transfers/remote/instagram/session', { method: 'DELETE', fallback: "Couldn't disconnect Instagram" }),
 

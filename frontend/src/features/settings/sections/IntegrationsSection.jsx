@@ -54,7 +54,8 @@ const InstagramPanel = () => {
         setBusy(true);
         setError("");
         try {
-            const res = form.needsCode ? await api.instagramTwoFactor(form.code) : await api.instagramLogin(form.username, form.password);
+            const res = form.browser ? await api.instagramBrowserSession(form.sessionid)
+                : form.needsCode ? await api.instagramTwoFactor(form.code) : await api.instagramLogin(form.username, form.password);
             if (res.needs_2fa) {
                 setForm({ ...form, password: "", needsCode: true, code: "" });
                 return;
@@ -83,15 +84,25 @@ const InstagramPanel = () => {
     const connected = Boolean(session?.connected);
     return (<SettingsPanel icon={Instagram} title="Instagram" description="Instagram only lets signed-in accounts download posts, so imports use the account connected here" actions={connected ? (<Button variant="outline" size="sm" className="h-8" onClick={disconnect}><Unlink className="w-3.5 h-3.5 mr-1.5"/>Disconnect</Button>) : !form && (<Button size="sm" className="h-8" onClick={() => { setForm({ username: "", password: "" }); setError(""); }}><Plus className="w-3.5 h-3.5 mr-1.5"/>Connect</Button>)}>
       {connected ? (<p className="text-sm flex flex-wrap items-center gap-2"><StatusPill tone="success">Connected</StatusPill>Imports use <span className="font-medium">@{session.username}</span>.</p>) : !form ? (<p className="text-sm text-muted-foreground">Not connected. Use a spare Instagram account rather than your personal one: Instagram can limit accounts that download a lot.</p>) : (<form onSubmit={submit} className="grid gap-3 max-w-sm">
-          {form.needsCode ? (<Field label="Code from your authenticator app or SMS" htmlFor="ig-code"><Input id="ig-code" autoFocus inputMode="numeric" autoComplete="one-time-code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })}/></Field>) : (<>
+          {form.browser ? (<>
+              <ol className="text-sm text-muted-foreground list-decimal pl-5 grid gap-1">
+                <li>On a computer, sign in at <span className="font-medium text-foreground">instagram.com</span> with the account to use.</li>
+                <li>Press F12, open <span className="font-medium text-foreground">Application</span> (Chrome, Edge) or <span className="font-medium text-foreground">Storage</span> (Firefox), then Cookies › https://www.instagram.com.</li>
+                <li>Copy the <span className="font-medium text-foreground">Value</span> of the row named <span className="font-mono text-foreground">sessionid</span> and paste it here.</li>
+              </ol>
+              <Field label="sessionid" htmlFor="ig-session" hint="It works like a password for that Instagram account: paste it only here. Signing out of Instagram in that browser ends it."><Input id="ig-session" autoFocus type="password" autoComplete="off" value={form.sessionid} onChange={(e) => setForm({ ...form, sessionid: e.target.value })}/></Field>
+            </>) : form.needsCode ? (<Field label="Code from your authenticator app or SMS" htmlFor="ig-code"><Input id="ig-code" autoFocus inputMode="numeric" autoComplete="one-time-code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })}/></Field>) : (<>
               <Field label="Instagram username" htmlFor="ig-user"><Input id="ig-user" autoFocus autoComplete="off" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })}/></Field>
               <Field label="Password" htmlFor="ig-pass" hint="Used once to sign in. TeleStore keeps only Instagram's sign-in session, never the password."><Input id="ig-pass" type="password" autoComplete="off" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}/></Field>
             </>)}
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <div className="flex gap-2">
-            <Button type="submit" size="sm" disabled={busy || (form.needsCode ? !form.code.trim() : !form.username.trim() || !form.password)}>{busy ? "Signing in…" : form.needsCode ? "Confirm code" : "Sign in"}</Button>
+            <Button type="submit" size="sm" disabled={busy || (form.browser ? !form.sessionid.trim() : form.needsCode ? !form.code.trim() : !form.username.trim() || !form.password)}>{busy ? "Signing in…" : form.browser ? "Connect" : form.needsCode ? "Confirm code" : "Sign in"}</Button>
             <Button type="button" size="sm" variant="ghost" onClick={() => setForm(null)}>Cancel</Button>
           </div>
+          {!form.needsCode && (<button type="button" className="justify-self-start text-sm text-primary hover:underline" onClick={() => { setForm(form.browser ? { username: "", password: "" } : { browser: true, sessionid: "" }); setError(""); }}>
+              {form.browser ? "Sign in with username and password instead" : "Use my browser's sign-in"}
+            </button>)}
         </form>)}
     </SettingsPanel>);
 };

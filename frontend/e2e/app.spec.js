@@ -156,11 +156,16 @@ test.describe("import from Instagram", () => {
         await expect(dialog.getByRole("button", { name: /^Import/ })).toBeDisabled();
     });
 
-    test("the owner sees the Instagram sign-in in Integrations", async ({ page }) => {
+    test("the owner connects Instagram with the browser's sign-in", async ({ page, request }) => {
         await page.goto("/settings?tab=integrations");
         await expect(page.getByRole("heading", { name: "Instagram" })).toBeVisible();
         await page.getByRole("button", { name: "Connect" }).last().click();
         await expect(page.getByLabel("Instagram username")).toBeVisible();
+        await page.getByRole("button", { name: "Use my browser's sign-in" }).click();
+        await page.getByLabel("sessionid").fill("1234567%3AAbCd12%3A9%3AAYx");
+        await page.getByRole("button", { name: "Connect", exact: true }).last().click();
+        await expect(page.getByText("Instagram connected as @spare.account")).toBeVisible();
+        expect((await mutations(request)).find((r) => r.path === "/transfers/remote/instagram/session/browser").body).toBe('{"sessionid":"1234567%3AAbCd12%3A9%3AAYx"}');
     });
 });
 

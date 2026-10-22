@@ -212,6 +212,10 @@ class InstagramCodeModel(BaseModel):
     code: str
 
 
+class InstagramBrowserSessionModel(BaseModel):
+    sessionid: str
+
+
 async def _read_instagram_post(url: str) -> dict:
     from telestore.services.instagram_service import InstagramError, get_client, parse_instagram_url
     try:
@@ -325,6 +329,16 @@ async def instagram_two_factor(body: InstagramCodeModel, user: User = Depends(re
     _require_owner(user)
     try:
         return await asyncio.to_thread(get_client().finish_two_factor, body.code)
+    except InstagramError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/instagram/session/browser")
+async def instagram_browser_session(body: InstagramBrowserSessionModel, user: User = Depends(require_auth)):
+    from telestore.services.instagram_service import InstagramError, get_client
+    _require_owner(user)
+    try:
+        return await asyncio.to_thread(get_client().login_with_browser_session, body.sessionid)
     except InstagramError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

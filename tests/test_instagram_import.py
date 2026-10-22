@@ -273,3 +273,34 @@ class TestErrorMessages:
         from telestore.services.instagram_service import RATE_LIMITED, _friendly
         err = self._error('429 Too Many Requests - "Please wait a few minutes before you try again."')
         assert str(_friendly(err, signed_in=True)) == RATE_LIMITED
+
+
+class TestBrowserSession:
+    def test_bad_value_is_refused(self):
+        client = instagram_service.InstagramClient.__new__(instagram_service.InstagramClient)
+        with pytest.raises(InstagramError):
+            client.login_with_browser_session("not a session")
+
+    def test_good_session_is_saved(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(instagram_service, "SESSION_DIR", str(tmp_path))
+        monkeypatch.setattr(instagram_service, "SESSION_FILE", str(tmp_path / "session"))
+        monkeypatch.setattr(instagram_service, "USERNAME_FILE", str(tmp_path / "username"))
+        client = instagram_service.InstagramClient()
+        with patch("instaloader.instaloadercontext.InstaloaderContext.test_login", return_value="spare.account"):
+            res = client.login_with_browser_session("sessionid=1234567%3AAbCd12%3A9%3AAYx-y_z")
+        assert res == {"connected": True, "username": "spare.account"}
+        assert client.connected_username() == "spare.account"
+        assert client._loader.context.is_logged_in
+        assert oct((tmp_path / "session").stat().st_mode)[-3:] == "600"
+
+    def test_rejected_session(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(instagram_service, "SESSION_FILE", str(tmp_path / "session"))
+        client = instagram_service.InstagramClient()
+        with patch("instaloader.instaloadercontext.InstaloaderContext.test_login", return_value=None):
+            with pytest.raises(InstagramError):
+                client.login_with_browser_session("1234567:AbCd12:9:AYx")
+        assert not (tmp_path / "session").exists()
+
+    def test_only_the_owner(self, client, as_user):
+        as_user()
+        assert client.post("/api/transfers/remote/instagram/session/browser", json={"sessionid": "1:a:1"}).status_code == 403
