@@ -31,6 +31,8 @@ const FOLDERS = {
         file(13, "poster.jpg", "photo", 1_200_000, "/Home/Movies"),
     ],
 };
+// A folder of songs, to check that a long audio queue scrolls
+FOLDERS["/Home/Music"] = Array.from({ length: 20 }, (_, n) => file(3000 + n, `Song ${String(n + 1).padStart(2, "0")}.mp3`, "audio", 5_000_000, "/Home/Music"));
 // A big folder, to check that long lists stay quick to render
 FOLDERS["/Home/Documents"] = Array.from({ length: 1500 }, (_, n) => file(1000 + n, `scan-${String(n + 1).padStart(4, "0")}.pdf`, "document", 120_000 + n, "/Home/Documents"));
 
