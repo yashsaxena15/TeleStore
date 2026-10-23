@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { toast } from "sonner";
-import { ARROW_KEYS, calculateNextIndex, canRenameItem, computeRangeSelection, isButtonOrLink, isInputOrModalActive, isInsideFileGrid, isSystemProtectedFolder } from "../lib/fileKeyboardNavigation";
+import { ARROW_KEYS, calculateNextIndex, canRenameItem, computeRangeSelection, isButtonOrLink, isInputOrModalActive, isInsideFileGrid } from "../lib/fileKeyboardNavigation";
 import { getItemKey } from "../lib/fileCardHelpers";
 
 /**
@@ -196,10 +196,6 @@ export function useGridKeyboard(stateRef, { setBatchDeleteDialogOpen, setContext
                     setBatchDeleteDialogOpen(true);
                 } else if (s.focusedIndex !== null && s.items[s.focusedIndex]) {
                     const item = s.items[s.focusedIndex];
-                    if (isSystemProtectedFolder(item, s.currentPath)) {
-                        toast.error("Cannot delete default system folders");
-                        return;
-                    }
                     if (s.onDelete) {
                         s.onDelete(item, s.focusedIndex);
                     }

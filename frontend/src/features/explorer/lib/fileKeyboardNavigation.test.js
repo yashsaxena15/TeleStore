@@ -5,7 +5,6 @@ import {
   isInputOrModalActive,
   isInsideFileGrid,
   isButtonOrLink,
-  isSystemProtectedFolder,
   canRenameItem,
   ARROW_KEYS
 } from './fileKeyboardNavigation.js';
@@ -202,19 +201,6 @@ describe('File Keyboard Navigation and Safety Guards', () => {
     expect(isButtonOrLink(mockLink)).toBe(true);
   });
 
-  it('protects root system folders', () => {
-    const rootHome = ["Home"];
-    const subHome = ["Home", "Documents"];
-
-    expect(isSystemProtectedFolder({ name: "Documents" }, rootHome)).toBe(true);
-    expect(isSystemProtectedFolder({ name: "Images" }, rootHome)).toBe(true);
-    expect(isSystemProtectedFolder({ name: "Videos" }, rootHome)).toBe(true);
-    expect(isSystemProtectedFolder({ name: "Audio" }, rootHome)).toBe(true);
-    expect(isSystemProtectedFolder({ name: "Voice Messages" }, rootHome)).toBe(true);
-    expect(isSystemProtectedFolder({ name: "CustomFolder" }, rootHome)).toBe(false);
-    expect(isSystemProtectedFolder({ name: "Documents" }, subHome)).toBe(false);
-  });
-
   it('enforces rename permission safety rules', () => {
     const userFolder = { id: "123", name: "My Project", type: "folder" };
     const systemFolder = { id: "sys1", name: "Videos", type: "folder" };
@@ -277,7 +263,7 @@ describe('File Keyboard Navigation and Safety Guards', () => {
       currentApiPath: "/Home",
       currentPath: ["Home"]
     });
-    expect(systemCheck.allowed).toBe(false);
-    expect(systemCheck.reason).toContain("system folders");
+    // The starter folders (Videos, Images…) are ordinary folders: they can be renamed
+    expect(systemCheck.allowed).toBe(true);
   });
 });

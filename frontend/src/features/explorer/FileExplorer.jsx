@@ -384,8 +384,9 @@ export const FileExplorer = () => {
                 setCurrentPath(["Private Vault"]);
             }
             else {
-                // If clicking on Home, explicitly set to Home
-                setCurrentPath(["Home"]);
+                // Same as Home in the sidebar: leave Trash, Starred or Inbox too. Changing only the
+                // folder left the filter behind, and the address and the view kept undoing each other.
+                handleFilterChange("all");
             }
         }
         else {
@@ -513,7 +514,7 @@ export const FileExplorer = () => {
         }
     };
     handleFilterChangeRef.current = handleFilterChange;
-    const batchActions = createBatchActions({ isCloudMode, cloudAccountId, currentPath, currentApiPath, refetch, moveItem });
+    const batchActions = createBatchActions({ isCloudMode, cloudAccountId, currentApiPath, isTrashMode: isEffectiveTrashMode, refetch, moveItem });
     const { handleSidebarDrop, handleNewFolder, handleDelete, handleRename, handleMove, handleDownloadFolderPart, handleDownloadAllFolderParts, handleDownload, confirmRename, confirmDelete, handleToggleStar, handleRestoreItem, handleEmptyTrash } = createItemActions({ cloudAccountId, cloudFolderId, currentApiPath, currentFolder, currentPath, deleteDialog, isCloudMode, isEffectiveTrashMode, isInboxMode, isTrashMode, moveItem, refetch, renamingItem, setDeleteDialog, setEmptyTrashDialogOpen, setFolderDownloadInfo, setIsEmptyingTrash, setNewFolderDialogOpen, setRenamingItem });
     const cancelDelete = () => {
         setDeleteDialog(null);
@@ -678,7 +679,7 @@ export const FileExplorer = () => {
             </Suspense>
           </div>) : view === "transfers" ? (<div key="transfers" className={PAGE_CLASS}>
             <Suspense fallback={<PanelLoading />}>
-              <Transfers onNewTransfer={() => setRemoteDownloadOpen(true)}/>
+              <Transfers onNewTransfer={runShellAction}/>
             </Suspense>
           </div>) : (<div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             <TopBar currentPath={currentPath} searchQuery={searchQuery} viewMode={viewMode} onSearchChange={setSearchQuery} onViewModeChange={setViewMode} onBreadcrumbClick={handleBreadcrumbClick} sortField={sortField} sortOrder={sortOrder} foldersFirst={foldersFirst} onSortChange={(field, order) => {

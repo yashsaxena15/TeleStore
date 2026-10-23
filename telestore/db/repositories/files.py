@@ -571,6 +571,17 @@ class Files(Collection):
             })
         return True
 
+    def is_trashed_folder_path(self, full_path: str, owner_id: str = None) -> bool:
+        """Whether full_path (e.g. /Home/Old/Pics) names a folder that is in Trash."""
+        clean = "/" + (full_path or "").strip().strip("/")
+        if clean.count("/") < 1 or clean in ("/", "/Home"):
+            return False
+        parent, name = clean.rsplit("/", 1)
+        query = {"file_type": "folder", "file_name": name, "file_path": {"$in": [parent or "/", parent + "/"]}, "trashed": True}
+        if owner_id:
+            query["owner_id"] = owner_id
+        return self.find_one(query) is not None
+
     def restore_from_trash(self, file_id: str, owner_id: str = None) -> bool:
         """Restore a file or folder from trash back to active explorer"""
         from bson import ObjectId

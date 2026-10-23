@@ -53,6 +53,12 @@ async def move_file_route(request: MoveFileRequest, user: User = Depends(require
         if not file_data:
             raise HTTPException(status_code=404, detail="File not found")
         
+        # Items in Trash stay where they were deleted from, so Restore can put them back
+        if file_data.get("trashed"):
+            raise HTTPException(status_code=400, detail="Items in Trash can't be moved. Restore it first, then move it.")
+        if database.Files.is_trashed_folder_path(request.target_path, user_id):
+            raise HTTPException(status_code=400, detail="That folder is in Trash. Restore it first, then move items into it.")
+
         # Update the file's path and modified date
         is_target_vault = request.target_path.startswith("/Vault") or request.target_path == "Vault"
         update_fields = {
@@ -101,6 +107,8 @@ async def move_file_route(request: MoveFileRequest, user: User = Depends(require
             )
         
         return {"message": "File moved successfully"}
+    except HTTPException:
+        raise  # refusals (not yours, not found, in Trash) keep their own status and message
     except Exception as e:
         logger.error(f"Error moving file: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -109,6 +109,48 @@ test.describe("users and connection", () => {
     });
 });
 
+test.describe("trash, starter folders and new transfers", () => {
+    test("Home in the Trash breadcrumb goes home without looping", async ({ page }) => {
+        await page.goto("/");
+        await page.getByRole("complementary").first().getByRole("button", { name: "Trash" }).click();
+        await expect(row(page, "old-notes.txt")).toBeVisible();
+        const before = await page.evaluate(() => history.length);
+        await page.getByRole("button", { name: "Home", exact: true }).nth(1).click();
+        await expect(row(page, "Movies")).toBeVisible();
+        await page.waitForTimeout(1500);
+        expect(await page.evaluate(() => history.length) - before).toBeLessThanOrEqual(1);
+        await expect(page).toHaveURL(/\/$/);
+    });
+
+    test("items in Trash can't be dragged into a folder", async ({ page, request }) => {
+        await page.goto("/");
+        await page.getByRole("complementary").first().getByRole("button", { name: "Trash" }).click();
+        await row(page, "old-notes.txt").dragTo(row(page, "Old stuff"));
+        await expect(page.getByText(/Items in Trash can't be moved/).first()).toBeVisible();
+        expect((await mutations(request)).some((r) => r.path === "/files/move")).toBe(false);
+    });
+
+    test("a starter folder like Documents can be deleted", async ({ page, request }) => {
+        await page.goto("/");
+        await row(page, "Documents").click({ button: "right" });
+        const del = page.getByRole("menuitem", { name: /Delete|Move to Trash/i }).first();
+        await expect(del).toBeEnabled();
+        await del.click();
+        const confirm = page.getByRole("alertdialog").or(page.getByRole("dialog"));
+        await confirm.getByRole("button", { name: /Delete|Move to Trash/i }).last().click();
+        await expect.poll(async () => (await mutations(request)).some((r) => /delete|trash/.test(r.path) && r.body.includes("f2"))).toBe(true);
+    });
+
+    test("New transfer offers leech, video and Instagram", async ({ page }) => {
+        await page.goto("/transfers");
+        await page.getByRole("button", { name: "New transfer" }).first().click();
+        await expect(page.getByRole("menuitem", { name: /Remote leech/ })).toBeVisible();
+        await expect(page.getByRole("menuitem", { name: /Import from Instagram/ })).toBeVisible();
+        await page.getByRole("menuitem", { name: /Download video or audio/ }).click();
+        await expect(page.getByRole("dialog", { name: "Download video or audio" })).toBeVisible();
+    });
+});
+
 test.describe("staying signed in", () => {
     test("moving between pages doesn't re-check the sign-in", async ({ page }) => {
         let checks = 0;

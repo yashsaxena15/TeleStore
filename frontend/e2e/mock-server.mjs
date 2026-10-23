@@ -31,6 +31,11 @@ const FOLDERS = {
         file(13, "poster.jpg", "photo", 1_200_000, "/Home/Movies"),
     ],
 };
+// Trash: a deleted folder and a deleted file
+FOLDERS["/trash"] = [
+    file(90, "Old stuff", "folder", 0, "/Home", { trashed: true, trashed_at: "2026-10-20T10:00:00+00:00", original_path: "/Home" }),
+    file(91, "old-notes.txt", "document", 12_000, "/Home", { trashed: true, trashed_at: "2026-10-21T10:00:00+00:00", original_path: "/Home" }),
+];
 // A folder of songs, to check that a long audio queue scrolls
 FOLDERS["/Home/Music"] = Array.from({ length: 20 }, (_, n) => file(3000 + n, `Song ${String(n + 1).padStart(2, "0")}.mp3`, "audio", 5_000_000, "/Home/Music"));
 // A big folder, to check that long lists stay quick to render
