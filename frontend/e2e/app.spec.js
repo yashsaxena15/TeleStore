@@ -514,11 +514,28 @@ test.describe("player panels", () => {
         await page.getByRole("button", { name: "Playlist" }).first().click();
         await expect(page.getByText("Blade.Runner.2049.mkv").first()).toBeVisible();
         await page.keyboard.press("Escape");
-        // Minimize: keeps playing in the dock, from the same position
-        const before = await video.evaluate((v) => v.currentTime);
+        // Minimize: the same video keeps playing in the dock, without a pause or a reload
+        const before = await video.evaluate((v) => {
+            v.dataset.e2e = "same-element";
+            window.__pauses = 0;
+            window.__loads = 0;
+            v.addEventListener("pause", () => { window.__pauses++; });
+            v.addEventListener("loadstart", () => { window.__loads++; });
+            return v.currentTime;
+        });
         await page.getByRole("button", { name: "Minimize to dock" }).click();
         await expect(page.getByRole("button", { name: "Open video in theater mode" }).first()).toBeVisible();
         await expect.poll(() => page.locator("video").evaluate((v) => v.currentTime)).toBeGreaterThan(before);
+        await expect(page.locator('video[data-e2e="same-element"]')).toHaveCount(1);
+        expect((await page.locator("video").boundingBox()).width).toBeLessThan(100); // shown in the dock thumbnail
+        // …and back to theater mode
+        await page.getByRole("button", { name: "Open video in theater mode" }).first().click();
+        await expect(page.getByRole("button", { name: "Minimize to dock" })).toBeVisible();
+        await page.waitForTimeout(500);
+        await expect(page.locator('video[data-e2e="same-element"]')).toHaveCount(1);
+        expect(await page.evaluate(() => [window.__pauses, window.__loads])).toEqual([0, 0]);
+        expect(await page.locator("video").evaluate((v) => v.paused)).toBe(false);
+        expect((await page.locator("video").boundingBox()).width).toBeGreaterThan(800); // fills the theater again
     });
 });
 
