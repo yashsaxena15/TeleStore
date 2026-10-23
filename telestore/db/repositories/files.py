@@ -3,7 +3,7 @@
 from typing import Literal
 from dataclasses import dataclass
 from d4rk.Logs import setup_logger
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pymongo.collection import Collection
 
@@ -66,7 +66,7 @@ class Files(Collection):
                 "file_name": file_name,
                 "file_caption": file_caption,
                 "file_path": file_path,  # Store file path
-                "modified_date": modified_date or datetime.utcnow().isoformat(),  # Set current time if not provided
+                "modified_date": modified_date or datetime.now(timezone.utc).isoformat(),  # UTC with its offset, so browsers show local time
                 "is_vault": bool(is_vault)
             }
             
@@ -112,7 +112,7 @@ class Files(Collection):
             "file_caption": file_caption,
             "file_path": file_path,
             "owner_id": owner_id,
-            "modified_date": modified_date or datetime.utcnow().isoformat(),
+            "modified_date": modified_date or datetime.now(timezone.utc).isoformat(),
             "is_split": True,
             "total_parts": len(parts),
             "part_size": part_size or (parts[0]["part_size"] if parts else 0),
@@ -168,7 +168,7 @@ class Files(Collection):
             "file_name": folder_name,
             "file_caption": folder_name,
             "file_path": folder_path,
-            "modified_date": datetime.utcnow().isoformat()  # Set current time for folder creation
+            "modified_date": datetime.now(timezone.utc).isoformat()  # Set current time for folder creation
         }
         
         # Add owner_id if provided
@@ -453,7 +453,7 @@ class Files(Collection):
         # Update the file/folder name and modified date
         result = self.update_one(
             query,
-            {"$set": {"file_name": new_name, "modified_date": datetime.utcnow().isoformat()}}
+            {"$set": {"file_name": new_name, "modified_date": datetime.now(timezone.utc).isoformat()}}
         )
         
         # If this is a folder, we need to update the paths of all contained files
@@ -481,7 +481,7 @@ class Files(Collection):
                 
             self.update_many(
                 folder_update_query,
-                {"$set": {"file_path": new_full_path, "modified_date": datetime.utcnow().isoformat()}}
+                {"$set": {"file_path": new_full_path, "modified_date": datetime.now(timezone.utc).isoformat()}}
             )
             
             # Update files in subfolders (paths that start with old_full_path + "/")
@@ -498,7 +498,7 @@ class Files(Collection):
                 new_file_path = file["file_path"].replace(old_full_path, new_full_path, 1)
                 self.update_one(
                     {"_id": file["_id"]},
-                    {"$set": {"file_path": new_file_path, "modified_date": datetime.utcnow().isoformat()}}
+                    {"$set": {"file_path": new_file_path, "modified_date": datetime.now(timezone.utc).isoformat()}}
                 )
         
         return result.modified_count > 0
@@ -527,7 +527,7 @@ class Files(Collection):
         if not doc:
             return False
         
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         orig_path = doc.get("file_path", "/")
         self.update_one(query, {
             "$set": {

@@ -58,7 +58,7 @@ async def move_file_route(request: MoveFileRequest, user: User = Depends(require
         update_fields = {
             "file_path": request.target_path,
             "is_vault": is_target_vault,
-            "modified_date": datetime.datetime.utcnow().isoformat()
+            "modified_date": datetime.datetime.now(datetime.timezone.utc).isoformat()
         }
         database.Files.update_one(
             {"_id": ObjectId(request.file_id), "owner_id": user_id},
@@ -72,7 +72,7 @@ async def move_file_route(request: MoveFileRequest, user: User = Depends(require
             old_full_path = f"{old_parent}/{folder_name}" if old_parent else f"/{folder_name}"
             new_parent = request.target_path.rstrip('/')
             new_full_path = f"{new_parent}/{folder_name}" if new_parent else f"/{folder_name}"
-            now_iso = datetime.datetime.utcnow().isoformat()
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
             # 1. Update direct children
             database.Files.update_many(
@@ -123,7 +123,7 @@ async def copy_file_route(request: CopyFileRequest, user: User = Depends(require
         new_file_data = file_data.copy()
         new_file_data["_id"] = ObjectId()  # Generate new ID
         new_file_data["file_path"] = request.target_path
-        new_file_data["modified_date"] = datetime.datetime.utcnow().isoformat()  # Set new modified date for copied file
+        new_file_data["modified_date"] = datetime.datetime.now(datetime.timezone.utc).isoformat()  # Set new modified date for copied file
         # Preserve the owner when copying
         new_file_data["owner_id"] = user_id
         
@@ -136,7 +136,7 @@ async def copy_file_route(request: CopyFileRequest, user: User = Depends(require
             old_full_path = f"{old_parent}/{folder_name}" if old_parent else f"/{folder_name}"
             new_parent = request.target_path.rstrip('/')
             new_full_path = f"{new_parent}/{folder_name}" if new_parent else f"/{folder_name}"
-            now_iso = datetime.datetime.utcnow().isoformat()
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
             is_target_vault = request.target_path.startswith("/Vault") or request.target_path == "Vault"
 
             descendants = list(database.Files.find({
