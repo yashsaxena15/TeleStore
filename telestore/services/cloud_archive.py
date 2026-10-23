@@ -501,7 +501,13 @@ async def execute_task_extract(task_id: str, payload: Dict[str, Any], manager: A
                     elif file_type == "video" and file_sz <= 50 * 1024 * 1024:
                         sent_msg = await c.send_video(chat_id=storage_chat_id, video=full_path, caption=f"Extracted: {fname}")
                     elif file_type == "audio" and file_sz <= 50 * 1024 * 1024:
-                        sent_msg = await c.send_audio(chat_id=storage_chat_id, audio=full_path, caption=f"Extracted: {fname}")
+                        from telestore.services.pipeline_uploader import extract_audio_cover
+                        cover = await extract_audio_cover(full_path)
+                        try:
+                            sent_msg = await c.send_audio(chat_id=storage_chat_id, audio=full_path, caption=f"Extracted: {fname}", thumb=cover)
+                        finally:
+                            if cover and os.path.exists(cover):
+                                os.remove(cover)
                     else:
                         sent_msg = await c.send_document(chat_id=storage_chat_id, document=full_path, caption=f"Extracted: {fname}", force_document=True)
                 except Exception as ex:

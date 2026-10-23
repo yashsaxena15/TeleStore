@@ -1,9 +1,42 @@
 import os
 import asyncio
 import logging
+import shutil
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
+
+AUDIO_EXTS = ["mp3", "wav", "ogg", "flac", "m4a"]
+
+
+async def extract_audio_cover(audio_path: str) -> Optional[str]:
+    """Saves an audio file's built-in cover art as a small JPEG for Telegram; None when it has none.
+
+    Telegram doesn't read the cover out of an uploaded song itself, so without this songs have no
+    thumbnail. Telegram wants a JPEG of at most 320x320 and 200 KB.
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return None
+    cover_path = f"{audio_path}.cover.jpg"
+    for quality in (3, 8, 15):
+        proc = await asyncio.create_subprocess_exec(
+            ffmpeg, "-y", "-v", "error", "-i", audio_path, "-map", "0:v:0", "-frames:v", "1",
+            "-vf", "scale=320:320:force_original_aspect_ratio=decrease", "-q:v", str(quality), cover_path,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=30)
+        except asyncio.TimeoutError:
+            proc.kill()
+            break
+        if proc.returncode != 0 or not os.path.exists(cover_path):
+            break  # no picture in the file
+        if os.path.getsize(cover_path) <= 200 * 1024:
+            return cover_path
+    if os.path.exists(cover_path):
+        os.remove(cover_path)
+    return None
 
 
 async def upload_part_task(
@@ -57,8 +90,13 @@ async def upload_part_task(
                     msg = await client.send_photo(chat_id=chat_id, photo=part_file_path, caption=caption, **upload_kwargs)
                 elif ext in ["mp4", "mkv", "avi", "mov", "webm"]:
                     msg = await client.send_video(chat_id=chat_id, video=part_file_path, caption=caption, file_name=target_file_name, **upload_kwargs)
-                elif ext in ["mp3", "wav", "ogg", "flac", "m4a"]:
-                    msg = await client.send_audio(chat_id=chat_id, audio=part_file_path, caption=caption, file_name=target_file_name, **upload_kwargs)
+                elif ext in AUDIO_EXTS:
+                    cover = await extract_audio_cover(part_file_path)
+                    try:
+                        msg = await client.send_audio(chat_id=chat_id, audio=part_file_path, caption=caption, file_name=target_file_name, thumb=cover, **upload_kwargs)
+                    finally:
+                        if cover and os.path.exists(cover):
+                            os.remove(cover)
                 else:
                     msg = await client.send_document(chat_id=chat_id, document=part_file_path, caption=caption, file_name=target_file_name, force_document=True, **upload_kwargs)
             except Exception as e:

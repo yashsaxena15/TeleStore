@@ -2,7 +2,7 @@
 
 import urllib.parse
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List
 
 from fastapi import Request, Response, HTTPException
@@ -176,7 +176,7 @@ async def handle_move(request: Request, segments: List[str], owner_id: str) -> R
             {"$set": {
                 "file_name": dest_name,
                 "file_path": dest_parent_path,
-                "modified_date": datetime.utcnow().isoformat()
+                "modified_date": datetime.now(timezone.utc).isoformat()
             }}
         )
 
@@ -196,7 +196,7 @@ async def handle_move(request: Request, segments: List[str], owner_id: str) -> R
             {"$set": {
                 "file_name": dest_name,
                 "file_path": dest_parent_path,
-                "modified_date": datetime.utcnow().isoformat()
+                "modified_date": datetime.now(timezone.utc).isoformat()
             }}
         )
 
@@ -233,7 +233,7 @@ async def handle_copy(request: Request, segments: List[str], owner_id: str) -> R
     new_doc.pop("_id", None)
     new_doc["file_name"] = dest_name
     new_doc["file_path"] = dest_parent
-    new_doc["modified_date"] = datetime.utcnow().isoformat()
+    new_doc["modified_date"] = datetime.now(timezone.utc).isoformat()
 
     database.Files.insert_one(new_doc)
     return Response(status_code=201)

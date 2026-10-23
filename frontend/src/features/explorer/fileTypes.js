@@ -1,3 +1,6 @@
+// The server saves times in UTC. Older records were written without the "+00:00", and browsers
+// read a time without a zone as local time (5h30 early in India), so mark those as UTC.
+export const serverTime = (value) => (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(value) ? `${value}Z` : value);
 export const VIDEO_EXTS = ['mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv', 'm4v', '3gp', 'ts'];
 export const PHOTO_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic'];
 export const AUDIO_EXTS = ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'opus', 'wma'];
@@ -70,13 +73,13 @@ export const apiFileToFileItem = (apiFile) => {
         fileType: resolvedFileType,
         thumbnail: apiFile.thumbnail,
         file_path: apiFile.file_path,
-        modified: apiFile.modified_date,
+        modified: serverTime(apiFile.modified_date),
         chat_id: apiFile.chat_id,
         message_id: apiFile.message_id,
         caption: apiFile.file_caption,
         starred: Boolean(apiFile.starred),
         trashed: Boolean(apiFile.trashed),
-        trashed_at: apiFile.trashed_at,
+        trashed_at: serverTime(apiFile.trashed_at),
         original_path: apiFile.original_path,
     };
 };
