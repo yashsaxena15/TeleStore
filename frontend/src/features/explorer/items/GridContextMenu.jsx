@@ -7,7 +7,17 @@ import { ContextMenu } from "../ContextMenu";
 import { isVideoItem } from "../fileTypes";
 import { getItemKey, isItemStarred } from "../lib/fileCardHelpers";
 
-export const GridContextMenu = ({ cloudAccountId, cloudFolderId, contextMenu, currentApiPath, currentPath, handleItemOpen, hasClipboard, isClipboardPasted, isCloudMode, isRestrictedEmptyArea, isTrashMode, isVaultMode, items, onCopy, onCut, onDelete, onDownload, onMoveToHome, onMoveToVault, onNewFolder, onPaste, onRefresh, onRename, onRestoreItem, onToggleStar, openDetails, selectedItems, setArchiveInspect, setCompressDialog, setContextMenu, triggerDirectoryUpload, triggerFileUpload }) => {
+export const GridContextMenu = ({ cloudAccountId, cloudFolderId, contextMenu, currentApiPath, currentPath, handleItemOpen, hasClipboard, isClipboardPasted, isCloudMode, isRestrictedEmptyArea, isTrashMode, isVaultMode, items, onCopy, onCut, onDelete, onDownload, onMoveToHome, onMoveToVault, onNewFolder, onPaste, onRefresh, onRename, onRestoreItem, onSelectionAction, onToggleStar, openDetails, selectedItems, setArchiveInspect, setCompressDialog, setContextMenu, triggerDirectoryUpload, triggerFileUpload }) => {
+    // Right-clicking one of several selected items acts on all of them (the menu shows the count)
+    const onSelection = Boolean(contextMenu.item && selectedItems.size > 1 && selectedItems.has(getItemKey(contextMenu.item)) && onSelectionAction);
+    const forSelection = (id, single) => () => {
+        if (!contextMenu.item)
+            return;
+        if (onSelection)
+            onSelectionAction(id);
+        else
+            single(contextMenu.item);
+    };
     const cmExt = (contextMenu.item?.extension || contextMenu.item?.name?.split('.').pop() || '').toLowerCase();
     const isArchiveItem = ['zip', 'tar', 'gz', 'bz2', 'xz', 'rar', '7z'].includes(cmExt);
     const isVideo = contextMenu.item ? isVideoItem(contextMenu.item) : false;
@@ -45,9 +55,9 @@ export const GridContextMenu = ({ cloudAccountId, cloudFolderId, contextMenu, cu
             else {
                 onCut(contextMenu.item);
             }
-        }} onPaste={onPaste} onDelete={() => contextMenu.item && onDelete(contextMenu.item, contextMenu.index)} onRename={() => contextMenu.item && onRename(contextMenu.item, contextMenu.index)} onNewFolder={onNewFolder} onDownload={() => contextMenu.item && onDownload(contextMenu.item)} onUploadFiles={triggerFileUpload} // Use the trigger function
+        }} onPaste={onPaste} onDelete={forSelection(isTrashMode || cloudFolderId === "trash" ? "delete-forever" : "delete", (item) => onDelete(item, contextMenu.index))} onRename={() => contextMenu.item && onRename(contextMenu.item, contextMenu.index)} onNewFolder={onNewFolder} onDownload={() => contextMenu.item && onDownload(contextMenu.item)} onUploadFiles={triggerFileUpload} // Use the trigger function
      onUploadFolder={triggerDirectoryUpload} // Use the trigger function
-     onClose={() => setContextMenu(null)} hasClipboard={hasClipboard} isClipboardPasted={isClipboardPasted} disableDelete={false} onProperties={() => contextMenu.item && openDetails(contextMenu.item)} isArchive={isArchiveItem} selectedCount={selectedCount} isVaultMode={isVaultMode} onMoveToVault={() => contextMenu.item && onMoveToVault?.(contextMenu.item)} onMoveToHome={() => contextMenu.item && onMoveToHome?.(contextMenu.item)} onInspectArchive={() => {
+     onClose={() => setContextMenu(null)} hasClipboard={hasClipboard} isClipboardPasted={isClipboardPasted} disableDelete={false} onProperties={() => contextMenu.item && openDetails(contextMenu.item)} isArchive={isArchiveItem} selectedCount={selectedCount} isVaultMode={isVaultMode} onMoveToVault={forSelection("to-vault", (item) => onMoveToVault?.(item))} onMoveToHome={forSelection("to-home", (item) => onMoveToHome?.(item))} onInspectArchive={() => {
             if (contextMenu.item) {
                 setArchiveInspect({
                     fileId: getItemKey(contextMenu.item),
@@ -87,5 +97,5 @@ export const GridContextMenu = ({ cloudAccountId, cloudFolderId, contextMenu, cu
             }
         }} onCompress={() => {
             setCompressDialog(true);
-        }} isStarred={isItemStarred(contextMenu.item)} onToggleStar={() => contextMenu.item && onToggleStar?.(contextMenu.item)} isTrashMode={isTrashMode || cloudFolderId === "trash" || Boolean(contextMenu.item?.is_trashed)} onRestore={() => contextMenu.item && onRestoreItem?.(contextMenu.item)} isCloudMode={isCloudMode} isVirtualFolder={Boolean(contextMenu.item?.is_virtual)} isRestrictedEmptyArea={isRestrictedEmptyArea} onRefresh={onRefresh}/>);
+        }} isStarred={isItemStarred(contextMenu.item)} onToggleStar={() => contextMenu.item && onToggleStar?.(contextMenu.item)} isTrashMode={isTrashMode || cloudFolderId === "trash" || Boolean(contextMenu.item?.is_trashed)} onRestore={forSelection("restore", (item) => onRestoreItem?.(item))} isCloudMode={isCloudMode} isVirtualFolder={Boolean(contextMenu.item?.is_virtual)} isRestrictedEmptyArea={isRestrictedEmptyArea} onRefresh={onRefresh}/>);
 };

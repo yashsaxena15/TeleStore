@@ -141,6 +141,18 @@ test.describe("trash, starter folders and new transfers", () => {
         await expect.poll(async () => (await mutations(request)).some((r) => /delete|trash/.test(r.path) && r.body.includes("f2"))).toBe(true);
     });
 
+    test("right-click Move to Trash acts on every selected item", async ({ page, request }) => {
+        await page.goto("/");
+        await page.getByRole("button", { name: "Select Movies" }).click();
+        await page.getByRole("button", { name: "Select Music" }).click();
+        await page.getByRole("button", { name: "Select Documents" }).click();
+        await row(page, "Music").click({ button: "right" });
+        await page.getByRole("menuitem", { name: "Move to Trash (3)" }).click();
+        const confirm = page.getByRole("alertdialog").or(page.getByRole("dialog"));
+        await confirm.getByRole("button", { name: /Delete|Move to Trash/i }).last().click();
+        await expect.poll(async () => (await mutations(request)).filter((r) => r.path === "/files/trash").map((r) => JSON.parse(r.body).file_id).sort()).toEqual(["f1", "f2", "f3"]);
+    });
+
     test("New transfer offers leech, video and Instagram", async ({ page }) => {
         await page.goto("/transfers");
         await page.getByRole("button", { name: "New transfer" }).first().click();
