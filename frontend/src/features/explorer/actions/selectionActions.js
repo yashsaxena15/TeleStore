@@ -115,17 +115,8 @@ const handleBatchDownload = async () => {
 };
 const handleConfirmBatchDelete = async () => {
     const itemsToDelete = items.filter(item => selectedItems.has(getItemKey(item)));
-    // Protect system folders in root Home
-    const validItemsToDelete = itemsToDelete.filter(item => {
-        if (currentPath && currentPath.length === 1 &&
-            currentPath[0] === "Home" &&
-            ["Images", "Documents", "Audio", "Voice Messages", "Videos"].includes(item.name)) {
-            return false;
-        }
-        return true;
-    });
+    const validItemsToDelete = itemsToDelete;
     if (validItemsToDelete.length === 0) {
-        toast.error("Cannot delete default system folders");
         setBatchDeleteDialogOpen(false);
         return;
     }

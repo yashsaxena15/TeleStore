@@ -47,11 +47,7 @@ export const GridContextMenu = ({ cloudAccountId, cloudFolderId, contextMenu, cu
             }
         }} onPaste={onPaste} onDelete={() => contextMenu.item && onDelete(contextMenu.item, contextMenu.index)} onRename={() => contextMenu.item && onRename(contextMenu.item, contextMenu.index)} onNewFolder={onNewFolder} onDownload={() => contextMenu.item && onDownload(contextMenu.item)} onUploadFiles={triggerFileUpload} // Use the trigger function
      onUploadFolder={triggerDirectoryUpload} // Use the trigger function
-     onClose={() => setContextMenu(null)} hasClipboard={hasClipboard} isClipboardPasted={isClipboardPasted} disableDelete={
-        // Disable delete for specific virtual folders in Home
-        Boolean(currentPath && currentPath.length === 1 &&
-            currentPath[0] === "Home" &&
-            ["Images", "Documents", "Audio", "Voice Messages", "Videos"].includes(contextMenu.itemName))} onProperties={() => contextMenu.item && openDetails(contextMenu.item)} isArchive={isArchiveItem} selectedCount={selectedCount} isVaultMode={isVaultMode} onMoveToVault={() => contextMenu.item && onMoveToVault?.(contextMenu.item)} onMoveToHome={() => contextMenu.item && onMoveToHome?.(contextMenu.item)} onInspectArchive={() => {
+     onClose={() => setContextMenu(null)} hasClipboard={hasClipboard} isClipboardPasted={isClipboardPasted} disableDelete={false} onProperties={() => contextMenu.item && openDetails(contextMenu.item)} isArchive={isArchiveItem} selectedCount={selectedCount} isVaultMode={isVaultMode} onMoveToVault={() => contextMenu.item && onMoveToVault?.(contextMenu.item)} onMoveToHome={() => contextMenu.item && onMoveToHome?.(contextMenu.item)} onInspectArchive={() => {
             if (contextMenu.item) {
                 setArchiveInspect({
                     fileId: getItemKey(contextMenu.item),

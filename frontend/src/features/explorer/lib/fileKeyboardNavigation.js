@@ -144,23 +144,6 @@ export function isButtonOrLink(target) {
 }
 
 /**
- * System folders in root Home that cannot be deleted or renamed.
- */
-export const PROTECTED_SYSTEM_FOLDERS = new Set([
-  "Images",
-  "Documents",
-  "Audio",
-  "Voice Messages",
-  "Videos"
-]);
-
-export function isSystemProtectedFolder(item, currentPath) {
-  if (!item) return false;
-  const isRootHome = Array.isArray(currentPath) && currentPath.length === 1 && currentPath[0] === "Home";
-  return isRootHome && PROTECTED_SYSTEM_FOLDERS.has(item.name);
-}
-
-/**
  * Validates whether an item can be renamed in the current context.
  */
 export function canRenameItem({
@@ -184,9 +167,6 @@ export function canRenameItem({
   }
   if (currentFolder === "Starred" || currentApiPath === "/starred") {
     return { allowed: false, reason: "Cannot rename items in Starred" };
-  }
-  if (isSystemProtectedFolder(item, currentPath)) {
-    return { allowed: false, reason: "Cannot rename default system folders" };
   }
   return { allowed: true };
 }

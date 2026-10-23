@@ -105,6 +105,8 @@ class IndexMessages:
             # Use the owner ID from the indexer (the user who initiated the indexing)
             owner_id = self.owner_id
             
+            # The user may have deleted this folder; bring it back so the file can be seen
+            database.Files.create_folder_path(file_path, owner_id=owner_id)
             return database.Files.add_file(
                 chat_id=message.chat.id,
                 message_id=message.id,

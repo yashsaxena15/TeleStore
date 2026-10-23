@@ -8,7 +8,21 @@ import { Progress } from "@/components/ui/progress";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { cn, formatBytes } from "@/lib/utils";
+import { NEW_ITEM_GROUPS } from "@/components/layout/shellActions";
 import { useTransferManager } from "./useTransferManager";
+
+// Server transfers the user can start: the "From elsewhere" items of the New menu, minus
+// connecting a drive (not a transfer)
+const TRANSFER_SOURCES = NEW_ITEM_GROUPS.flatMap((g) => g.items).filter((it) => ["remote-leech", "media-download", "instagram-import"].includes(it.id));
+
+const NewTransferMenu = ({ onPick }) => (<DropdownMenu>
+    <DropdownMenuTrigger asChild>
+      <Button size="sm" className="gap-1.5"><Plus className="w-4 h-4"/>New transfer</Button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end" className="min-w-[260px]">
+      {TRANSFER_SOURCES.map(({ id, label, icon: Icon }) => (<DropdownMenuItem key={id} onSelect={() => onPick(id)} className="gap-2"><Icon className="w-4 h-4"/>{label}</DropdownMenuItem>))}
+    </DropdownMenuContent>
+  </DropdownMenu>);
 import { buildTransferItems, countByFilter, matchesFilter, TRANSFER_FILTERS, TRANSFERRING_STATUSES, formatEta, kindLabel, statusInfo, rowActions } from "./transferRows";
 
 const TONE_CHIP = {
@@ -153,9 +167,7 @@ export const Transfers = ({ onNewTransfer }) => {
     };
     return (<div className="flex-1 flex flex-col overflow-hidden bg-background">
       <PageHeader icon={ArrowUpDown} title="Transfers" subtitle={stats.totalActive > 0 ? `${stats.totalActive} active · uploads, downloads and cloud leeches` : "Uploads, downloads and cloud leeches"} actions={<>
-          {onNewTransfer && (<Button size="sm" onClick={onNewTransfer} className="gap-1.5">
-              <Plus className="w-4 h-4"/>New transfer
-            </Button>)}
+          {onNewTransfer && <NewTransferMenu onPick={onNewTransfer}/>}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon" className="h-9 w-9" aria-label="Bulk actions" title="Bulk actions">
@@ -188,7 +200,7 @@ export const Transfers = ({ onNewTransfer }) => {
               <h3 className="text-sm font-semibold">{filter === "all" ? "No transfers yet" : `No ${TRANSFER_FILTERS.find((f) => f.id === filter).label.toLowerCase()} transfers`}</h3>
               <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">Uploads, downloads and cloud leeches show up here while they run.</p>
               <div className="mt-4 flex justify-center gap-2">
-                {onNewTransfer && <Button size="sm" onClick={onNewTransfer} className="gap-1.5"><Plus className="w-4 h-4"/>New transfer</Button>}
+                {onNewTransfer && <NewTransferMenu onPick={onNewTransfer}/>}
                 <Button size="sm" variant="outline" onClick={() => navigate("/")} className="gap-1.5"><Folder className="w-4 h-4"/>Go to Files</Button>
               </div>
             </div>) : (<div role="table" aria-label="Transfers" className="rounded-lg border border-border bg-card overflow-hidden">

@@ -58,9 +58,13 @@ def _start_session(request: Request, username: str, method: str, **extra) -> Non
 
 
 def _issue_token(username: str, method: str, user_data: Optional[dict]) -> str:
-    """Creates default folders for verified users and returns a token for the desktop app."""
-    if user_data and user_data.get("telegram_user_id"):
+    """Creates the starter folders once for a verified user and returns a token for the desktop app.
+
+    Only the first time: after that they are the user's own folders, free to rename or delete.
+    """
+    if user_data and user_data.get("telegram_user_id") and not user_data.get("default_folders_created"):
         created = database.Files.create_default_folders(str(user_data.get("telegram_user_id")))
+        database.Users.update_user_by_identifier(username, {"default_folders_created": True})
         logger.info(f"Default folders created for user {username}: {created}")
     auth_token = secrets.token_urlsafe(32)
     database.Users.save_auth_token(username, auth_token, method)

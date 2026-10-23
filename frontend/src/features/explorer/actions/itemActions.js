@@ -5,9 +5,14 @@ import { toast } from "sonner";
 import { api, fetchWithTimeout, getApiBaseUrl } from "@/lib/api";
 import logger from "@/lib/logger";
 import { downloadManager } from "@/features/transfers/downloadManager";
+import { TRASH_MOVE_MESSAGE } from "./batchActions";
 
 export function createItemActions({ cloudAccountId, cloudFolderId, currentApiPath, currentFolder, currentPath, deleteDialog, isCloudMode, isEffectiveTrashMode, isInboxMode, isTrashMode, moveItem, refetch, renamingItem, setDeleteDialog, setEmptyTrashDialogOpen, setFolderDownloadInfo, setIsEmptyingTrash, setNewFolderDialogOpen, setRenamingItem }) {
 const handleSidebarDrop = async (item, targetFolderName) => {
+    if (isEffectiveTrashMode || item.trashed) {
+        toast.error(TRASH_MOVE_MESSAGE);
+        return;
+    }
     try {
         // Construct the source path correctly
         let sourcePath = "/";
@@ -117,6 +122,10 @@ const handleRename = (item, index) => {
 };
 const handleMove = async (item, targetFolder) => {
     try {
+        if (isEffectiveTrashMode || item.trashed || targetFolder.trashed) {
+            toast.error(TRASH_MOVE_MESSAGE);
+            return;
+        }
         if (isCloudMode && cloudAccountId) {
             if (targetFolder.is_virtual || ["trash", "starred", "shared_with_me"].includes(targetFolder.id)) {
                 toast.error("Cannot move items into virtual folders.");
