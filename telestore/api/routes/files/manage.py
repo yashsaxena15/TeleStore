@@ -235,11 +235,10 @@ async def delete_file_route(
             m_id = doc.get("message_id")
             if c_id and m_id:
                 messages_to_delete[c_id].add(m_id)
-            if doc.get("is_split"):
-                for part in doc.get("parts", []):
-                    p_mid = part.get("message_id")
-                    if p_mid and c_id:
-                        messages_to_delete[c_id].add(p_mid)
+            for part in doc.get("parts") or []:  # every part, even if is_split is missing
+                p_mid = part.get("message_id")
+                if p_mid and c_id:
+                    messages_to_delete[c_id].add(p_mid)
 
         # Check if this is a folder
         if file_data.get("file_type") == "folder":
@@ -295,7 +294,8 @@ async def delete_file_route(
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="File not found")
         
-        # Delete Telegram message(s) from channel if any exist
+        # Delete Telegram message(s) from channel if any exist (but not ones a copy still uses)
+        messages_to_delete = database.Files.unreferenced_messages(messages_to_delete)
         if messages_to_delete:
             try:
                 bot_manager = getattr(http_request.app.state, 'bot_manager', None)
@@ -378,14 +378,14 @@ async def empty_trash_route(http_request: Request, user: User = Depends(require_
             m_id = doc.get("message_id")
             if c_id and m_id:
                 messages_to_delete[c_id].add(m_id)
-            if doc.get("is_split"):
-                for part in doc.get("parts", []):
-                    p_mid = part.get("message_id")
-                    if p_mid and c_id:
-                        messages_to_delete[c_id].add(p_mid)
+            for part in doc.get("parts") or []:  # every part, even if is_split is missing
+                p_mid = part.get("message_id")
+                if p_mid and c_id:
+                    messages_to_delete[c_id].add(p_mid)
         
         database.Files.delete_many({"trashed": True, "owner_id": user_id})
-        
+        messages_to_delete = database.Files.unreferenced_messages(messages_to_delete)
+
         if messages_to_delete:
             try:
                 bot_manager = getattr(http_request.app.state, 'bot_manager', None)

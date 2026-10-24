@@ -11,11 +11,12 @@ from fastapi import Request, Response, HTTPException
 from fastapi.responses import StreamingResponse, HTMLResponse
 
 from telestore.db import database
+from telestore.api.state import active_dav_uploads
 import re
 import asyncio
 import glob
 from telestore.services.byte_streamer import get_byte_streamer
-from telestore.services.streaming_utils import parse_range_header, resolve_mime_type
+from telestore.services.streaming_utils import RangeNotSatisfiable, parse_byte_range, resolve_mime_type
 from telestore.services.pipeline_uploader import upload_part_task
 
 from telestore.api.routes.webdav.browser import get_directory_items, render_webdav_html
@@ -53,17 +54,20 @@ async def handle_get_head(request: Request, segments: List[str], owner_id: str, 
             "trashed": {"$ne": True}
         })
     elif top_name == "Starred":
+        # Vault files never show through WebDAV (no PIN here), as the listings already hide them
         file_doc = database.Files.find_one({
             "file_name": target_name,
             "starred": True,
             "owner_id": owner_id,
-            "trashed": {"$ne": True}
+            "trashed": {"$ne": True},
+            "is_vault": {"$ne": True},
         })
     elif top_name == "Trash":
         file_doc = database.Files.find_one({
             "file_name": target_name,
             "trashed": True,
-            "owner_id": owner_id
+            "owner_id": owner_id,
+            "is_vault": {"$ne": True},
         })
 
     if not file_doc:
@@ -86,6 +90,11 @@ async def handle_get_head(request: Request, segments: List[str], owner_id: str, 
             }
         )
 
+    if not file_size or not (message_id or parts):
+        # An empty file (no Telegram message behind it)
+        return Response(status_code=200, headers={"Content-Length": "0", "Content-Type": content_type,
+                                                  "Last-Modified": format_dav_date(file_doc.get("modified_date"))})
+
     # GET stream
     bot_manager = getattr(request.app.state, "bot_manager", None)
     if not bot_manager:
@@ -97,8 +106,8 @@ async def handle_get_head(request: Request, segments: List[str], owner_id: str, 
 
     range_header = request.headers.get("Range", "")
     try:
-        from_bytes, until_bytes = parse_range_header(range_header, file_size)
-    except ValueError:
+        byte_range = parse_byte_range(range_header, file_size)
+    except RangeNotSatisfiable:
         return Response(
             status_code=416,
             headers={
@@ -107,6 +116,7 @@ async def handle_get_head(request: Request, segments: List[str], owner_id: str, 
             }
         )
 
+    from_bytes, until_bytes = byte_range or (0, max(0, file_size - 1))
     req_length = until_bytes - from_bytes + 1
 
     # Prepare streaming parts
@@ -155,19 +165,19 @@ async def handle_get_head(request: Request, segments: List[str], owner_id: str, 
         "Content-Length": str(req_length),
         "Content-Type": content_type,
         "Accept-Ranges": "bytes",
-        "Cache-Control": "public, max-age=3600, immutable",
+        "Cache-Control": "private, no-cache",  # a PUT can replace the file at this address
         "Last-Modified": format_dav_date(file_doc.get("modified_date")),
         "Content-Disposition": f'inline; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded_filename}',
         "X-Content-Type-Options": "nosniff",
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
     }
-    if range_header:
+    if byte_range:
         headers["Content-Range"] = f"bytes {from_bytes}-{until_bytes}/{file_size}"
 
     return StreamingResponse(
         body,
-        status_code=206 if range_header else 200,
+        status_code=206 if byte_range else 200,
         headers=headers
     )
 
@@ -202,6 +212,7 @@ async def handle_put(request: Request, segments: List[str], owner_id: str, defau
     os.makedirs(tg_files_dir, exist_ok=True)
     PART_MAX_SIZE = 1950 * 1024 * 1024  # 1950 MB Telegram Bot file limit
     upload_id = secrets.token_hex(8)
+    active_dav_uploads.add(upload_id)  # the tg_files janitor leaves it alone while it runs
     part_index = 1
     current_part_file = os.path.join(tg_files_dir, f"dav_{upload_id}_part_{part_index}.tmp")
     current_part_written = 0
@@ -282,7 +293,19 @@ async def handle_put(request: Request, segments: List[str], owner_id: str, defau
             disk_semaphore.release()
             if os.path.exists(current_part_file):
                 os.remove(current_part_file)
-            raise HTTPException(status_code=400, detail="Cannot upload empty files")
+            # Windows Explorer and Finder create a file empty first, then send its contents in a second
+            # PUT. Telegram can't hold an empty file, so it is a record with no message (0 bytes).
+            empty = {"chat_id": None, "message_id": None, "file_unique_id": f"empty_{upload_id}", "file_size": 0,
+                     "thumbnail": None, "file_type": file_type, "parts": None, "is_split": False,
+                     "modified_date": datetime.now(timezone.utc).isoformat()}
+            existing = database.Files.find_one({"file_name": file_name, "file_path": target_folder_path, "owner_id": owner_id, "trashed": {"$ne": True}})
+            if existing:
+                database.Files.update_one({"_id": existing["_id"]}, {"$set": empty})
+            else:
+                database.Files.insert_one({**empty, "file_name": file_name, "file_caption": f"WebDAV upload: {file_name}",
+                                           "file_path": target_folder_path, "owner_id": owner_id,
+                                           "starred": False, "trashed": False, "is_vault": False})
+            return Response(status_code=201)
 
         # Case 1: Single-part file (<= 1950MB)
         if len(upload_tasks) == 0:
@@ -319,8 +342,9 @@ async def handle_put(request: Request, segments: List[str], owner_id: str, defau
                         "thumbnail": res["thumbnail"],
                         "file_type": file_type,
                         "parts": None,
+                        "is_split": False,
                         "modified_date": datetime.now(timezone.utc).isoformat()
-                    }}
+                    }, "$unset": {"total_parts": "", "part_size": ""}}
                 )
             else:
                 database.Files.add_file(
@@ -387,6 +411,9 @@ async def handle_put(request: Request, segments: List[str], owner_id: str, defau
                 for r in results
             ]
 
+            # Marks the record as multi-part, as the website's uploads do: ZIP downloads, archive
+            # tools and "Delete forever" read is_split, and treated these as one 1.95 GB file
+            split_fields = {"is_split": True, "total_parts": len(parts), "part_size": parts[0]["part_size"] if parts else 0}
             existing = database.Files.find_one({
                 "file_name": file_name,
                 "file_path": target_folder_path,
@@ -404,6 +431,7 @@ async def handle_put(request: Request, segments: List[str], owner_id: str, defau
                         "thumbnail": first_thumbnail,
                         "file_type": file_type,
                         "parts": parts,
+                        **split_fields,
                         "modified_date": datetime.now(timezone.utc).isoformat()
                     }}
                 )
@@ -420,6 +448,8 @@ async def handle_put(request: Request, segments: List[str], owner_id: str, defau
                     "file_path": target_folder_path,
                     "owner_id": owner_id,
                     "parts": parts,
+                    **split_fields,
+                    "is_vault": target_folder_path == "/Vault" or target_folder_path.startswith("/Vault/"),
                     "modified_date": datetime.now(timezone.utc).isoformat(),
                     "starred": False,
                     "trashed": False
@@ -433,6 +463,7 @@ async def handle_put(request: Request, segments: List[str], owner_id: str, defau
         for t in upload_tasks:
             if not t.done():
                 t.cancel()
+        active_dav_uploads.discard(upload_id)
         # Clean up any leftover temporary files for this upload session
         for tmp in glob.glob(os.path.join(tg_files_dir, f"dav_{upload_id}_part_*.tmp")):
             try:

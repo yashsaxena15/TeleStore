@@ -6,7 +6,7 @@ from typing import Dict
 from pyrogram import Client
 from pyrogram import raw
 from pyrogram import utils
-from pyrogram.errors import AuthBytesInvalid
+from pyrogram.errors import AuthBytesInvalid, FloodWait
 from pyrogram.session import Session, Auth
 from pyrogram.file_id import FileId, FileType, ThumbnailSource
 
@@ -17,6 +17,7 @@ from collections import OrderedDict
 import threading
 from telestore.services.disk_cache_manager import DISK_CACHE_MANAGER
 
+MAX_FLOOD_WAIT_S = 30  # longer waits fail the chunk rather than stall the stream
 LOGGER = setup_logger(__name__)
 
 
@@ -238,8 +239,10 @@ class ByteStreamer:
                     GLOBAL_CHUNK_CACHE.put(chat_id, message_id, chunk_offset, chunk_size, disk_cached)
                     return disk_cached
 
-                # 3. Fetch from Telegram MTProto
-                for attempt in range(min(3, num_workers)):
+                # 3. Fetch from Telegram MTProto: a few tries spread over the bots, waiting out
+                # Telegram's FloodWait ("slow down") instead of counting it as a failure
+                attempts = max(3, num_workers)
+                for attempt in range(attempts):
                     w_c, sess, loc = worker_sessions[(chunk_seq - 1 + attempt) % num_workers]
                     try:
                         r = await sess.send(
@@ -261,14 +264,18 @@ class ByteStreamer:
                                     )
                                 )
                             return chunk_data
+                    except FloodWait as e:
+                        wait = min(int(getattr(e, "value", 1) or 1), MAX_FLOOD_WAIT_S)
+                        LOGGER.warning(f"FloodWait {wait}s fetching chunk {chunk_seq} from {getattr(w_c, 'name', str(w_c))}")
+                        await asyncio.sleep(wait)
                     except (TimeoutError, OSError, asyncio.TimeoutError) as e:
-                        if attempt == min(3, num_workers) - 1:
+                        if attempt == attempts - 1:
                             LOGGER.warning(f"Timeout fetching chunk {chunk_seq} from {getattr(w_c, 'name', str(w_c))}: {e}")
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(0.3 * (attempt + 1))
                     except Exception as e:
-                        if attempt == min(3, num_workers) - 1:
+                        if attempt == attempts - 1:
                             LOGGER.warning(f"Error fetching chunk {chunk_seq} from {getattr(w_c, 'name', str(w_c))}: {e}")
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(0.3 * (attempt + 1))
                 return b""
 
             tasks: Dict[int, asyncio.Task] = {}
@@ -295,12 +302,16 @@ class ByteStreamer:
 
                     task = tasks.pop(current_chunk, None)
                     if not task:
-                        break
+                        LOGGER.error(f"Chunk {current_chunk}/{part_count} of part {part_idx_num} was never scheduled; stopping")
+                        return
 
                     chunk = await task
                     if not chunk:
-                        LOGGER.warning(f"Empty chunk at {current_chunk}/{part_count} for part {part_idx_num}")
-                        break
+                        # Stop the whole stream. A `break` here used to go on to the next part, which put
+                        # its bytes where this part's missing bytes belong: a download that looked complete
+                        # but was corrupt. Ending early lets the client see it is incomplete and retry.
+                        LOGGER.error(f"Chunk {current_chunk}/{part_count} of part {part_idx_num} couldn't be fetched; stopping the stream")
+                        return
 
                     if part_count == 1:
                         yield chunk[first_part_cut:last_part_cut]
@@ -366,7 +377,8 @@ class ByteStreamer:
                 return disk_cached
 
             # 3. Fetch from Telegram MTProto
-            for attempt in range(min(3, num_workers)):
+            attempts = max(3, num_workers)
+            for attempt in range(attempts):
                 w_c, sess, loc = worker_sessions[(part_idx - 1 + attempt) % num_workers]
                 try:
                     r = await sess.send(
@@ -386,14 +398,18 @@ class ByteStreamer:
                                 )
                             )
                         return chunk_data
+                except FloodWait as e:
+                    wait = min(int(getattr(e, "value", 1) or 1), MAX_FLOOD_WAIT_S)
+                    LOGGER.warning(f"FloodWait {wait}s fetching part {part_idx} from {getattr(w_c, 'name', str(w_c))}")
+                    await asyncio.sleep(wait)
                 except (TimeoutError, OSError, asyncio.TimeoutError) as e:
-                    if attempt == min(3, num_workers) - 1:
+                    if attempt == attempts - 1:
                         LOGGER.warning(f"Timeout fetching part {part_idx} from {getattr(w_c, 'name', str(w_c))}: {e}")
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0.3 * (attempt + 1))
                 except Exception as e:
-                    if attempt == min(3, num_workers) - 1:
+                    if attempt == attempts - 1:
                         LOGGER.error(f"Error fetching part {part_idx} from {getattr(w_c, 'name', str(w_c))}: {e}")
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0.3 * (attempt + 1))
             return b""
 
         tasks: Dict[int, asyncio.Task] = {}

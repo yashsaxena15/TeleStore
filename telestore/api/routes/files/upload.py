@@ -4,6 +4,7 @@ from fastapi import Request, Depends, HTTPException, File, UploadFile, Form
 from pydantic import BaseModel
 import os
 import asyncio
+import time
 import datetime
 import aiofiles
 import secrets
@@ -303,6 +304,12 @@ async def upload_file(
 # Chunked Resumable Upload Endpoints (for 2GB+ & large files)
 # ----------------------------------------------------
 _active_upload_sessions: Dict[str, Dict[str, Any]] = {}
+SESSION_IDLE_LIMIT_S = 3600
+
+
+def active_upload_dirs() -> set:
+    """Temp folders of uploads still in progress (the tg_files janitor must leave them alone)."""
+    return {os.path.basename(s["dir"]) for s in _active_upload_sessions.values() if s.get("dir")}
 
 class InitUploadRequest(BaseModel):
     filename: str
@@ -317,11 +324,12 @@ async def init_chunked_upload(
     if not user.telegram_user_id:
         raise HTTPException(status_code=400, detail="TELEGRAM_NOT_VERIFIED: Please verify your Telegram account before uploading files")
 
-    # Clean up old upload sessions (> 1 hour old)
-    now = datetime.datetime.utcnow()
+    # Drop sessions nobody has touched for an hour. Measured from the last chunk, not the start:
+    # a 5 GB upload on a slow line runs for hours and must not be cut off by someone else's upload.
+    now_ts = time.time()
     expired_uids = [
         uid for uid, s in list(_active_upload_sessions.items())
-        if (now - datetime.datetime.fromisoformat(s.get("created_at", now.isoformat()))).total_seconds() > 3600
+        if s.get("status") != "processing" and now_ts - s.get("last_activity", now_ts) > SESSION_IDLE_LIMIT_S
     ]
     for uid in expired_uids:
         s = _active_upload_sessions.pop(uid, None)
@@ -352,6 +360,9 @@ async def init_chunked_upload(
         "path": req.path or "/Home",
         "user_id": str(user.telegram_user_id),
         "created_at": datetime.datetime.utcnow().isoformat(),
+        "last_activity": time.time(),
+        "next_chunk": 0,
+        "lock": asyncio.Lock(),
         "total_written": 0,
         "current_part_index": 1,
         "current_part_written": 0,
@@ -382,7 +393,22 @@ async def upload_file_chunk(
         raise HTTPException(status_code=404, detail="Upload session not found or expired")
 
     priority_manager.touch_user_upload(upload_id)
+    session["last_activity"] = time.time()
 
+    # One chunk at a time per upload, each written exactly once and in order. A chunk the browser
+    # sends again (its reply was lost, or it timed out while the server waited for disk room) is
+    # acknowledged without being appended a second time, which used to corrupt the file.
+    async with session["lock"]:
+        expected = session["next_chunk"]
+        if chunk_index < expected:
+            return {"status": "duplicate", "chunk_index": chunk_index, "next_chunk": expected,
+                    "total_written": session["total_written"], "parts_uploaded": len(session.get("upload_tasks", []))}
+        if chunk_index > expected:
+            raise HTTPException(status_code=409, detail={"message": f"Expected chunk {expected}, got {chunk_index}", "next_chunk": expected})
+        return await _write_chunk(request, session, upload_id, chunk_index, chunk_file, user)
+
+
+async def _write_chunk(request: Request, session: dict, upload_id: str, chunk_index: int, chunk_file: UploadFile, user: User):
     PART_MAX_SIZE = 1950 * 1024 * 1024
     part_idx = session["current_part_index"]
     part_file_path = os.path.join(session["dir"], f"part_{part_idx}.tmp")
@@ -390,18 +416,25 @@ async def upload_file_chunk(
     content = await chunk_file.read()
     chunk_len = len(content)
 
+    fills_part = session["current_part_written"] + chunk_len >= PART_MAX_SIZE
+    if fills_part:
+        # Check before writing: if this chunk is kept but the part can't be sent, the part would
+        # grow past Telegram's 2 GB limit (and a retry of this chunk would count as a duplicate)
+        bot_manager = getattr(request.app.state, 'bot_manager', None)
+        user_data = database.Users.find_one({"telegram_user_id": user.telegram_user_id}) or {}
+        chat_id = user_data.get("index_chat_id")
+        client = bot_manager.get_least_busy_client() if bot_manager else None
+        if not chat_id or not client:
+            raise HTTPException(status_code=503, detail="No Telegram bot or index chat is available right now. Try again in a minute.")
+
     async with aiofiles.open(part_file_path, 'ab') as f:
         await f.write(content)
 
     session["current_part_written"] += chunk_len
     session["total_written"] += chunk_len
+    session["next_chunk"] = chunk_index + 1
 
-    if session["current_part_written"] >= PART_MAX_SIZE:
-        bot_manager = getattr(request.app.state, 'bot_manager', None)
-        user_data = database.Users.find_one({"telegram_user_id": user.telegram_user_id})
-        chat_id = user_data.get("index_chat_id")
-        client = bot_manager.get_least_busy_client() if bot_manager else None
-
+    if fills_part:
         if chat_id and client:
             file_extension = os.path.splitext(session["filename"])[1].lower()
             file_type = "document"
@@ -644,7 +677,7 @@ async def complete_chunked_upload(
         raise HTTPException(status_code=404, detail="Upload session not found or expired")
 
     bot_manager = getattr(request.app.state, 'bot_manager', None)
-    user_data = database.Users.find_one({"telegram_user_id": user.telegram_user_id})
+    user_data = database.Users.find_one({"telegram_user_id": user.telegram_user_id}) or {}
     chat_id = user_data.get("index_chat_id")
     client = bot_manager.get_least_busy_client() if bot_manager else None
 
@@ -658,6 +691,14 @@ async def complete_chunked_upload(
             "upload_id": upload_id,
             "message": "Upload is already processing or completed"
         }
+
+    # Every byte must have arrived exactly once before the file is saved
+    expected = session.get("filesize")
+    if expected is not None and session["total_written"] != expected:
+        raise HTTPException(status_code=409, detail={
+            "message": f"Upload incomplete: received {session['total_written']} of {expected} bytes.",
+            "next_chunk": session.get("next_chunk", 0),
+        })
 
     session["status"] = "processing"
     # Run Telegram upload in background task so HTTP connection responds immediately

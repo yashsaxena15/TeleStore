@@ -7,7 +7,7 @@ import mimetypes
 
 from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, Response
 from concurrent.futures import ThreadPoolExecutor
 
 from pyrogram import Client
@@ -20,7 +20,7 @@ from telestore.security.credentials import require_auth
 from d4rk.Logs import setup_logger
 
 # Import utility functions from streaming_utils module
-from telestore.services.streaming_utils import parse_range_header, resolve_mime_type
+from telestore.services.streaming_utils import RangeNotSatisfiable, parse_byte_range, resolve_mime_type
 
 # Import ByteStreamer class from byte_streamer module
 from telestore.services.byte_streamer import get_byte_streamer
@@ -73,6 +73,7 @@ async def stream_handler(request: Request, file_name: str):
     # If we got here, we have a valid user
     # Use the user's Telegram ID as the user identifier, or username if no Telegram ID
     user_id = str(user.telegram_user_id) if user.telegram_user_id else user.username
+    owner_ids = [i for i in {user_id, user.username, str(user.telegram_user_id) if user.telegram_user_id else None} if i]
     
     # Decode URL encoded file name
     import urllib.parse
@@ -94,48 +95,42 @@ async def stream_handler(request: Request, file_name: str):
         extracted_filename = os.path.basename(decoded_file_name)
         file_data = None
 
+        # Only the signed-in user's own files. Several of these lookups used to search everyone's
+        # files (by ID, or by name as a last resort), so a known ID or a common name could
+        # return another user's file.
+        mine = {"owner_id": {"$in": owner_ids}}
+
         # 1. If file_id is provided, match by ObjectId, unique_id, or message_id
         if file_id_param:
             from bson import ObjectId
             try:
                 if ObjectId.is_valid(file_id_param):
-                    file_data = database.Files.find_one({"_id": ObjectId(file_id_param), "trashed": {"$ne": True}})
+                    file_data = database.Files.find_one({"_id": ObjectId(file_id_param), **mine})
             except Exception:
                 pass
             if not file_data:
-                file_data = database.Files.find_one({"file_unique_id": file_id_param, "trashed": {"$ne": True}})
+                file_data = database.Files.find_one({"file_unique_id": file_id_param, "trashed": {"$ne": True}, **mine})
             if not file_data and file_id_param.isdigit():
-                file_data = database.Files.find_one({"message_id": int(file_id_param), "trashed": {"$ne": True}})
+                file_data = database.Files.find_one({"message_id": int(file_id_param), "trashed": {"$ne": True}, **mine})
 
         # 2. If path is provided, match file_name and file_path
         if not file_data and path_param:
             file_data = database.Files.find_one({
                 "file_name": extracted_filename,
                 "file_path": path_param,
-                "owner_id": user_id,
-                "trashed": {"$ne": True}
+                "trashed": {"$ne": True},
+                **mine,
             })
-            if not file_data:
-                file_data = database.Files.find_one({
-                    "file_name": extracted_filename,
-                    "file_path": path_param,
-                    "trashed": {"$ne": True}
-                })
 
-        # 3. Fallback to name search (excluding trashed first)
+        # 3. Fallback to name search (not trashed first, then trashed, e.g. previewing in Trash)
         if not file_data:
-            file_data = database.Files.find_one({"file_name": extracted_filename, "owner_id": user_id, "trashed": {"$ne": True}})
+            for name in (extracted_filename, decoded_file_name):
+                file_data = database.Files.find_one({"file_name": name, "trashed": {"$ne": True}, **mine})
+                if file_data:
+                    break
             if not file_data:
-                file_data = database.Files.find_one({"file_name": decoded_file_name, "owner_id": user_id, "trashed": {"$ne": True}})
-            if not file_data:
-                file_data = database.Files.find_one({"file_name": extracted_filename, "trashed": {"$ne": True}})
-            if not file_data:
-                file_data = database.Files.find_one({"file_name": decoded_file_name, "trashed": {"$ne": True}})
-            # Final fallback even if trashed (e.g. previewing trashed item)
-            if not file_data:
-                file_data = database.Files.find_one({"file_name": extracted_filename})
-            if not file_data:
-                file_data = database.Files.find_one({"file_name": decoded_file_name})
+                file_data = database.Files.find_one({"file_name": extracted_filename, **mine}) or \
+                    database.Files.find_one({"file_name": decoded_file_name, **mine})
 
         if not file_data:
             print(f"File not found in database for name: {decoded_file_name}")
@@ -157,6 +152,13 @@ async def stream_handler(request: Request, file_name: str):
         total_file_size = file_data.get("file_size")
         stored_file_name = file_data.get("file_name", decoded_file_name)
         
+        if not total_file_size and not message_id and not parts_list:
+            # An empty file (e.g. created by Windows Explorer over WebDAV): nothing in Telegram
+            return Response(status_code=200, headers={
+                "Content-Length": "0", "Content-Type": "application/octet-stream",
+                "Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(stored_file_name)}",
+            })
+
         if not file_unique_id or not chat_id or not message_id:
             raise HTTPException(status_code=404, detail="File not found")
         
@@ -451,7 +453,11 @@ async def media_streamer(
 
     parts_list = parts_list or parts
 
-    from_bytes, until_bytes = parse_range_header(range_header, file_size)
+    try:
+        byte_range = parse_byte_range(range_header, file_size)
+    except RangeNotSatisfiable:
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}", "Accept-Ranges": "bytes"})
+    from_bytes, until_bytes = byte_range or (0, max(0, file_size - 1))
 
     chunk_size = 1024 * 1024
     req_length = until_bytes - from_bytes + 1
@@ -567,7 +573,8 @@ async def media_streamer(
         "Content-Length": str(req_length),
         "Content-Disposition": content_disposition,
         "Accept-Ranges": "bytes",
-        "Cache-Control": "public, max-age=3600, immutable",
+        # Private: the URL carries the user's sign-in token. Not immutable: WebDAV can replace a file.
+        "Cache-Control": "private, max-age=3600",
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
     }
@@ -577,11 +584,17 @@ async def media_streamer(
         headers["X-Content-Type-Options"] = "nosniff"
         headers["X-Frame-Options"] = "SAMEORIGIN"
 
-    if range_header:
+    if byte_range:
         headers["Content-Range"] = f"bytes {from_bytes}-{until_bytes}/{file_size}"
         status_code = 206
     else:
         status_code = 200
+
+    if request.method == "HEAD":
+        # Headers only. A StreamingResponse would still pull the whole range from Telegram (and
+        # write it to the disk cache) just to throw it away; players send HEAD to learn the size.
+        await body.aclose()
+        return Response(status_code=status_code, headers=headers)
 
     return StreamingResponse(
         status_code=status_code,
