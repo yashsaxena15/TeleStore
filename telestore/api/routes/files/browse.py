@@ -112,7 +112,9 @@ async def get_storage_analytics_route(user: User = Depends(require_auth)):
     try:
         user_id = str(user.telegram_user_id) if user.telegram_user_id else user.username
         stats = database.Files.get_storage_analytics(user_id)
-        return stats
+        from telestore.config import STORAGE_QUOTA_BYTES
+        used = stats.get("total_bytes") or 0
+        return {**stats, "quota_bytes": STORAGE_QUOTA_BYTES, "free_bytes": max(0, STORAGE_QUOTA_BYTES - used)}
     except Exception as e:
         logger.error(f"Error getting storage analytics: {e}")
         raise HTTPException(status_code=500, detail=str(e))

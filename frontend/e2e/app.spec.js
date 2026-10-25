@@ -631,6 +631,7 @@ test.describe("storage", () => {
         await expect(page.getByText("1843")).toBeVisible();
         await expect(page.getByRole("cell", { name: "Videos" })).toBeVisible();
         await expect(page.getByText("Dune.Part.Two.2024.2160p.HDR.mkv")).toBeVisible();
+        await expect(page.getByLabel("Storage space")).toHaveText(/^of 100 TB · 99\.\d+ TB free$/);
     });
 });
 
