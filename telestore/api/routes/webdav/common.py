@@ -183,6 +183,49 @@ def quota_props(owner_id: str) -> str:
             f"\n        <D:quota-used-bytes>{used}</D:quota-used-bytes>")
 
 
+# Starred and Trash are flat lists, but a folder shown there can be opened: its contents are the
+# items stored under the folder's real path (the live ones in Starred, the trashed ones in Trash).
+def folder_contents_paths(folder: Dict[str, Any]) -> List[str]:
+    """The file_path values a folder's own items are stored under."""
+    parent = (folder.get("file_path") or "/").rstrip("/")
+    name = folder.get("file_name", "")
+    if parent in ("", "/Home"):
+        return [f"/Home/{name}", f"/{name}"]  # Home's top level is stored as "/Home" or "/"
+    return [f"{parent}/{name}"]
+
+
+def _section_query(top_name: str, owner_id: str) -> Optional[Dict[str, Any]]:
+    # Vault items never show through WebDAV (no PIN here)
+    if top_name == "Starred":
+        return {"owner_id": owner_id, "trashed": {"$ne": True}, "is_vault": {"$ne": True}}
+    if top_name == "Trash":
+        return {"owner_id": owner_id, "trashed": True, "is_vault": {"$ne": True}}
+    return None
+
+
+def resolve_section_item(segments: List[str], owner_id: str) -> Optional[Dict[str, Any]]:
+    """The item at /webdav/Starred/... or /webdav/Trash/..., following folders opened inside it."""
+    query = _section_query(segments[0], owner_id) if len(segments) >= 2 else None
+    if query is None:
+        return None
+    first = {**query, "file_name": segments[1]}
+    if segments[0] == "Starred":
+        first["starred"] = True
+    if len(segments) > 2:
+        first["file_type"] = "folder"
+    doc = database.Files.find_one(first)
+    for name in segments[2:]:
+        if not doc or doc.get("file_type") != "folder":
+            return None
+        doc = database.Files.find_one({**query, "file_name": name, "file_path": {"$in": folder_contents_paths(doc)}})
+    return doc
+
+
+def section_folder_items(top_name: str, folder: Dict[str, Any], owner_id: str) -> List[Dict[str, Any]]:
+    """What a folder opened inside Starred (live items) or Trash (trashed items) contains."""
+    return list(database.Files.find({**_section_query(top_name, owner_id), "file_path": {"$in": folder_contents_paths(folder)}}))
+
+
 COLLECTION_TYPE = "<D:resourcetype><D:collection/></D:resourcetype>"
 
 

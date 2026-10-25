@@ -9,7 +9,7 @@ from typing import Optional, Tuple, Dict, Any, List
 
 from telestore.db import database
 
-from telestore.api.routes.webdav.common import VIRTUAL_TOP_LEVEL
+from telestore.api.routes.webdav.common import VIRTUAL_TOP_LEVEL, resolve_section_item, section_folder_items
 
 def format_size(size_bytes: Optional[int]) -> str:
     """Format bytes into human-readable size string."""
@@ -211,6 +211,24 @@ def get_directory_items(segments: List[str], owner_id: str) -> Tuple[bool, List[
                     "href": f"{base_url}/{urllib.parse.quote(sf_name, safe='')}"
                 })
 
+            return True, items
+
+    # 4. Folder opened inside Starred or Trash
+    if len(segments) >= 2 and segments[0] in ("Starred", "Trash"):
+        folder_doc = resolve_section_item(segments, owner_id)
+        if folder_doc and folder_doc.get("file_type") == "folder":
+            base_url = "/webdav/" + "/".join(urllib.parse.quote(s, safe="") for s in segments)
+            items = []
+            for child in section_folder_items(segments[0], folder_doc, owner_id):
+                cname = child.get("file_name", "Item")
+                is_fol = child.get("file_type") == "folder"
+                items.append({
+                    "name": cname,
+                    "is_dir": is_fol,
+                    "size": child.get("file_size", 0),
+                    "modified": child.get("modified_date"),
+                    "href": f"{base_url}/{urllib.parse.quote(cname, safe='')}" + ("/" if is_fol else "")
+                })
             return True, items
 
     return False, []
