@@ -18,6 +18,23 @@ import threading
 from telestore.services.disk_cache_manager import DISK_CACHE_MANAGER
 
 MAX_FLOOD_WAIT_S = 30  # longer waits fail the chunk rather than stall the stream
+MAX_WORKERS_PER_STREAM = 8  # bots one stream may use at once
+REQUESTS_PER_BOT = 3        # 1 MB chunk requests in flight per bot
+MAX_IN_FLIGHT = 16          # per stream (about 16 MB of memory)
+MAX_PENDING_CACHE_WRITES = 32
+
+
+_pending_cache_writes: set = set()
+
+
+def _cache_in_background(chat_id, message_id, chunk_offset, chunk_size, data, is_header=False):
+    """Writes a chunk to the SSD cache without holding up the stream. When the disk is behind,
+    the write is skipped instead of piling up tasks (each holding 1 MB of memory)."""
+    if len(_pending_cache_writes) >= MAX_PENDING_CACHE_WRITES:
+        return
+    task = asyncio.create_task(DISK_CACHE_MANAGER.put_async(chat_id, message_id, chunk_offset, chunk_size, data, is_header=is_header))
+    _pending_cache_writes.add(task)  # keeps a reference until it finishes
+    task.add_done_callback(_pending_cache_writes.discard)
 LOGGER = setup_logger(__name__)
 
 
@@ -107,7 +124,7 @@ class ByteStreamer:
             self.__cached_file_ids[key] = file_id
         return self.__cached_file_ids[key]
 
-    async def yield_parts(self, parts_to_stream: list, chunk_size: int, client_list: list = None):
+    async def yield_parts(self, parts_to_stream: list, chunk_size: int, client_list: list = None, cache_writes: bool = True):
         """
         Stream one or more parts of a file seamlessly across multiple Telegram messages.
         Each item in parts_to_stream is a dict with:
@@ -118,6 +135,8 @@ class ByteStreamer:
             'part_until_byte': int,
             'part_index': int
         }
+        cache_writes=False skips the SSD cache (whole-file downloads): one 5 GB download would
+        otherwise push every cached video out.
         """
         active_clients = client_list or [self.client]
 
@@ -136,41 +155,38 @@ class ByteStreamer:
             last_part_cut = (part_until % chunk_size) + 1
             part_count = math.ceil((part_until + 1) / chunk_size) - math.floor(offset / chunk_size)
 
-            # Instant Multi-Tier Cache Fast-Path: L1 (RAM) -> L2 (SSD Disk)
-            all_cached = True
-            cached_chunks = {}
-            for seq in range(1, part_count + 1):
-                p_offset = offset + (seq - 1) * chunk_size
-                # 1. Check L1 RAM Cache
+            # Serve from the caches (RAM, then SSD) one chunk at a time, for as long as they have
+            # the chunks; from the first miss on, fetch from Telegram. (This used to read a whole
+            # cached part, up to 1.95 GB, into memory before sending its first byte.)
+            served = 0
+            while served < part_count:
+                p_offset = offset + served * chunk_size
                 c_data = GLOBAL_CHUNK_CACHE.get(chat_id, message_id, p_offset, chunk_size)
                 if c_data is None:
-                    # 2. Check L2 SSD Disk Cache
-                    c_data = DISK_CACHE_MANAGER.get(chat_id, message_id, p_offset, chunk_size)
-                    if c_data is not None:
-                        GLOBAL_CHUNK_CACHE.put(chat_id, message_id, p_offset, chunk_size, c_data)
-
-                if c_data is not None:
-                    cached_chunks[seq] = c_data
+                    c_data = await asyncio.to_thread(DISK_CACHE_MANAGER.get, chat_id, message_id, p_offset, chunk_size)
+                    if c_data is None:
+                        break
+                    GLOBAL_CHUNK_CACHE.put(chat_id, message_id, p_offset, chunk_size, c_data)
+                seq = served + 1
+                if part_count == 1:
+                    yield c_data[first_part_cut:last_part_cut]
+                elif seq == 1:
+                    yield c_data[first_part_cut:]
+                elif seq == part_count:
+                    yield c_data[:last_part_cut]
                 else:
-                    all_cached = False
-                    break
-
-            if all_cached:
-                LOGGER.debug(f"Part {part_idx_num} (bytes {part_from}-{part_until}) served instantly from L1/L2 Cache")
-                for seq in range(1, part_count + 1):
-                    chunk = cached_chunks[seq]
-                    if part_count == 1:
-                        yield chunk[first_part_cut:last_part_cut]
-                    elif seq == 1:
-                        yield chunk[first_part_cut:]
-                    elif seq == part_count:
-                        yield chunk[:last_part_cut]
-                    else:
-                        yield chunk
+                    yield c_data
+                served += 1
+            if served == part_count:
                 continue
+            if served:
+                # The rest of this part comes from Telegram, starting at the first chunk not cached
+                offset += served * chunk_size
+                part_count -= served
+                first_part_cut = 0
 
             # Cache miss: Gather workers in parallel (limit to max 4 needed workers for speed)
-            max_needed = min(len(active_clients), max(2, min(part_count, 4)))
+            max_needed = min(len(active_clients), MAX_WORKERS_PER_STREAM, max(2, part_count))
             workers = []
 
             # Check primary client first (usually warm in cache)
@@ -225,7 +241,9 @@ class ByteStreamer:
                     w_c.add_workload(1)
 
             num_workers = len(worker_sessions)
-            PREFETCH_COUNT = max(2, min(num_workers, 4))
+            # Several 1 MB requests in flight per bot (one connection carries them all); 1 MB is
+            # Telegram's largest chunk, so more requests at once is what makes a stream faster
+            PREFETCH_COUNT = min(MAX_IN_FLIGHT, max(4, REQUESTS_PER_BOT * num_workers))
 
             async def fetch_part_chunk(chunk_seq: int, chunk_offset: int) -> bytes:
                 # 1. Check L1 RAM Chunk Cache for 0ms instant seeking/rewind
@@ -233,8 +251,8 @@ class ByteStreamer:
                 if cached is not None:
                     return cached
 
-                # 2. Check L2 SSD Disk Cache
-                disk_cached = DISK_CACHE_MANAGER.get(chat_id, message_id, chunk_offset, chunk_size)
+                # 2. Check L2 SSD Disk Cache (in a thread: it is file and SQLite I/O)
+                disk_cached = await asyncio.to_thread(DISK_CACHE_MANAGER.get, chat_id, message_id, chunk_offset, chunk_size)
                 if disk_cached is not None:
                     GLOBAL_CHUNK_CACHE.put(chat_id, message_id, chunk_offset, chunk_size, disk_cached)
                     return disk_cached
@@ -256,13 +274,11 @@ class ByteStreamer:
                             if chunk_data:
                                 # Save to L1 RAM Cache
                                 GLOBAL_CHUNK_CACHE.put(chat_id, message_id, chunk_offset, chunk_size, chunk_data)
-                                # Asynchronously persist to L2 SSD cache in background
-                                is_header = (chunk_offset == 0 or chunk_seq == 1 or chunk_seq == part_count)
-                                asyncio.create_task(
-                                    DISK_CACHE_MANAGER.put_async(
-                                        chat_id, message_id, chunk_offset, chunk_size, chunk_data, is_header=is_header
-                                    )
-                                )
+                                if cache_writes:
+                                    # Kept longer: the start of a file (players read it first). Not
+                                    # every seek's first chunk, which piled up and filled the cache.
+                                    _cache_in_background(chat_id, message_id, chunk_offset, chunk_size, chunk_data,
+                                                         is_header=chunk_offset == 0)
                             return chunk_data
                     except FloodWait as e:
                         wait = min(int(getattr(e, "value", 1) or 1), MAX_FLOOD_WAIT_S)
@@ -370,8 +386,8 @@ class ByteStreamer:
             if cached is not None:
                 return cached
 
-            # 2. Check L2 SSD Disk Cache
-            disk_cached = DISK_CACHE_MANAGER.get(fid_id, 0, part_offset, chunk_size)
+            # 2. Check L2 SSD Disk Cache (in a thread: it is file and SQLite I/O)
+            disk_cached = await asyncio.to_thread(DISK_CACHE_MANAGER.get, fid_id, 0, part_offset, chunk_size)
             if disk_cached is not None:
                 GLOBAL_CHUNK_CACHE.put(fid_id, 0, part_offset, chunk_size, disk_cached)
                 return disk_cached
@@ -391,12 +407,7 @@ class ByteStreamer:
                         chunk_data = r.bytes
                         if chunk_data:
                             GLOBAL_CHUNK_CACHE.put(fid_id, 0, part_offset, chunk_size, chunk_data)
-                            is_header = (part_offset == 0 or part_idx == 1 or part_idx == part_count)
-                            asyncio.create_task(
-                                DISK_CACHE_MANAGER.put_async(
-                                    fid_id, 0, part_offset, chunk_size, chunk_data, is_header=is_header
-                                )
-                            )
+                            _cache_in_background(fid_id, 0, part_offset, chunk_size, chunk_data, is_header=part_offset == 0)
                         return chunk_data
                 except FloodWait as e:
                     wait = min(int(getattr(e, "value", 1) or 1), MAX_FLOOD_WAIT_S)

@@ -291,7 +291,8 @@ export const api = {
         formData.append('destination_path', destination_path);
         return post('/transfers/remote/upload-torrent', formData, { timeout: 120000, fallback: 'Failed to upload torrent file' });
     },
-    getRemoteTasks: () => request('/transfers/remote/tasks', { soft: { tasks: [] } }),
+    // null on a failed poll, so the page keeps the last list instead of emptying it
+    getRemoteTasks: () => request('/transfers/remote/tasks', { soft: null }),
     cancelRemoteTask: (task_id) => post('/transfers/remote/cancel', { task_id }, { fallback: 'Failed to cancel remote transfer' }),
     cancelRemoteGroup: (group_id) => post('/transfers/remote/cancel-group', { group_id }, { fallback: 'Failed to cancel folder transfers' }),
     resumeRemoteGroup: (group_id) => post('/transfers/remote/resume-group', { group_id }, { fallback: 'Failed to resume folder transfers' }),

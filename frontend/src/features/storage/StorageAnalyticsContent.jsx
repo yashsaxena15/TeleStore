@@ -358,6 +358,11 @@ export const StorageAnalyticsContent = ({
                   <span className="text-xl sm:text-2xl font-bold text-primary">
                     {formatBytes(totalBytes)}
                   </span>
+                  {data?.quota_bytes ? (
+                    <span className="text-xs text-muted-foreground block" aria-label="Storage space">
+                      of {formatBytes(data.quota_bytes)} · {formatBytes(data.free_bytes ?? Math.max(0, data.quota_bytes - totalBytes))} free
+                    </span>
+                  ) : null}
                 </div>
               </div>
             </CardHeader>

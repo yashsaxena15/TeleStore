@@ -20,7 +20,7 @@ from telestore.services.streaming_utils import RangeNotSatisfiable, parse_byte_r
 from telestore.services.pipeline_uploader import upload_part_task
 
 from telestore.api.routes.webdav.browser import get_directory_items, render_webdav_html
-from telestore.api.routes.webdav.common import format_dav_date, logger
+from telestore.api.routes.webdav.common import format_dav_date, logger, resolve_section_item
 
 async def handle_get_head(request: Request, segments: List[str], owner_id: str, is_head: bool = False) -> Response:
     """Handle WebDAV file download, Range-based media streaming, or HTML directory browsing."""
@@ -53,22 +53,10 @@ async def handle_get_head(request: Request, segments: List[str], owner_id: str, 
             "owner_id": owner_id,
             "trashed": {"$ne": True}
         })
-    elif top_name == "Starred":
-        # Vault files never show through WebDAV (no PIN here), as the listings already hide them
-        file_doc = database.Files.find_one({
-            "file_name": target_name,
-            "starred": True,
-            "owner_id": owner_id,
-            "trashed": {"$ne": True},
-            "is_vault": {"$ne": True},
-        })
-    elif top_name == "Trash":
-        file_doc = database.Files.find_one({
-            "file_name": target_name,
-            "trashed": True,
-            "owner_id": owner_id,
-            "is_vault": {"$ne": True},
-        })
+    elif top_name in ("Starred", "Trash"):
+        file_doc = resolve_section_item(segments, owner_id)
+        if file_doc and file_doc.get("file_type") == "folder":
+            file_doc = None
 
     if not file_doc:
         raise HTTPException(status_code=404, detail="File not found")
@@ -157,6 +145,7 @@ async def handle_get_head(request: Request, segments: List[str], owner_id: str, 
         parts_to_stream=parts_to_stream,
         chunk_size=1024 * 1024,
         client_list=active_clients,
+        cache_writes=byte_range is not None,  # players seek with ranges; a whole-file copy is read once
     )
 
     encoded_filename = urllib.parse.quote(target_name)
@@ -228,7 +217,7 @@ async def handle_put(request: Request, segments: List[str], owner_id: str, defau
         file_type = "video"
     elif ext in ["jpg", "jpeg", "png", "gif", "webp"]:
         file_type = "photo"
-    elif ext in ["mp3", "wav", "ogg", "flac", "m4a"]:
+    elif ext in ["mp3", "wav", "ogg", "flac", "m4a", "opus", "aac"]:
         file_type = "audio"
 
     part_f = await aiofiles.open(current_part_file, "wb")

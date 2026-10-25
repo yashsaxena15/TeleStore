@@ -1,4 +1,5 @@
 # telestore/api/routes/webdav/dispatcher.py
+import asyncio
 
 from fastapi import Request, Response, HTTPException
 
@@ -28,7 +29,8 @@ async def webdav_dispatcher(request: Request, path: str = ""):
         )
 
     # 2. Authenticate all operational WebDAV requests
-    user_data, owner_id, default_chat_id = authenticate_webdav(request)
+    # In a thread: checking a password (scrypt + database) would otherwise stall every stream
+    user_data, owner_id, default_chat_id = await asyncio.to_thread(authenticate_webdav, request)
     segments = parse_webdav_path(path)
     active, can_upload = account_flags(user_data.get("username"), user_data)
     if not active:

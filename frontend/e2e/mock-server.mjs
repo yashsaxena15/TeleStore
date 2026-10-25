@@ -38,6 +38,8 @@ FOLDERS["/trash"] = [
 ];
 // A folder of songs, to check that a long audio queue scrolls
 FOLDERS["/Home/Music"] = Array.from({ length: 20 }, (_, n) => file(3000 + n, `Song ${String(n + 1).padStart(2, "0")}.mp3`, "audio", 5_000_000, "/Home/Music"));
+// A file too big to collect in the page: it goes to the browser's own downloads
+FOLDERS["/Home/Music"].push(file(500, "huge-backup.zip", "archive", 300 * 1024 * 1024, "/Home/Music"));
 // A big folder, to check that long lists stay quick to render
 FOLDERS["/Home/Documents"] = Array.from({ length: 1500 }, (_, n) => file(1000 + n, `scan-${String(n + 1).padStart(4, "0")}.pdf`, "document", 120_000 + n, "/Home/Documents"));
 
@@ -62,6 +64,7 @@ const ROUTES = {
     ] },
     "/cloud/acc1/files": { files: [{ id: "fold9", name: "Instagram saves", is_folder: true }, { id: "doc1", name: "notes.txt", is_folder: false }] },
     "/files/analytics": {
+        quota_bytes: 100 * 1024 ** 4, free_bytes: 100 * 1024 ** 4 - 214_000_000_000,
         total_bytes: 214_000_000_000, total_files: 1843, total_folders: 96, starred_count: 12, trash_count: 7, trash_bytes: 3_400_000_000,
         by_category: { video: { count: 312, bytes: 168_000_000_000 }, audio: { count: 640, bytes: 9_800_000_000 }, photo: { count: 702, bytes: 6_100_000_000 }, document: { count: 151, bytes: 1_900_000_000 }, archive: { count: 31, bytes: 26_000_000_000 }, other: { count: 7, bytes: 2_200_000_000 } },
         largest_files: [
@@ -125,17 +128,21 @@ const mutation = (req, res, url, body) => {
             ? send(res, 400, { detail: "This post is private or was removed." })
             : send(res, 200, { shortcode: "ABCdef12345", owner: "nasa", caption: "Earth from orbit", thumbnail: null, items: [{ index: 1, is_video: false }, { index: 2, is_video: true }] });
     }
-    // Chunked uploads: 2-byte chunks; the server "already has" chunk 1 the first time it is sent,
-    // like after a reply that got lost, and says which chunk it expects next
+    // Chunked uploads: 2-byte chunks sent as raw PUT bodies. The first time chunk 1 arrives the
+    // server says "disk buffer full, try again in a second" (429). Continuing an upload after a
+    // reload: init with resume_upload_id "up-old" says chunk 0 is already there.
     if (url.pathname === "/files/upload/init") {
         uploadState.sentOne = false;
-        return send(res, 200, { upload_id: "up1", chunk_size: 2, part_max_size: 1950 * 1024 * 1024 });
+        const resumed = body.includes('"resume_upload_id":"up-old"');
+        return send(res, 200, { upload_id: resumed ? "up-old" : "up1", chunk_size: 2, part_max_size: 1950 * 1024 * 1024, received: resumed ? [0] : [], resumed });
     }
-    if (url.pathname === "/files/upload/chunk") {
-        const index = Number((/name="chunk_index"\r\n\r\n(\d+)/.exec(body) || [])[1]);
+    const chunkPut = /^\/files\/upload\/chunk\/([^/]+)\/(\d+)$/.exec(url.pathname);
+    if (chunkPut) {
+        const index = Number(chunkPut[2]);
         if (index === 1 && !uploadState.sentOne) {
             uploadState.sentOne = true;
-            return send(res, 409, { detail: { message: "Expected chunk 2, got 1", next_chunk: 2 } });
+            res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "1" });
+            return res.end(JSON.stringify({ detail: "Waiting for earlier parts", retry_after: 1 }));
         }
         return send(res, 200, { status: "ok", chunk_index: index });
     }
@@ -148,7 +155,16 @@ const mutation = (req, res, url, body) => {
         if (body.includes("playlist"))
             return send(res, 200, { kind: "playlist", title: "Road trip", uploader: "Yash", site: "YoutubeTab", count: 3, thumbnail: null,
                 entries: [{ index: 1, title: "Song one", duration: 201 }, { index: 2, title: "Song two", duration: 185 }, { index: 3, title: "Song three", duration: 3725 }] });
-        return send(res, 200, { kind: "video", title: "Never Gonna Give You Up", uploader: "Rick Astley", site: "Youtube", duration: 213, count: 1, thumbnail: null, entries: [{ index: 1, title: "Never Gonna Give You Up", duration: 213 }] });
+        if (body.includes("facebook.com"))
+            return send(res, 200, { kind: "video", title: "How to Share With Just Friends", uploader: "Facebook", site: "Facebook", duration: 47, count: 1, thumbnail: null,
+                options: { video: [{ value: "fmt:hd", label: "HD", size: 0 }, { value: "fmt:sd", label: "SD", size: 0 }], audio: [] },
+                entries: [{ index: 1, title: "How to Share With Just Friends", duration: 47 }] });
+        return send(res, 200, { kind: "video", title: "Never Gonna Give You Up", uploader: "Rick Astley", site: "Youtube", duration: 213, count: 1, thumbnail: null,
+            options: {
+                video: [2160, 1440, 1080, 720, 480, 360, 240, 144].map((h) => ({ value: String(h), height: h, fps: 25, hdr: false, size: h * 110_000 })),
+                audio: [{ id: "140", codec: "AAC", abr: 130, size: 3_449_447 }, { id: "251", codec: "Opus", abr: 129, size: 3_433_755 }, { id: "249", codec: "Opus", abr: 46, size: 1_231_355 }],
+            },
+            entries: [{ index: 1, title: "Never Gonna Give You Up", duration: 213 }] });
     }
     if (url.pathname === "/transfers/remote/media/cookies" && req.method === "POST") {
         return send(res, 200, { version: "2026.10.21", builtin_version: "2026.10.21", updated: false, has_cookies: true, cookie_sites: ["youtube.com"], cookies_updated_at: "2026-10-22T10:00:00Z", youtube_sign_in: "signed_in", pot_helper: true });
@@ -190,6 +206,15 @@ http.createServer((req, res) => {
         if (req.method !== "GET" && req.method !== "HEAD") return mutation(req, res, url, body);
         if (ROUTES[url.pathname]) return send(res, 200, ROUTES[url.pathname]);
         if (url.pathname === "/files") return send(res, 200, listFiles(url));
+        // A 300 MB file: HEAD reports its size; the browser download gets a small stand-in body
+        if (decodeURIComponent(url.pathname) === "/dl/huge-backup.zip") {
+            requests.push({ method: req.method, path: url.pathname, body: url.search });
+            if (req.method === "HEAD") {
+                res.writeHead(200, { "Content-Length": 300 * 1024 * 1024, "Content-Type": "application/zip", "ETag": '"u9-300"' });
+                return res.end();
+            }
+            return send(res, 200, Buffer.from("stand-in"), "application/zip");
+        }
         const ext = path.extname(url.pathname).toLowerCase();
         if (MEDIA[ext] && !url.pathname.startsWith("/assets/")) return serveMedia(req, res, url.pathname);
         const filePath = path.join(DIST, decodeURIComponent(url.pathname));

@@ -314,6 +314,8 @@ async def delete_user(request: Request, user_id_param: str, user: User = Depends
         if not success:
             raise HTTPException(status_code=404, detail="User not found")
         
+        from telestore.api.routes.webdav.common import forget_webdav_logins
+        forget_webdav_logins()  # their remembered WebDAV sign-in stops working too
         return {"message": "User deleted successfully"}
     except HTTPException:
         raise
@@ -407,6 +409,8 @@ async def change_user_password(request: Request, user_id_param: str, password_re
         # Update password in database
         logger.info(f"Updating password in database for user: {target_username}")
         success = database.Users.update_user_by_identifier(actual_user_id_param, {"password_hash": new_password_hash})
+        from telestore.api.routes.webdav.common import forget_webdav_logins
+        forget_webdav_logins()
         logger.info(f"Database update result: {success}")
         
         if not success:

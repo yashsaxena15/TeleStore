@@ -1,4 +1,5 @@
 // End-to-end checks of the main screens against the mock backend (see e2e/mock-server.mjs).
+import fs from "node:fs";
 import { test, expect } from "@playwright/test";
 
 const row = (page, name) => page.getByRole("row", { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")},`) });
@@ -163,6 +164,24 @@ test.describe("trash, starter folders and new transfers", () => {
     });
 });
 
+test.describe("large downloads", () => {
+    test("a big file goes to the browser's own downloads", async ({ page, request }) => {
+        await page.goto("/");
+        await row(page, "Music").dblclick();
+        await page.getByRole("button", { name: "Select huge-backup.zip" }).click();
+        const download = page.waitForEvent("download");
+        await page.getByRole("toolbar", { name: "1 selected" }).getByRole("button", { name: /^Download/ }).click();
+        expect((await download).suggestedFilename()).toBe("huge-backup.zip");
+        // Saved by the browser (straight to disk), not collected in the page's memory
+        const calls = (await mutations(request)).filter((r) => r.path === "/dl/huge-backup.zip");
+        expect(calls.map((c) => c.method)).toEqual(["HEAD", "GET"]);
+        expect(calls[1].body).toMatch(/file_id=f500/);
+        expect(calls[1].body).toMatch(/download=1/);
+        await page.goto("/transfers");
+        await expect(page.getByText("In browser downloads").first()).toBeVisible();
+    });
+});
+
 test.describe("staying signed in", () => {
     test("moving between pages doesn't re-check the sign-in", async ({ page }) => {
         let checks = 0;
@@ -212,9 +231,37 @@ test.describe("video and audio downloads", () => {
         await expect(dialog.getByLabel("Link preview")).toContainText("Never Gonna Give You Up");
         await expect(dialog.getByLabel("Link preview")).toContainText("3:33");
         await dialog.getByRole("radio", { name: "Audio only" }).click();
+        // The site's own audio first; MP3 320 says it won't sound better than the 130 kbps source
+        await dialog.getByLabel("Audio format").selectOption("mp3:320");
+        await expect(dialog.getByText(/source is 130 kbps/)).toBeVisible();
         await dialog.getByRole("button", { name: "Download", exact: true }).click();
         await expect(page.getByText("Downloading 2 video files.")).toBeVisible();
-        expect(await downloadBody(request)).toEqual({ url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", choice: { mode: "audio", audio_format: "mp3" }, destination: { kind: "home", path: "/Home" }, sync: false });
+        expect(await downloadBody(request)).toEqual({ url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", choice: { mode: "audio", audio_format: "mp3", audio_bitrate: "320" }, destination: { kind: "home", path: "/Home" }, sync: false });
+    });
+
+    test("the quality list shows exactly what the video has", async ({ page, request }) => {
+        const dialog = await openDialog(page);
+        await dialog.getByLabel("Link", { exact: true }).fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+        await expect(dialog.getByLabel("Link preview")).toContainText("Never Gonna Give You Up");
+        const options = await dialog.getByLabel("Quality").locator("option").allTextContents();
+        expect(options[0]).toBe("Best available (2160p)");
+        expect(options.slice(1, 9).map((o) => o.split(" ")[0])).toEqual(["2160p", "1440p", "1080p", "720p", "480p", "360p", "240p", "144p"]);
+        expect(options.at(-1)).toMatch(/Most compatible/);
+        await dialog.getByLabel("Quality").selectOption("2160");
+        await dialog.getByRole("button", { name: "Download", exact: true }).click();
+        await expect.poll(async () => (await mutations(request)).some((r) => r.path === "/transfers/remote/media")).toBe(true);
+        expect((await downloadBody(request)).choice.quality).toBe("2160");
+    });
+
+    test("Facebook shows its HD and SD versions", async ({ page, request }) => {
+        const dialog = await openDialog(page);
+        await dialog.getByLabel("Link", { exact: true }).fill("https://www.facebook.com/facebook/videos/10153231379946729/");
+        await expect(dialog.getByLabel("Link preview")).toContainText("How to Share With Just Friends");
+        expect(await dialog.getByLabel("Quality").locator("option").allTextContents()).toEqual(["Best available", "HD", "SD"]);
+        await dialog.getByLabel("Quality").selectOption("fmt:hd");
+        await dialog.getByRole("button", { name: "Download", exact: true }).click();
+        await expect.poll(async () => (await mutations(request)).some((r) => r.path === "/transfers/remote/media")).toBe(true);
+        expect((await downloadBody(request)).choice.quality).toBe("fmt:hd");
     });
 
     test("chosen playlist videos at 720p with subtitles", async ({ page, request }) => {
@@ -444,10 +491,35 @@ test.describe("item actions", () => {
         await page.getByRole("menuitem", { name: /Upload files/ }).click();
         await (await chooser).setFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
         await expect.poll(async () => (await mutations(request)).some((r) => r.path.startsWith("/files/upload") && r.body.includes("notes.txt") && r.body.includes("/Home/Movies"))).toBe(true);
-        // 5 bytes in 2-byte chunks: 0, 1 (server answers "I expected 2"), then it continues from 2
+        // 5 bytes in 2-byte chunks, sent together as raw bodies; chunk 1 is told to wait (429) once
         await expect.poll(async () => (await mutations(request)).some((r) => r.path === "/files/upload/complete")).toBe(true);
-        const chunks = (await mutations(request)).filter((r) => r.path === "/files/upload/chunk").map((r) => Number(/name="chunk_index"\r\n\r\n(\d+)/.exec(r.body)[1]));
-        expect(chunks).toEqual([0, 1, 2]);
+        const puts = (await mutations(request)).filter((r) => r.method === "PUT" && r.path.startsWith("/files/upload/chunk/up1/"));
+        const indexes = puts.map((r) => Number(r.path.split("/").pop()));
+        expect([...new Set(indexes)].sort()).toEqual([0, 1, 2]);
+        expect(indexes.filter((i) => i === 1)).toHaveLength(2); // asked to wait, then sent again
+        expect(puts.find((r) => r.path.endsWith("/0")).body).toBe("he"); // the raw bytes, no form wrapping
+    });
+
+    test("an upload continues after a page reload", async ({ page, request }, testInfo) => {
+        // The same file picked again (same name, size and modification time) after a reload
+        const filePath = testInfo.outputPath("notes.txt");
+        fs.writeFileSync(filePath, "hello");
+        fs.utimesSync(filePath, 1_700_000_000, 1_700_000_000);
+        // What the page remembered before the reload: this file belongs to session up-old
+        await page.addInitScript(() => {
+            localStorage.setItem("telestore.uploadResume", JSON.stringify({ "/Home/Movies|notes.txt|5|1700000000000": "up-old" }));
+        });
+        await page.goto("/");
+        await row(page, "Movies").dblclick();
+        await expect(row(page, "Arrival.2016.1080p.mkv")).toBeVisible();
+        const chooser = page.waitForEvent("filechooser");
+        await page.getByRole("button", { name: "New", exact: true }).first().click();
+        await page.getByRole("menuitem", { name: /Upload files/ }).click();
+        await (await chooser).setFiles(filePath);
+        await expect.poll(async () => (await mutations(request)).some((r) => r.path === "/files/upload/complete")).toBe(true);
+        const sent = (await mutations(request)).filter((r) => r.method === "PUT").map((r) => r.path);
+        expect(sent.every((p) => p.startsWith("/files/upload/chunk/up-old/"))).toBe(true);
+        expect([...new Set(sent.map((p) => Number(p.split("/").pop())))].sort()).toEqual([1, 2]); // chunk 0 was already there
     });
 
     test("copy in one folder, paste in another", async ({ page, request }) => {
@@ -559,6 +631,7 @@ test.describe("storage", () => {
         await expect(page.getByText("1843")).toBeVisible();
         await expect(page.getByRole("cell", { name: "Videos" })).toBeVisible();
         await expect(page.getByText("Dune.Part.Two.2024.2160p.HDR.mkv")).toBeVisible();
+        await expect(page.getByLabel("Storage space")).toHaveText(/^of 100 TB · 99\.\d+ TB free$/);
     });
 });
 
