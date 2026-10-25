@@ -563,6 +563,26 @@ test.describe("storage", () => {
 });
 
 test.describe("phone @phone", () => {
+    test("a tap shows the video controls and they stay a few seconds", async ({ page }) => {
+        await page.goto("/");
+        await row(page, "Movies").click();
+        await row(page, "Arrival.2016.1080p.mkv").click();
+        const video = page.locator("video");
+        await expect.poll(() => video.evaluate((v) => v.currentTime)).toBeGreaterThan(0.2);
+        const topBar = page.getByRole("button", { name: "Back / Close" }).locator("xpath=ancestor::div[contains(@class,'top-0')][1]");
+        // Playing: the controls fade out by themselves
+        await expect(topBar).toHaveClass(/opacity-0/, { timeout: 8000 });
+        // One tap on the video brings them back, and they are still there 2 seconds later
+        const box = await video.boundingBox();
+        await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+        await expect(topBar).toHaveClass(/opacity-100/);
+        await page.waitForTimeout(2000);
+        await expect(topBar).toHaveClass(/opacity-100/);
+        // A second tap hides them right away
+        await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+        await expect(topBar).toHaveClass(/opacity-0/, { timeout: 1500 });
+    });
+
     test("bottom tabs and settings sub-menu fit the screen", async ({ page }) => {
         await page.goto("/");
         await expect(row(page, "Movies")).toBeVisible();

@@ -89,6 +89,8 @@ export const MediaPlayer = ({
     const modeSwitchRef = useRef(null);
     // UI visibility states
     const [areControlsVisible, setAreControlsVisible] = useState(true);
+    const controlsVisibleRef = useRef(true);
+    controlsVisibleRef.current = areControlsVisible;
     const [isScrubbing, setIsScrubbing] = useState(false);
     const [hoverTime, setHoverTime] = useState(null);
     const [hoverPosPercent, setHoverPosPercent] = useState(0);
@@ -512,6 +514,8 @@ export const MediaPlayer = ({
             return;
         }
         const isTouch = e.pointerType === "touch" || e.pointerType === "pen";
+        // What the user saw when they tapped decides show or hide, not the state a moment later
+        const visibleAtTap = controlsVisibleRef.current;
         const rect = e.currentTarget.getBoundingClientRect();
         const xRatio = (e.clientX - rect.left) / rect.width;
         let zone = "center";
@@ -551,19 +555,11 @@ export const MediaPlayer = ({
             singleTapTimerRef.current = setTimeout(() => {
                 singleTapTimerRef.current = null;
                 if (isTouch) {
-                    // On touch screens: single tap toggles controls visibility
-                    setAreControlsVisible((prev) => {
-                        if (!prev) {
-                            // If controls were hidden, show them and keep visible for 4.5s
-                            showControls(4500);
-                            return true;
-                        }
-                        else {
-                            // If controls were already visible, hide them immediately
-                            hideControls();
-                            return false;
-                        }
-                    });
+                    // On touch screens: a tap shows the controls (for 4.5 s while playing) or hides them
+                    if (visibleAtTap)
+                        hideControls();
+                    else
+                        showControls(4500);
                 }
                 else {
                     // On desktop mouse: single click toggles play/pause
@@ -917,7 +913,12 @@ export const MediaPlayer = ({
     // =========================================================================
     return (<>
       {videoElement}
-      <div ref={containerRef} onMouseMove={() => showControls(4000)} className={`fixed inset-0 z-50 bg-[#0a0a0a] text-white flex flex-col select-none overflow-hidden ${!areControlsVisible && isPlaying ? "cursor-none" : "cursor-default"}`}>
+      <div ref={containerRef} onPointerMove={(e) => {
+            // A real mouse only. Phones send a fake mouse move after every tap, which used to show
+            // the controls a moment before the tap itself was handled as "they're visible: hide".
+            if (e.pointerType === "mouse")
+                showControls(4000);
+        }} className={`fixed inset-0 z-50 bg-[#0a0a0a] text-white flex flex-col select-none overflow-hidden ${!areControlsVisible && isPlaying ? "cursor-none" : "cursor-default"}`}>
       {/* The one video element (theater and dock share it) */}
       <div ref={attachVideo} className="w-full h-full"/>
 
