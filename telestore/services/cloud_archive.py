@@ -1,6 +1,7 @@
 # telestore/services/cloud_archive.py
 
 import os
+import re
 import uuid
 import shutil
 import zipfile
@@ -616,7 +617,7 @@ async def execute_task_compress(task_id: str, payload: Dict[str, Any], manager: 
             folder_name = doc.get("file_name")
             folder_path = doc.get("file_path", "/")
             target_base = f"{folder_path.rstrip('/')}/{folder_name}".lstrip("/")
-            regex_pattern = f"^{folder_path.rstrip('/')}/{folder_name}(/.*)?$"
+            regex_pattern = f"^{re.escape(folder_path.rstrip('/') + '/' + folder_name)}(/.*)?$"  # names like "Movies (2024)"
             child_files = list(database.Files.find({
                 "file_path": {"$regex": regex_pattern},
                 "file_type": {"$ne": "folder"},

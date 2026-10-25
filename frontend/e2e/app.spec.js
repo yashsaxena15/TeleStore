@@ -444,6 +444,10 @@ test.describe("item actions", () => {
         await page.getByRole("menuitem", { name: /Upload files/ }).click();
         await (await chooser).setFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
         await expect.poll(async () => (await mutations(request)).some((r) => r.path.startsWith("/files/upload") && r.body.includes("notes.txt") && r.body.includes("/Home/Movies"))).toBe(true);
+        // 5 bytes in 2-byte chunks: 0, 1 (server answers "I expected 2"), then it continues from 2
+        await expect.poll(async () => (await mutations(request)).some((r) => r.path === "/files/upload/complete")).toBe(true);
+        const chunks = (await mutations(request)).filter((r) => r.path === "/files/upload/chunk").map((r) => Number(/name="chunk_index"\r\n\r\n(\d+)/.exec(r.body)[1]));
+        expect(chunks).toEqual([0, 1, 2]);
     });
 
     test("copy in one folder, paste in another", async ({ page, request }) => {

@@ -249,10 +249,13 @@ const handleDownload = async (item) => {
         console.log('[FileExplorer] handleDownload - baseUrl:', baseUrl);
         // Construct the download URL - for the new path structure, we just need the file name
         // The backend will handle extracting the file name from paths like /Home/Images/filename.jpg
-        const fileName = item.name;
+        // The file's ID picks exactly this file (a name alone can match a same-named file in
+        // another folder); the name is encoded so "#", "?" or "%" in it don't break the address
+        const fileName = encodeURIComponent(item.name);
+        const fileIdParam = item.id ? `?file_id=${encodeURIComponent(item.id)}` : "";
         let downloadUrl = baseUrl
-            ? `${baseUrl}/dl/${fileName}`
-            : `/dl/${fileName}`;
+            ? `${baseUrl}/dl/${fileName}${fileIdParam}`
+            : `/dl/${fileName}${fileIdParam}`;
         console.log('[FileExplorer] handleDownload - constructed URL:', downloadUrl);
         // Add to download manager for tracking - this will automatically start the download
         // The download manager will handle adding auth tokens as needed

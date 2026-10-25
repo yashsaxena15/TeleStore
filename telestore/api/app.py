@@ -47,6 +47,13 @@ app = FastAPI(
 @app.on_event("startup")
 async def startup_event():
     load_persistent_tokens(app)
+
+    try:
+        fixed = database.Files.mark_split_files()
+        if fixed:
+            logger.info(f"Marked {fixed} multi-part file(s) that were saved without is_split")
+    except Exception as e:
+        logger.warning(f"Couldn't check multi-part files: {e}")
     
     # Run startup cleanup for any stale upload files (> 5 minutes old from previous crashes)
     cleanup_stale_upload_files(max_age_seconds=300)
@@ -57,7 +64,8 @@ async def startup_event():
         while True:
             await asyncio.sleep(900)  # 15 minutes
             try:
-                cleanup_stale_upload_files(max_age_seconds=3600)
+                # Deleting multi-GB files blocks; keep it off the event loop
+                await asyncio.to_thread(cleanup_stale_upload_files, 3600)
             except Exception as e:
                 logger.error(f"Error in periodic_upload_janitor: {e}")
 

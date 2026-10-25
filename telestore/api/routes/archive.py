@@ -1,5 +1,6 @@
 # telestore/api/routes/archive.py
 
+import re
 from typing import List
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -159,7 +160,7 @@ async def compress_archive_endpoint(
         if doc.get("file_type") == "folder":
             f_name = doc.get("file_name")
             f_path = doc.get("file_path", "/")
-            regex_pat = f"^{f_path.rstrip('/')}/{f_name}(/.*)?$"
+            regex_pat = f"^{re.escape(f_path.rstrip('/') + '/' + f_name)}(/.*)?$"  # names like "Movies (2024)"
             cursor = database.Files.find({
                 "file_path": {"$regex": regex_pat},
                 "file_type": {"$ne": "folder"},

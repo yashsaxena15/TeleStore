@@ -76,7 +76,8 @@ export async function uploadFileChunked(file, path = '/', onProgress) {
                 });
                 if (!chunkRes.ok) {
                     const errData = await chunkRes.json().catch(() => ({}));
-                    throw new Error(errData.detail || `Chunk upload failed (${chunkRes.status})`);
+                    const detail = typeof errData.detail === "string" ? errData.detail : errData.detail?.message;
+                    throw new Error(detail || `Chunk upload failed (${chunkRes.status})`);
                 }
                 success = true;
                 bytesUploaded += (end - start);

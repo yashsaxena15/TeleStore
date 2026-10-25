@@ -571,6 +571,37 @@ class Files(Collection):
             })
         return True
 
+    def unreferenced_messages(self, messages: dict) -> dict:
+        """Of {chat_id: {message_id, ...}} about to be deleted from Telegram, the ones no remaining
+        record still points to. Copies share the original's messages (copying never re-uploads), so
+        deleting one copy for good must not delete the data the other copy plays from.
+        Call after the deleted records are gone from the database."""
+        free = {}
+        for chat_id, message_ids in messages.items():
+            ids = [m for m in message_ids if m]
+            if not ids:
+                continue
+            used = set()
+            for doc in self.find({"chat_id": chat_id, "$or": [{"message_id": {"$in": ids}}, {"parts.message_id": {"$in": ids}}]},
+                                 {"message_id": 1, "parts.message_id": 1}):
+                used.add(doc.get("message_id"))
+                used.update(p.get("message_id") for p in (doc.get("parts") or []))
+            left = set(ids) - used
+            if left:
+                free[chat_id] = left
+        return free
+
+    def mark_split_files(self) -> int:
+        """Marks records that list several Telegram parts as multi-part (is_split, total_parts,
+        part_size), as add_multipart_file does. WebDAV uploads were saved without it, so ZIP
+        downloads and "Delete forever" treated a 5 GB file as one 1.95 GB message. Safe to repeat."""
+        result = self.update_many(
+            {"parts.1": {"$exists": True}, "is_split": {"$ne": True}},
+            [{"$set": {"is_split": True, "total_parts": {"$size": "$parts"},
+                       "part_size": {"$arrayElemAt": ["$parts.part_size", 0]}}}],
+        )
+        return result.modified_count
+
     def is_trashed_folder_path(self, full_path: str, owner_id: str = None) -> bool:
         """Whether full_path (e.g. /Home/Old/Pics) names a folder that is in Trash."""
         clean = "/" + (full_path or "").strip().strip("/")

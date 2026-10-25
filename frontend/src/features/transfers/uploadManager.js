@@ -248,6 +248,7 @@ export class UploadManager {
                 const chunkBlob = item.file.slice(start, end);
                 let success = false;
                 let lastErr = null;
+                let jumpTo = null; // the server already has a different number of chunks
                 for (let attempt = 0; attempt < 3; attempt++) {
                     if (item.status !== 'uploading')
                         return;
@@ -264,9 +265,17 @@ export class UploadManager {
                             signal: item.abortController.signal,
                             body: chunkFormData
                         });
+                        if (chunkRes.status === 409) {
+                            const errData = await chunkRes.json().catch(() => ({}));
+                            if (Number.isInteger(errData.detail?.next_chunk)) {
+                                jumpTo = errData.detail.next_chunk;
+                                break;
+                            }
+                        }
                         if (!chunkRes.ok) {
                             const errData = await chunkRes.json().catch(() => ({}));
-                            throw new Error(errData.detail || `Chunk upload failed (${chunkRes.status})`);
+                            const detail = typeof errData.detail === "string" ? errData.detail : errData.detail?.message;
+                            throw new Error(detail || `Chunk upload failed (${chunkRes.status})`);
                         }
                         success = true;
                         break;
@@ -279,6 +288,12 @@ export class UploadManager {
                         lastErr = err;
                         await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
                     }
+                }
+                if (jumpTo !== null) {
+                    // Continue from the chunk the server expects (chunks are kept exactly once)
+                    item.chunkIndex = jumpTo;
+                    item.bytesUploaded = Math.min(item.filesize, jumpTo * item.chunkSize);
+                    continue;
                 }
                 if (!success) {
                     throw new Error(`Failed to upload chunk ${chunkIdx + 1}/${item.totalChunks}: ${lastErr?.message || 'Network error'}`);
@@ -319,8 +334,15 @@ export class UploadManager {
                 if (completeRes.ok) {
                     initialResponse = await completeRes.json().catch(() => null);
                 }
+                else if (completeRes.status === 409) {
+                    // The server is missing bytes: never save a file with a gap in it
+                    const errData = await completeRes.json().catch(() => ({}));
+                    throw Object.assign(new Error(errData.detail?.message || "Upload incomplete. Please try again."), { fatal: true });
+                }
             }
             catch (fetchErr) {
+                if (fetchErr.fatal)
+                    throw fetchErr;
                 if (item.status !== 'uploading' || fetchErr.name === 'AbortError')
                     return;
                 logger.warn('[UploadManager] complete request dropped, polling status...', fetchErr);

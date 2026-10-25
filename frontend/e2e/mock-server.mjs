@@ -77,6 +77,7 @@ const ROUTES = {
 };
 
 const requests = [];
+const uploadState = { sentOne: false };
 
 const send = (res, code, body, type = "application/json") => {
     const data = Buffer.isBuffer(body) ? body : Buffer.from(typeof body === "string" ? body : JSON.stringify(body));
@@ -123,6 +124,23 @@ const mutation = (req, res, url, body) => {
         return body.includes("/p/MISSING")
             ? send(res, 400, { detail: "This post is private or was removed." })
             : send(res, 200, { shortcode: "ABCdef12345", owner: "nasa", caption: "Earth from orbit", thumbnail: null, items: [{ index: 1, is_video: false }, { index: 2, is_video: true }] });
+    }
+    // Chunked uploads: 2-byte chunks; the server "already has" chunk 1 the first time it is sent,
+    // like after a reply that got lost, and says which chunk it expects next
+    if (url.pathname === "/files/upload/init") {
+        uploadState.sentOne = false;
+        return send(res, 200, { upload_id: "up1", chunk_size: 2, part_max_size: 1950 * 1024 * 1024 });
+    }
+    if (url.pathname === "/files/upload/chunk") {
+        const index = Number((/name="chunk_index"\r\n\r\n(\d+)/.exec(body) || [])[1]);
+        if (index === 1 && !uploadState.sentOne) {
+            uploadState.sentOne = true;
+            return send(res, 409, { detail: { message: "Expected chunk 2, got 1", next_chunk: 2 } });
+        }
+        return send(res, 200, { status: "ok", chunk_index: index });
+    }
+    if (url.pathname === "/files/upload/complete") {
+        return send(res, 200, { status: "completed", file: { id: "new1", file_name: "notes.txt" } });
     }
     if (url.pathname === "/transfers/remote/media/preview") {
         if (body.includes("127.0.0.1"))

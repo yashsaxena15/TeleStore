@@ -44,7 +44,7 @@ async def handle_delete(request: Request, segments: List[str], owner_id: str) ->
 
     if top_name == "Trash":
         # Permanently purge from database and delete Telegram messages
-        item = database.Files.find_one({"file_name": target_name, "trashed": True, "owner_id": owner_id})
+        item = database.Files.find_one({"file_name": target_name, "trashed": True, "owner_id": owner_id, "is_vault": {"$ne": True}})
         if item:
             from collections import defaultdict
             messages_to_delete = defaultdict(set)
@@ -54,11 +54,10 @@ async def handle_delete(request: Request, segments: List[str], owner_id: str) ->
                 m_id = doc.get("message_id")
                 if c_id and m_id:
                     messages_to_delete[c_id].add(m_id)
-                if doc.get("is_split"):
-                    for part in doc.get("parts", []):
-                        p_mid = part.get("message_id")
-                        if p_mid and c_id:
-                            messages_to_delete[c_id].add(p_mid)
+                for part in doc.get("parts") or []:  # every part, even if is_split is missing
+                    p_mid = part.get("message_id")
+                    if p_mid and c_id:
+                        messages_to_delete[c_id].add(p_mid)
 
             if item.get("file_type") == "folder":
                 folder_name = item.get("file_name", "")
@@ -82,6 +81,7 @@ async def handle_delete(request: Request, segments: List[str], owner_id: str) ->
                 collect_file_messages(item)
             
             database.Files.delete_one({"_id": item["_id"]})
+            messages_to_delete = database.Files.unreferenced_messages(messages_to_delete)
 
             if messages_to_delete:
                 try:
@@ -186,7 +186,7 @@ async def handle_move(request: Request, segments: List[str], owner_id: str) -> R
             {"$set": {"file_path": new_folder_path}}
         )
         database.Files.update_many(
-            {"file_path": {"$regex": f"^{old_folder_path}/"}, "owner_id": owner_id},
+            {"file_path": {"$regex": f"^{re.escape(old_folder_path)}/"}, "owner_id": owner_id},
             [{"$set": {"file_path": {"$replaceOne": {"input": "$file_path", "find": old_folder_path, "replacement": new_folder_path}}}}]
         )
     else:

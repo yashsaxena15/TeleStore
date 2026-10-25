@@ -4,7 +4,7 @@ import zlib
 import json
 import asyncio
 import mimetypes
-from typing import Tuple
+from typing import Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor
 
 from pyrogram import Client
@@ -81,31 +81,52 @@ async def get_file_ids(client: Client, chat_id: int, message_id: int) -> FileId:
         LOGGER.warning(f"get_file_ids failed for {getattr(client, 'name', client)}: {type(e).__name__} - {e}")
         return None
 
+class RangeNotSatisfiable(ValueError):
+    """The requested range starts past the end of the file (HTTP 416)."""
+
+
+def parse_byte_range(range_header: str, file_size: int) -> Optional[Tuple[int, int]]:
+    """The inclusive (start, end) a Range header asks for, or None to send the whole file (200).
+
+    Follows RFC 9110: "bytes=500-" and "bytes=500-999" as usual; "bytes=-500" is the last 500
+    bytes; an end past the file is trimmed to the last byte; a header that isn't a single valid
+    bytes range (another unit, several ranges, garbage) is ignored. Raises RangeNotSatisfiable
+    only when the range starts at or past the end of the file.
+    """
+    if not range_header or file_size <= 0:
+        return None
+    value = range_header.strip().lower()
+    if not value.startswith("bytes=") or "," in value:
+        return None
+    spec = value[len("bytes="):].strip()
+    if "-" not in spec:
+        return None
+    start_s, end_s = (part.strip() for part in spec.split("-", 1))
+    if not start_s.isdigit() and start_s != "":
+        return None
+    if end_s and not end_s.isdigit():
+        return None
+    if start_s == "":
+        if not end_s:
+            return None
+        suffix = int(end_s)
+        if suffix == 0:
+            raise RangeNotSatisfiable("Empty suffix range")
+        return max(0, file_size - suffix), file_size - 1
+    start = int(start_s)
+    if start >= file_size:
+        raise RangeNotSatisfiable("Range starts past the end of the file")
+    end = int(end_s) if end_s else file_size - 1
+    if end < start:
+        return None
+    return start, min(end, file_size - 1)
+
+
 def parse_range_header(range_header: str, file_size: int) -> Tuple[int, int]:
-    """
-    Accepts "bytes=X-Y" and returns (from_bytes, until_bytes) inclusive.
-    If no range_header, returns full range (0, file_size - 1).
-    Raises HTTPException 416 for bad requests.
-    """
-    if not range_header:
-        return 0, file_size - 1
-    try:
-        range_value = range_header.strip().lower()
-        if not range_value.startswith("bytes="):
-            raise ValueError("Range must start with 'bytes='")
-        range_value = range_value[len("bytes="):]
-        from_str, until_str = range_value.split("-")
-        from_bytes = int(from_str) if from_str else 0
-        until_bytes = int(until_str) if until_str else file_size - 1
-    except Exception as e:
-        # This should raise an HTTPException in the calling function
-        raise ValueError(f"Invalid Range header: {e}")
-
-    if from_bytes < 0 or until_bytes < from_bytes or until_bytes >= file_size:
-        # This should raise an HTTPException in the calling function
-        raise ValueError("Requested Range Not Satisfiable")
-
-    return from_bytes, until_bytes
+    """(start, end) inclusive; the whole file when there is no usable range. Raises ValueError
+    (RangeNotSatisfiable) for a range that starts past the end."""
+    byte_range = parse_byte_range(range_header, file_size)
+    return byte_range if byte_range else (0, max(0, file_size - 1))
 
 def resolve_mime_type(file_name: str, explicit_mime: str | None = None, is_watch: bool = False) -> str:
     # explicit_mime from Telegram is best
