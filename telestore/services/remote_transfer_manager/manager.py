@@ -30,6 +30,11 @@ MEDIA_GAP_S = 5
 MEDIA_BLOCK_COOLDOWN = timedelta(minutes=30)
 MEDIA_BLOCK_RETRIES = 3
 
+RUNNING_STATUSES = ["downloading", "uploading_tg", "discovering"]
+ACTIVE_STATUSES = ["queued", *RUNNING_STATUSES, "paused_quota"]
+# Waiting files shown per folder leech on the Transfers page (the summary counts all of them)
+GROUP_PREVIEW_SIZE = 20
+
 
 class RemoteTransferManager:
     """
@@ -54,6 +59,9 @@ class RemoteTransferManager:
         """Reset any interrupted tasks on startup."""
         try:
             coll = get_remote_db()["RemoteTransfers"]
+            # Folder leeches can queue tens of thousands of tasks; keep the Transfers list and claims fast
+            coll.create_index([("user_id", 1), ("status", 1), ("group_id", 1)])
+            coll.create_index([("group_id", 1), ("status", 1)])
             coll.update_many(
                 {"status": {"$in": ["downloading", "uploading_tg"]}},
                 {
@@ -2361,17 +2369,30 @@ class RemoteTransferManager:
         )
         return res.modified_count > 0
 
-    def get_user_tasks(self, user_id: str) -> List[Dict[str, Any]]:
+    def get_user_tasks(self, user_id: str) -> Dict[str, Any]:
+        """The Transfers page's list. Tasks outside a group come in full; a folder leech can hold tens
+        of thousands of files, so each group sends the files moving now, the next few waiting and a
+        summary of all of them (counts per status and bytes), never every row."""
         coll = get_remote_db()["RemoteTransfers"]
-        # Fetch ALL active/running/queued/discovering/paused tasks without limit so no active downloads are hidden
+        uid = str(user_id)
         active_docs = list(coll.find({
-            "user_id": str(user_id),
-            "status": {"$in": ["queued", "downloading", "uploading_tg", "discovering", "paused_quota"]}
+            "user_id": uid,
+            "status": {"$in": ACTIVE_STATUSES},
+            "group_id": None,
         }).sort("created_at", -1))
 
-        # Fetch recent completed/cancelled/failed history tasks
+        active_groups = coll.distinct("group_id", {"user_id": uid, "status": {"$in": ACTIVE_STATUSES}, "group_id": {"$ne": None}})
+        for group_id in active_groups:
+            active_docs += list(coll.find({"user_id": uid, "group_id": group_id, "status": {"$in": RUNNING_STATUSES}}))
+            active_docs += list(coll.find({
+                "user_id": uid,
+                "group_id": group_id,
+                "status": {"$in": ["queued", "paused_quota"]},
+            }).sort("created_at", 1).limit(GROUP_PREVIEW_SIZE))
+
+        # Recent completed/cancelled/failed history
         history_docs = list(coll.find({
-            "user_id": str(user_id),
+            "user_id": uid,
             "status": {"$in": ["completed", "cancelled", "failed"]}
         }).sort("updated_at", -1).limit(40))
 
@@ -2384,6 +2405,32 @@ class RemoteTransferManager:
                 d["updated_at"] = d["updated_at"].isoformat()
             if isinstance(d.get("cooldown_until"), datetime):
                 d["cooldown_until"] = d["cooldown_until"].isoformat()
-        return docs
+
+        group_ids = sorted({d["group_id"] for d in docs if d.get("group_id")})
+        return {"tasks": docs, "groups": self._group_summaries(coll, uid, group_ids)}
+
+    @staticmethod
+    def _group_summaries(coll, user_id: str, group_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        if not group_ids:
+            return {}
+        rows = coll.aggregate([
+            {"$match": {"user_id": user_id, "group_id": {"$in": group_ids}}},
+            {"$group": {
+                "_id": {"group": "$group_id", "status": "$status"},
+                "count": {"$sum": 1},
+                "filesize": {"$sum": {"$ifNull": ["$filesize", 0]}},
+                "transferred": {"$sum": {"$ifNull": ["$transferred_bytes", 0]}},
+                "speed": {"$sum": {"$ifNull": ["$speed_bps", 0]}},
+            }},
+        ])
+        summaries: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            group = summaries.setdefault(row["_id"]["group"], {"total": 0, "counts": {}, "filesize": 0, "transferred_bytes": 0, "speed_bps": 0})
+            group["total"] += row["count"]
+            group["counts"][row["_id"]["status"]] = row["count"]
+            group["filesize"] += row["filesize"]
+            group["transferred_bytes"] += row["transferred"]
+            group["speed_bps"] += row["speed"]
+        return summaries
 
 remote_transfer_manager = RemoteTransferManager(max_concurrent=2)

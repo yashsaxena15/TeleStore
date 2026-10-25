@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { uploadManager } from './uploadManager';
 import { downloadManager } from './downloadManager';
 import { transferManager } from './transferManager';
 import { api } from '@/lib/api';
+import { countRemoteTasks } from './transferGrouping';
 export const useTransferManager = () => {
     const [uploads, setUploads] = useState(() => uploadManager.getUploads());
     const [downloads, setDownloads] = useState(() => downloadManager.getDownloads());
@@ -15,12 +16,19 @@ export const useTransferManager = () => {
             unsubDownload();
         };
     }, []);
+    const remotePollRunning = useRef(false);
     const fetchRemoteTransfers = useCallback(async () => {
+        // A slow answer must not pile up behind the next poll
+        if (remotePollRunning.current)
+            return;
+        remotePollRunning.current = true;
         try {
             const res = await api.getRemoteTasks();
             if (res && Array.isArray(res.tasks)) {
+                const groups = res.groups || {};
                 const mapped = res.tasks.map(t => ({
                     ...t,
+                    group_summary: t.group_id ? groups[t.group_id] : undefined,
                     id: t.task_id,
                     name: t.filename || 'Remote Transfer',
                     size: t.filesize || 0,
@@ -34,6 +42,9 @@ export const useTransferManager = () => {
         }
         catch {
             // Ignore background poll errors
+        }
+        finally {
+            remotePollRunning.current = false;
         }
     }, []);
     const hasActiveRemote = useMemo(() => remoteTransfers.some(r => r.status === 'downloading' || r.status === 'uploading_tg' || r.status === 'queued' || r.status === 'discovering' || r.status === 'paused_quota'), [remoteTransfers]);
@@ -52,22 +63,24 @@ export const useTransferManager = () => {
     const activeUploads = useMemo(() => uploads.filter(u => u.status === 'uploading' || u.status === 'queued'), [uploads]);
     const activeDownloads = useMemo(() => downloads.filter(d => d.status === 'downloading' || d.status === 'queued'), [downloads]);
     const activeRemote = useMemo(() => remoteTransfers.filter(r => r.status === 'downloading' || r.status === 'uploading_tg' || r.status === 'queued' || r.status === 'discovering' || r.status === 'paused_quota'), [remoteTransfers]);
-    const totalActiveCount = activeUploads.length + activeDownloads.length + activeRemote.length;
+    // Folder leeches send a summary instead of every file, so counts come from it
+    const remoteCounts = useMemo(() => countRemoteTasks(remoteTransfers), [remoteTransfers]);
+    const totalActiveCount = activeUploads.length + activeDownloads.length + remoteCounts.active;
     const stats = useMemo(() => {
         return {
             activeUploads: activeUploads.length,
             activeDownloads: activeDownloads.length,
-            activeRemote: activeRemote.length,
+            activeRemote: remoteCounts.active,
             totalActive: totalActiveCount,
             completedUploads: uploads.filter(u => u.status === 'completed').length,
             completedDownloads: downloads.filter(d => d.status === 'completed').length,
-            completedRemote: remoteTransfers.filter(r => r.status === 'completed').length,
+            completedRemote: remoteCounts.completed,
             failedUploads: uploads.filter(u => u.status === 'failed').length,
             failedDownloads: downloads.filter(d => d.status === 'failed').length,
-            failedRemote: remoteTransfers.filter(r => r.status === 'failed').length,
+            failedRemote: remoteCounts.failed,
             pausedCount: uploads.filter(u => u.status === 'paused').length + downloads.filter(d => d.status === 'paused').length
         };
-    }, [uploads, downloads, remoteTransfers, activeUploads, activeDownloads, activeRemote, totalActiveCount]);
+    }, [uploads, downloads, remoteCounts, activeUploads, activeDownloads, totalActiveCount]);
     // Upload Actions
     const pauseUpload = useCallback((id) => uploadManager.pauseUpload(id), []);
     const resumeUpload = useCallback((id) => uploadManager.resumeUpload(id), []);
@@ -132,11 +145,12 @@ export const useTransferManager = () => {
     const resumeAll = useCallback(() => transferManager.resumeAll(), []);
     const cancelAll = useCallback(() => {
         transferManager.cancelAll();
-        // Cancel all active remote tasks as well
-        remoteTransfers
-            .filter(r => r.status === 'downloading' || r.status === 'uploading_tg' || r.status === 'queued' || r.status === 'discovering' || r.status === 'paused_quota')
-            .forEach(r => cancelRemoteTransfer(r.task_id));
-    }, [remoteTransfers, cancelRemoteTransfer]);
+        // Cancel all active remote tasks as well; a folder leech is cancelled as a whole, since only
+        // a few of its waiting files are in the list
+        const active = remoteTransfers.filter(r => r.status === 'downloading' || r.status === 'uploading_tg' || r.status === 'queued' || r.status === 'discovering' || r.status === 'paused_quota');
+        new Set(active.filter(r => r.group_id).map(r => r.group_id)).forEach(cancelRemoteGroup);
+        active.filter(r => !r.group_id).forEach(r => cancelRemoteTransfer(r.task_id));
+    }, [remoteTransfers, cancelRemoteTransfer, cancelRemoteGroup]);
     const clearCompleted = useCallback(() => {
         transferManager.clearCompleted();
         clearCompletedRemote();

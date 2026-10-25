@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildTransferItems, countByFilter, matchesFilter, formatEta, statusInfo, rowActions, kindLabel } from "./transferRows";
+import { countRemoteTasks } from "./transferGrouping";
 
 const uploads = [
     { id: "u1", filename: "a.mkv", status: "completed", startTime: "2026-10-19T08:00:00Z" },
@@ -55,5 +56,24 @@ describe("row helpers", () => {
         expect(rowActions({ type: "remote", status: "paused_quota" })).toMatchObject({ resumeRemaining: true, cancel: true });
         expect(rowActions({ type: "download", status: "completed", savePath: "/x" }).showInFolder).toBe(true);
         expect(rowActions({ type: "remote", isGroup: true, status: "completed", items: [{ status: "failed" }] }).resumeRemaining).toBe(true);
+    });
+});
+
+describe("a folder leech sent as a summary", () => {
+    const summary = { total: 38000, counts: { queued: 31000, completed: 6800, failed: 199, downloading: 1 }, filesize: 9000, transferred_bytes: 9000, speed_bps: 5 };
+    const rows = [
+        { task_id: "a", id: "a", filename: "now.bin", status: "downloading", group_id: "big", group_name: "Backup", group_summary: summary },
+        { task_id: "b", id: "b", filename: "next.bin", status: "queued", group_id: "big", group_name: "Backup", group_summary: summary },
+    ];
+    it("shows the whole folder's counts, not just the rows sent", () => {
+        const group = buildTransferItems([], [], rows).find((i) => i.id === "big");
+        expect(group.totalCount).toBe(38000);
+        expect(group.completedCount).toBe(6800);
+        expect(group.status).toBe("downloading");
+        expect(group.progress).toBe(17.9);
+        expect(group.phase).toBe("Leeching [6801/38000]: now.bin");
+    });
+    it("counts active, completed and failed from the summary once", () => {
+        expect(countRemoteTasks([...rows, { task_id: "s", status: "queued" }])).toEqual({ active: 31002, completed: 6800, failed: 199 });
     });
 });

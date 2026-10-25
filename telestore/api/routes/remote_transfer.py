@@ -125,8 +125,7 @@ async def get_remote_tasks(
     # Ensure worker running
     remote_transfer_manager.start_worker(request.app)
     user_id = str(user.telegram_user_id or user.username)
-    tasks = remote_transfer_manager.get_user_tasks(user_id)
-    return {"tasks": tasks}
+    return await asyncio.to_thread(remote_transfer_manager.get_user_tasks, user_id)
 
 @router.post("/cancel")
 async def cancel_remote_task(
