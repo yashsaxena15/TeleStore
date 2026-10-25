@@ -32,13 +32,16 @@ from telestore.api.routes.webdav import router as webdav_router
 # Import exception handlers
 from telestore.api.routes.error_handlers import exception_handlers
 
-from telestore.config import APP_NAME, OWNER, SESSION_SECRET_KEY, FRONTEND_DIST
+from telestore.config import API_DOCS_ENABLED, APP_NAME, OWNER, SESSION_SECRET_KEY, FRONTEND_DIST
 from telestore.db import database
 
 # Import utility functions and global variables
 from telestore.api.state import _auth_tokens, load_persistent_tokens, cleanup_stale_upload_files
 
 app = FastAPI(
+    docs_url="/docs" if API_DOCS_ENABLED else None,
+    redoc_url="/redoc" if API_DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if API_DOCS_ENABLED else None,
     title=f"{APP_NAME} Media Server",
     description=f"A powerful, self-hosted {APP_NAME} built with FastAPI, MongoDB, and PyroFork seamlessly integrated with Stremio for automated media streaming and discovery.",
 )
@@ -201,7 +204,6 @@ async def root():
         "app": f"{APP_NAME} Media Server",
         "version": "1.0.0",
         "status": "running",
-        "docs_url": "/docs"
     }
 
 # Add a health check endpoint

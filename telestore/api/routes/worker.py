@@ -1,6 +1,7 @@
 # telestore/api/routes/worker.py
 
 from fastapi import APIRouter, Request, HTTPException, Header, Depends, status
+from telestore.security.credentials import require_admin
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, timedelta
@@ -114,8 +115,8 @@ async def worker_heartbeat(
 
 
 @router.get("/nodes")
-async def list_worker_nodes():
-    """Public/Admin endpoint to view active distributed workers and their health."""
+async def list_worker_nodes(admin: bool = Depends(require_admin)):
+    """Admin view of the distributed workers and their health (their names and addresses aren't public)."""
     coll = get_remote_db()["WorkerNodes"]
     now = datetime.now(timezone.utc)
     stale_limit = now - timedelta(seconds=60)

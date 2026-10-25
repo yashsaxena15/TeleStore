@@ -1,6 +1,6 @@
 import asyncio
 import smtplib
-import random
+import secrets
 import logging
 import os
 from datetime import datetime, timezone, timedelta
@@ -24,7 +24,7 @@ def get_vault_db():
 
 def generate_otp() -> str:
     """Generate a secure 6-digit numeric OTP."""
-    return f"{random.randint(100000, 999999)}"
+    return f"{secrets.randbelow(900000) + 100000}"
 
 def _send_smtp_email_sync(to_email: str, subject: str, html_content: str, text_content: str = "") -> bool:
     """Synchronous SMTP email dispatcher using STARTTLS."""

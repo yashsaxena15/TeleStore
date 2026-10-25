@@ -14,6 +14,8 @@ TEMP_ARCHIVE_DIR = os.getenv("TEMP_ARCHIVE_DIR", os.path.join(PROJECT_ROOT, "tem
 # The storage size shown to WebDAV clients and on the Storage page. Telegram sets no total limit,
 # so this is a display size, not a cap. Binary TB (TiB), which is what Windows calls "TB".
 STORAGE_QUOTA_BYTES = int(float(os.getenv("STORAGE_QUOTA_TB", "100")) * 1024 ** 4)
+# The API reference (/docs, /redoc, /openapi.json) lists every endpoint, so it is off unless asked for
+API_DOCS_ENABLED = os.getenv("API_DOCS_ENABLED", "false").lower() in ("1", "true", "yes")
 
 APP_NAME = os.getenv("APP_NAME", "TeleStore")
 TIME_ZONE = os.getenv("TIME_ZONE", "+5:30")
