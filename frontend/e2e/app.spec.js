@@ -164,6 +164,24 @@ test.describe("trash, starter folders and new transfers", () => {
     });
 });
 
+test.describe("large downloads", () => {
+    test("a big file goes to the browser's own downloads", async ({ page, request }) => {
+        await page.goto("/");
+        await row(page, "Music").dblclick();
+        await page.getByRole("button", { name: "Select huge-backup.zip" }).click();
+        const download = page.waitForEvent("download");
+        await page.getByRole("toolbar", { name: "1 selected" }).getByRole("button", { name: /^Download/ }).click();
+        expect((await download).suggestedFilename()).toBe("huge-backup.zip");
+        // Saved by the browser (straight to disk), not collected in the page's memory
+        const calls = (await mutations(request)).filter((r) => r.path === "/dl/huge-backup.zip");
+        expect(calls.map((c) => c.method)).toEqual(["HEAD", "GET"]);
+        expect(calls[1].body).toMatch(/file_id=f500/);
+        expect(calls[1].body).toMatch(/download=1/);
+        await page.goto("/transfers");
+        await expect(page.getByText("In browser downloads").first()).toBeVisible();
+    });
+});
+
 test.describe("staying signed in", () => {
     test("moving between pages doesn't re-check the sign-in", async ({ page }) => {
         let checks = 0;

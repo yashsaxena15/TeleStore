@@ -252,6 +252,32 @@ async function downloadFileTauri(url, filename, onProgress, cancellationToken) {
 /**
  * Downloads a file using browser APIs
  */
+// Bigger files go to the browser's own download manager: it writes to disk as bytes arrive and
+// can resume. Collecting them in the page first needs the whole file in memory (a 5 GB file
+// crashes the tab) and starts over after any interruption.
+export const DIRECT_DOWNLOAD_BYTES = 200 * 1024 * 1024;
+
+/** Size from a HEAD request (cheap: the server answers without fetching the file), or 0. */
+async function remoteSize(requestUrl, fetchOptions) {
+    try {
+        const head = await fetch(requestUrl, { ...fetchOptions, method: "HEAD" });
+        return head.ok ? Number(head.headers.get("content-length")) || 0 : 0;
+    }
+    catch {
+        return 0;
+    }
+}
+
+function handToBrowser(requestUrl, filename) {
+    const separator = requestUrl.includes("?") ? "&" : "?";
+    const link = document.createElement("a");
+    link.href = requestUrl.includes("download=1") ? requestUrl : `${requestUrl}${separator}download=1`;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
 async function downloadFileBrowser(url, filename, onProgress, cancellationToken) {
     console.log('[downloadFileBrowser] Starting download:', { url, filename });
     // Add authentication headers for browser and Tauri environment
@@ -305,7 +331,13 @@ async function downloadFileBrowser(url, filename, onProgress, cancellationToken)
         credentials: isTauri ? undefined : 'include', // Include cookies for authentication
         signal: cancellationToken?.signal // Add cancellation signal
     };
-    console.log('[downloadFileBrowser] Fetching with options:', { url: requestUrl, fetchOptions });
+    if (!isTauri) {
+        const size = await remoteSize(requestUrl, fetchOptions);
+        if (size >= DIRECT_DOWNLOAD_BYTES) {
+            handToBrowser(requestUrl, filename);
+            return { handedToBrowser: true, size };
+        }
+    }
     // Try the fetch with credentials first
     let response;
     try {

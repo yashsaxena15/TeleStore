@@ -1,6 +1,10 @@
 # telestore/api/routes/webdav/common.py
 
 import base64
+import hashlib
+import hmac
+import threading
+import time
 import urllib.parse
 from datetime import datetime, timezone
 from email.utils import format_datetime
@@ -10,7 +14,7 @@ from typing import Optional, Tuple, Dict, Any, List
 from fastapi import APIRouter, Request, HTTPException
 
 from telestore.db import database
-from telestore.config import OWNER, LOGS, MOVIE, GROUP, FILTER_CHAT
+from telestore.config import OWNER, LOGS, MOVIE, GROUP, FILTER_CHAT, SESSION_SECRET_KEY
 from telestore.security.credentials import check_login
 from telestore.security.attempt_limiter import TooManyAttempts
 from d4rk.Logs import setup_logger
@@ -49,6 +53,42 @@ def parse_webdav_path(raw_path: str) -> List[str]:
     return segments
 
 
+# Explorer and Finder send many small requests, each with the password. Checking it costs ~90 ms
+# of scrypt plus database reads, so a successful sign-in is remembered for a few minutes, keyed
+# by an HMAC of the header (the password itself is never kept). A password change clears it;
+# a turned-off account is still refused at once (its flags are read on every request).
+LOGIN_CACHE_SECONDS = 300
+_login_cache: Dict[str, Tuple[str, float]] = {}
+_login_cache_lock = threading.Lock()
+
+
+def _login_key(auth_header: str) -> str:
+    return hmac.new(SESSION_SECRET_KEY.encode(), auth_header.encode(), hashlib.sha256).hexdigest()
+
+
+def forget_webdav_logins() -> None:
+    """Call when any password changes, so old passwords stop working for WebDAV right away."""
+    with _login_cache_lock:
+        _login_cache.clear()
+
+
+def _remembered_login(auth_header: str) -> Optional[str]:
+    key = _login_key(auth_header)
+    with _login_cache_lock:
+        hit = _login_cache.get(key)
+        if hit and hit[1] > time.time():
+            return hit[0]
+        _login_cache.pop(key, None)
+    return None
+
+
+def _remember_login(auth_header: str, account: str) -> None:
+    with _login_cache_lock:
+        if len(_login_cache) > 1000:
+            _login_cache.clear()
+        _login_cache[_login_key(auth_header)] = (account, time.time() + LOGIN_CACHE_SECONDS)
+
+
 def authenticate_webdav(request: Request) -> Tuple[Dict[str, Any], str, Optional[int]]:
     """
     Authenticate WebDAV request via HTTP Basic Auth.
@@ -82,7 +122,12 @@ def authenticate_webdav(request: Request) -> Tuple[Dict[str, Any], str, Optional
                 return user_data, owner_id, chat_id
 
     try:
-        account = check_login(username, password) if (username and password) else None
+        account = _remembered_login(auth_header) if auth_header.startswith("Basic ") else None
+        from_cache = bool(account)
+        if not account and username and password:
+            account = check_login(username, password)
+            if account:
+                _remember_login(auth_header, account)
         signed_in = bool(account)
         if account:
             username = account
@@ -97,6 +142,10 @@ def authenticate_webdav(request: Request) -> Tuple[Dict[str, Any], str, Optional
 
     # Resolve user metadata
     user_data = database.Users.getUser(username) if hasattr(database, "Users") else None
+    if not user_data and from_cache:
+        # Removed since the sign-in was remembered: never fall back to the owner's identity below
+        forget_webdav_logins()
+        raise HTTPException(status_code=401, detail="Unauthorized", headers={"WWW-Authenticate": 'Basic realm="TeleStore WebDAV"'})
     if not user_data:
         user_data = {"username": username, "telegram_user_id": OWNER}
 

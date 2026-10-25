@@ -170,6 +170,8 @@ async def forgot_password_reset(body: ResetPasswordRequest):
     if not valid:
         raise wrong
     database.Users.update_user_by_identifier(name, {"password_hash": hash_password(body.new_password)})
+    from telestore.api.routes.webdav.common import forget_webdav_logins
+    forget_webdav_logins()
     # A successful reset also lifts any sign-in lockout for the account
     password_limiter.success(f"pw:{name.lower()}")
     logger.info(f"Password reset by email code for user {name}")

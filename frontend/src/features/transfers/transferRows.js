@@ -75,6 +75,7 @@ export function statusInfo(item) {
     if ((s === "paused_quota" || item.isPausedQuota) && (item.source_type === "media" || item.group_type === "media")) return { label: "Waiting", tone: "warning" };
     if (s === "paused_quota" || item.isPausedQuota) return { label: "Quota pause", tone: "warning" };
     if (s === "discovering" || item.isDiscovering) return { label: "Scanning", tone: "info" };
+    if (s === "completed" && item.handedToBrowser) return { label: "In browser downloads", tone: "info" };
     if (s === "completed") return { label: "Done", tone: "success" };
     if (s === "failed") return { label: "Failed", tone: "destructive" };
     if (s === "cancelled") return { label: "Cancelled", tone: "muted" };

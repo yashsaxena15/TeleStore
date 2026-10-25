@@ -157,6 +157,7 @@ async def handle_get_head(request: Request, segments: List[str], owner_id: str, 
         parts_to_stream=parts_to_stream,
         chunk_size=1024 * 1024,
         client_list=active_clients,
+        cache_writes=byte_range is not None,  # players seek with ranges; a whole-file copy is read once
     )
 
     encoded_filename = urllib.parse.quote(target_name)
