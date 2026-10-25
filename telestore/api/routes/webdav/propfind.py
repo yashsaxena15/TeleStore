@@ -9,7 +9,7 @@ from telestore.db import database
 
 # --- Handler Implementations ---
 
-from telestore.api.routes.webdav.common import VIRTUAL_TOP_LEVEL, build_response_xml
+from telestore.api.routes.webdav.common import COLLECTION_TYPE, VIRTUAL_TOP_LEVEL, build_response_xml, quota_props
 
 async def handle_propfind(request: Request, segments: List[str], owner_id: str) -> Response:
     """Handle WebDAV PROPFIND directory and file enumeration."""
@@ -227,6 +227,10 @@ async def handle_propfind(request: Request, segments: List[str], owner_id: str) 
             ))
         else:
             raise HTTPException(status_code=404, detail="Path not found")
+
+    # Used and free space on every folder, so Explorer, Finder, rclone and phone apps can show it
+    quota = quota_props(owner_id)
+    responses_xml = [r.replace(COLLECTION_TYPE, COLLECTION_TYPE + quota) for r in responses_xml]
 
     full_xml = f"""<?xml version="1.0" encoding="utf-8"?>
 <D:multistatus xmlns:D="DAV:">

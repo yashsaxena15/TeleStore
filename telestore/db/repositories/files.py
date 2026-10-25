@@ -653,6 +653,14 @@ class Files(Collection):
             })
         return True
 
+    def used_bytes(self, owner_id: str) -> int:
+        """Total size of an owner's files (Trash included: it still takes space). One small sum."""
+        rows = list(self.aggregate([
+            {"$match": {"owner_id": owner_id, "file_type": {"$ne": "folder"}}},
+            {"$group": {"_id": None, "bytes": {"$sum": {"$ifNull": ["$file_size", 0]}}}},
+        ]))
+        return int(rows[0]["bytes"]) if rows else 0
+
     def get_storage_analytics(self, owner_id: str = None) -> dict:
         """Total storage used, breakdown by category, counts and the largest files.
 

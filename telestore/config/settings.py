@@ -11,6 +11,9 @@ FRONTEND_DIR = os.path.join(PROJECT_ROOT, "frontend")
 FRONTEND_DIST = os.path.join(FRONTEND_DIR, "dist")
 # Scratch space for archives built on the server (zip/7z downloads, archive extraction)
 TEMP_ARCHIVE_DIR = os.getenv("TEMP_ARCHIVE_DIR", os.path.join(PROJECT_ROOT, "temp_archives"))
+# The storage size shown to WebDAV clients and on the Storage page. Telegram sets no total limit,
+# so this is a display size, not a cap. Binary TB (TiB), which is what Windows calls "TB".
+STORAGE_QUOTA_BYTES = int(float(os.getenv("STORAGE_QUOTA_TB", "100")) * 1024 ** 4)
 
 APP_NAME = os.getenv("APP_NAME", "TeleStore")
 TIME_ZONE = os.getenv("TIME_ZONE", "+5:30")

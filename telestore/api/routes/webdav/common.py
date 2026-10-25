@@ -14,7 +14,7 @@ from typing import Optional, Tuple, Dict, Any, List
 from fastapi import APIRouter, Request, HTTPException
 
 from telestore.db import database
-from telestore.config import OWNER, LOGS, MOVIE, GROUP, FILTER_CHAT, SESSION_SECRET_KEY
+from telestore.config import OWNER, LOGS, MOVIE, GROUP, FILTER_CHAT, SESSION_SECRET_KEY, STORAGE_QUOTA_BYTES
 from telestore.security.credentials import check_login
 from telestore.security.attempt_limiter import TooManyAttempts
 from d4rk.Logs import setup_logger
@@ -155,6 +155,35 @@ def authenticate_webdav(request: Request) -> Tuple[Dict[str, Any], str, Optional
         chat_id = [c for c in [LOGS, MOVIE, GROUP, FILTER_CHAT] if c is not None][0] if [c for c in [LOGS, MOVIE, GROUP, FILTER_CHAT] if c is not None] else None
 
     return user_data, owner_id, chat_id
+
+
+QUOTA_CACHE_SECONDS = 60
+_quota_cache: Dict[str, Tuple[int, float]] = {}
+
+
+def storage_quota(owner_id: str) -> Tuple[int, int]:
+    """(used, available) bytes for the WebDAV quota properties (RFC 4331). Cached for a minute:
+    Explorer and Finder ask for it with nearly every folder they open."""
+    hit = _quota_cache.get(owner_id)
+    if hit and hit[1] > time.time():
+        used = hit[0]
+    else:
+        try:
+            used = database.Files.used_bytes(owner_id)
+        except Exception as e:
+            logger.warning(f"[WEBDAV] Couldn't total storage for quota: {e}")
+            used = hit[0] if hit else 0
+        _quota_cache[owner_id] = (used, time.time() + QUOTA_CACHE_SECONDS)
+    return used, max(0, STORAGE_QUOTA_BYTES - used)
+
+
+def quota_props(owner_id: str) -> str:
+    used, available = storage_quota(owner_id)
+    return (f"\n        <D:quota-available-bytes>{available}</D:quota-available-bytes>"
+            f"\n        <D:quota-used-bytes>{used}</D:quota-used-bytes>")
+
+
+COLLECTION_TYPE = "<D:resourcetype><D:collection/></D:resourcetype>"
 
 
 def build_response_xml(href: str, display_name: str, is_collection: bool, size: int = 0, mime_type: str = "application/octet-stream", modified: Optional[str] = None) -> str:
