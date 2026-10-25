@@ -407,7 +407,7 @@ async def execute_task_extract(task_id: str, payload: Dict[str, Any], manager: A
             file_type = "document"
             if ext in ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv']:
                 file_type = "video"
-            elif ext in ['.mp3', '.wav', '.ogg', '.flac', '.m4a']:
+            elif ext in ['.mp3', '.wav', '.ogg', '.flac', '.m4a', '.opus', '.aac']:
                 file_type = "audio"
             elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']:
                 file_type = "photo"

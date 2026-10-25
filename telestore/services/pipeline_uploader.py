@@ -9,7 +9,7 @@ from pyrogram.errors import FloodWait
 logger = logging.getLogger(__name__)
 
 PART_UPLOAD_ATTEMPTS = 3  # tries per part, each on the least busy bot
-AUDIO_EXTS = ["mp3", "wav", "ogg", "flac", "m4a"]
+AUDIO_EXTS = ["mp3", "wav", "ogg", "flac", "m4a", "opus", "aac"]
 
 
 async def extract_audio_cover(audio_path: str) -> Optional[str]:
