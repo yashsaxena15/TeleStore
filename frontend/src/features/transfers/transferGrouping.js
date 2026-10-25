@@ -24,14 +24,19 @@ export function groupRemoteTransfers(remoteTransfers) {
     });
     const groupedRemoteItems = [];
     groupMap.forEach((subItems, groupId) => {
-        const completedCount = subItems.filter(i => i.status === 'completed').length;
-        const failedCount = subItems.filter(i => i.status === 'failed').length;
-        const cancelledCount = subItems.filter(i => i.status === 'cancelled').length;
-        const isDownloading = subItems.some(i => i.status === 'downloading');
-        const isUploading = subItems.some(i => i.status === 'uploading_tg');
-        const isDiscovering = subItems.some(i => i.status === 'discovering');
-        const isPausedQuota = subItems.some(i => i.status === 'paused_quota');
-        const isQueued = subItems.some(i => i.status === 'queued');
+        // The server's summary counts every file in the group; the rows are only the ones moving
+        // now, the next few waiting and recent history
+        const summary = subItems[0].group_summary;
+        const statusCount = (status) => summary ? (summary.counts[status] || 0) : subItems.filter(i => i.status === status).length;
+        const totalCount = summary ? summary.total : subItems.length;
+        const completedCount = statusCount('completed');
+        const failedCount = statusCount('failed');
+        const cancelledCount = statusCount('cancelled');
+        const isDownloading = statusCount('downloading') > 0;
+        const isUploading = statusCount('uploading_tg') > 0;
+        const isDiscovering = statusCount('discovering') > 0;
+        const isPausedQuota = statusCount('paused_quota') > 0;
+        const isQueued = statusCount('queued') > 0;
         let status = 'queued';
         if (isDownloading)
             status = 'downloading';
@@ -41,11 +46,11 @@ export function groupRemoteTransfers(remoteTransfers) {
             status = 'discovering';
         else if (isPausedQuota)
             status = 'paused_quota';
-        else if (completedCount === subItems.length && subItems.length > 0)
+        else if (completedCount === totalCount && totalCount > 0)
             status = 'completed';
-        else if (cancelledCount === subItems.length && subItems.length > 0)
+        else if (cancelledCount === totalCount && totalCount > 0)
             status = 'cancelled';
-        else if (failedCount === subItems.length && subItems.length > 0)
+        else if (failedCount === totalCount && totalCount > 0)
             status = 'failed';
         else if (isQueued)
             status = 'queued';
@@ -54,19 +59,22 @@ export function groupRemoteTransfers(remoteTransfers) {
             status = 'failed';
         else if (cancelledCount > 0)
             status = 'cancelled';
-        const totalBytes = subItems.reduce((acc, i) => acc + (i.filesize || 0), 0);
-        const transferredBytes = subItems.reduce((acc, i) => acc + (i.transferred_bytes || 0), 0);
-        const totalSpeed = subItems.reduce((acc, i) => acc + (i.speed_bps || 0), 0);
-        const totalPeers = subItems.reduce((acc, i) => acc + (i.peer_count || 0), 0);
-        let progress = 0;
-        if (totalBytes > 0) {
-            progress = Math.min(100, Math.round((transferredBytes / totalBytes) * 1000) / 10);
-        }
-        else if (subItems.length > 0) {
-            progress = Math.min(100, Math.round((completedCount / subItems.length) * 1000) / 10);
-        }
+        const sum = (key) => subItems.reduce((acc, i) => acc + (i[key] || 0), 0);
+        const totalBytes = summary ? summary.filesize : sum('filesize');
+        const transferredBytes = summary ? summary.transferred_bytes : sum('transferred_bytes');
+        const totalSpeed = summary ? summary.speed_bps : sum('speed_bps');
+        const totalPeers = sum('peer_count');
         const groupName = subItems[0].group_name || 'Folder Download';
         const groupType = subItems[0].group_type || 'folder';
+        // A folder's waiting files have no size yet, so its progress counts files, not bytes
+        const countFiles = summary && groupType !== 'file';
+        let progress = 0;
+        if (totalBytes > 0 && !countFiles) {
+            progress = Math.min(100, Math.round((transferredBytes / totalBytes) * 1000) / 10);
+        }
+        else if (totalCount > 0) {
+            progress = Math.min(100, Math.round((completedCount / totalCount) * 1000) / 10);
+        }
         const destPath = subItems[0].destination_path || '/Home';
         const cooldownItem = subItems.find(i => i.cooldown_until);
         const cooldownUntil = cooldownItem?.cooldown_until;
@@ -86,22 +94,22 @@ export function groupRemoteTransfers(remoteTransfers) {
             phase = `Google Drive quota limit reached. Auto-resumes at ${targetTime}`;
         }
         else if (status === 'completed') {
-            phase = groupType === 'file' ? `Completed and assembled (${subItems.length} parts)` : `Completed all ${subItems.length} file(s)`;
+            phase = groupType === 'file' ? `Completed and assembled (${totalCount} parts)` : `Completed all ${totalCount} file(s)`;
         }
         else if (status === 'downloading' || status === 'uploading_tg') {
             const activeSub = subItems.find(i => i.status === 'downloading' || i.status === 'uploading_tg');
             phase = groupType === 'file'
-                ? `Multi-node leeching [${completedCount}/${subItems.length} parts done]`
-                : `Leeching [${completedCount + 1}/${subItems.length}]: ${activeSub?.filename || ''}`;
+                ? `Multi-node leeching [${completedCount}/${totalCount} parts done]`
+                : `Leeching [${completedCount + 1}/${totalCount}]: ${activeSub?.filename || ''}`;
         }
         else if (status === 'failed') {
-            phase = `${failedCount} of ${subItems.length} ${groupType === 'file' ? 'parts' : 'files'} failed`;
+            phase = `${failedCount} of ${totalCount} ${groupType === 'file' ? 'parts' : 'files'} failed`;
         }
         else if (status === 'cancelled') {
             phase = groupType === 'file' ? 'File transfer cancelled' : 'Folder transfer cancelled';
         }
         else {
-            phase = groupType === 'file' ? `Queued (${subItems.length} parts)` : `Queued (${subItems.length} files)`;
+            phase = groupType === 'file' ? `Queued (${totalCount} parts)` : `Queued (${totalCount} files)`;
         }
         groupedRemoteItems.push({
             isGroup: true,
@@ -128,9 +136,37 @@ export function groupRemoteTransfers(remoteTransfers) {
             peer_count: totalPeers,
             items: subItems,
             completedCount,
-            totalCount: subItems.length,
+            totalCount,
             startTime: subItems[0].startTime
         });
     });
     return { groupedRemoteItems, singleRemoteItems };
+}
+
+const ACTIVE_REMOTE = ['queued', 'downloading', 'uploading_tg', 'discovering', 'paused_quota'];
+
+// Active, completed and failed remote tasks: a folder leech's rows are only a sample of its files,
+// so its summary is counted once instead
+export function countRemoteTasks(remoteTransfers) {
+    const counts = { active: 0, completed: 0, failed: 0 };
+    const seenGroups = new Set();
+    remoteTransfers.forEach(r => {
+        const summary = r.group_id && r.group_summary;
+        if (summary) {
+            if (seenGroups.has(r.group_id))
+                return;
+            seenGroups.add(r.group_id);
+            ACTIVE_REMOTE.forEach(s => { counts.active += summary.counts[s] || 0; });
+            counts.completed += summary.counts.completed || 0;
+            counts.failed += summary.counts.failed || 0;
+            return;
+        }
+        if (ACTIVE_REMOTE.includes(r.status))
+            counts.active += 1;
+        else if (r.status === 'completed')
+            counts.completed += 1;
+        else if (r.status === 'failed')
+            counts.failed += 1;
+    });
+    return counts;
 }
