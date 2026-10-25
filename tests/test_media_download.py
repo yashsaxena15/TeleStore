@@ -72,18 +72,79 @@ class TestLinks:
         assert expected in str(media._friendly(Exception(text)))
 
 
+def _f(fid, ext, h=None, fps=None, v="none", a="none", abr=None, size=None, note=None, dr="SDR"):
+    return {"format_id": fid, "ext": ext, "height": h, "fps": fps, "vcodec": v, "acodec": a, "abr": abr, "filesize": size, "format_note": note, "dynamic_range": dr}
+
+
+# Shaped like the real formats YouTube gave for "Never Gonna Give You Up" (trimmed)
+YOUTUBE = {"formats": [
+    _f("sb0", "mhtml", h=180, note="storyboard"),
+    _f("251", "webm", a="opus", abr=128.93, size=3_433_755),
+    _f("140", "m4a", a="mp4a.40.2", abr=129.5, size=3_449_447),
+    _f("249", "webm", a="opus", abr=46.2, size=1_231_355),
+    _f("160", "mp4", h=144, fps=25, v="avc1.4D400", size=2_058_142),
+    _f("18", "mp4", h=360, fps=25, v="avc1.42001", a="mp4a.40.2", size=11_832_459),
+    _f("137", "mp4", h=1080, fps=25, v="avc1.64002", size=80_911_999),
+    _f("399", "mp4", h=1080, fps=25, v="av01.0.08M", size=30_415_996),
+    _f("313", "webm", h=2160, fps=25, v="vp9", size=358_608_461),
+    _f("401", "mp4", h=2160, fps=25, v="av01.0.12M", size=240_334_643),
+]}
+FACEBOOK = {"formats": [_f("sd", "mp4", v="", a=""), _f("hd", "mp4", v="", a="")]}
+
+
+class TestOptions:
+    def test_only_the_sizes_the_video_has(self):
+        video = media.media_options(YOUTUBE)["video"]
+        assert [v["height"] for v in video] == [2160, 1080, 360, 144]  # no storyboard, no 4320/1440
+        assert video[0]["size"] == 240_334_643 + 3_449_447  # the MP4 (AV1) version plus the AAC audio
+
+    def test_audio_versions_best_first(self):
+        audio = media.media_options(YOUTUBE)["audio"]
+        assert [(a["codec"], a["abr"]) for a in audio] == [("AAC", 130), ("Opus", 129), ("Opus", 46)]
+
+    def test_named_versions_for_facebook(self):
+        video = media.media_options(FACEBOOK)["video"]
+        assert [(v["value"], v["label"]) for v in video] == [("fmt:hd", "HD"), ("fmt:sd", "SD")]
+
+    def test_a_144p_only_video(self):
+        assert [v["height"] for v in media.media_options({"formats": [_f("160", "mp4", h=144, v="avc1")]})["video"]] == [144]
+
+
 class TestFormats:
-    def test_video_prefers_mp4_at_the_chosen_height(self):
+    def test_a_chosen_height(self):
         opts = format_options({"mode": "video", "quality": "720"})
-        assert opts["format_sort"][0] == "res:720" and opts["merge_output_format"] == "mp4"
+        assert opts["format"].startswith("bv*[height<=720]") and opts["format_sort"][0] == "res:720"
+        assert opts["merge_output_format"] == "mp4/mkv"
 
-    def test_best_video_has_no_height_limit(self):
-        assert not format_options({"mode": "video", "quality": "best"})["format_sort"][0].startswith("res:")
+    def test_best_is_really_the_best(self):
+        # Not held to H.264 any more (which stopped YouTube at 1080p)
+        opts = format_options({"mode": "video", "quality": "best"})
+        assert opts["format_sort"][0] == "res" and not any("h264" in s for s in opts["format_sort"])
 
-    def test_audio(self):
-        opts = format_options({"mode": "audio", "audio_format": "m4a"})
-        assert opts["postprocessors"][0] == {"key": "FFmpegExtractAudio", "preferredcodec": "m4a", "preferredquality": "0"}
-        assert any(p["key"] == "EmbedThumbnail" for p in opts["postprocessors"])
+    def test_most_compatible(self):
+        opts = format_options({"mode": "video", "quality": "compat"})
+        assert "vcodec:h264" in opts["format_sort"] and opts["merge_output_format"] == "mp4"
+
+    def test_facebook_named_version(self):
+        assert format_options({"mode": "video", "quality": "fmt:hd"})["format"] == "hd/best"
+
+    def test_odd_quality_falls_back_to_best(self):
+        assert format_options({"mode": "video", "quality": "x; rm"})["format_sort"][0] == "res"
+
+    def test_original_audio_is_not_converted(self):
+        opts = format_options({"mode": "audio", "audio_format": "original"})
+        assert opts["postprocessors"][0] == {"key": "FFmpegExtractAudio", "preferredcodec": "best"}
+
+    def test_mp3_at_a_bitrate(self):
+        opts = format_options({"mode": "audio", "audio_format": "mp3", "audio_bitrate": "320"})
+        assert opts["postprocessors"][0] == {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "320"}
+
+    def test_one_audio_version(self):
+        assert format_options({"mode": "audio", "audio_source": "251"})["format"].startswith("251/")
+
+    def test_wav_has_no_cover(self):
+        opts = format_options({"mode": "audio", "audio_format": "wav"})
+        assert not any(p["key"] == "EmbedThumbnail" for p in opts["postprocessors"])
 
     def test_subtitles_are_embedded(self):
         opts = format_options({"mode": "video", "subtitles": True})
@@ -373,3 +434,61 @@ class TestSync:
             assert asyncio.run(media_sync.check(doc)) == 2
         assert [e["index"] for e in enqueue.call_args.args[2]] == [2, 3]
         assert syncs.update_one.call_args.args[1]["$set"]["last_new_count"] == 2
+
+
+class TestChoiceRoute:
+    def test_any_height_and_named_versions_are_accepted(self, client, as_user, tasks_db, index_chat):
+        as_user()
+        for quality in ("2160", "144", "fmt:hd", "compat"):
+            with probing(VIDEO):
+                res = client.post("/api/transfers/remote/media", json={"url": "https://youtu.be/x", "choice": {"mode": "video", "quality": quality}, "destination": {"kind": "home", "path": "/Home"}})
+            assert res.status_code == 200, (quality, res.text)
+
+    def test_bad_values_are_refused(self, client, as_user, tasks_db, index_chat):
+        as_user()
+        for choice in ({"mode": "video", "quality": "1080; rm -rf"}, {"mode": "audio", "audio_bitrate": "999"}, {"mode": "audio", "audio_source": "a b"}):
+            res = client.post("/api/transfers/remote/media", json={"url": "https://youtu.be/x", "choice": choice, "destination": {"kind": "home", "path": "/Home"}})
+            assert res.status_code == 422, choice
+
+    def test_preview_includes_the_options(self, client, as_user):
+        as_user()
+        with probing({**VIDEO, "options": media.media_options(YOUTUBE)}), patch.object(media, "thumbnail", AsyncMock(return_value=None)):
+            res = client.post("/api/transfers/remote/media/preview", json={"url": "https://youtu.be/x"})
+        assert [v["height"] for v in res.json()["options"]["video"]] == [2160, 1080, 360, 144]
+
+
+class TestCookieSites:
+    @pytest.fixture
+    def cookie_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(media, "SETTINGS_DIR", str(tmp_path))
+        monkeypatch.setattr(media, "COOKIES_FILE", str(tmp_path / "cookies.txt"))
+        monkeypatch.setattr(media, "COOKIES_STATUS_FILE", str(tmp_path / "cookies-status.json"))
+        monkeypatch.setattr(media, "_pot_running", lambda: False)
+        return tmp_path
+
+    def _file(self, domain, *names):
+        return ("# Netscape HTTP Cookie File\n" + "".join(f"{domain}\tTRUE\t/\tTRUE\t1999999999\t{n}\tv\n" for n in names)).encode()
+
+    def test_a_facebook_export_keeps_the_youtube_sign_in(self, cookie_dir):
+        with patch.object(media, "_check_youtube_sign_in", return_value="signed_in") as check:
+            media.save_cookies(self._file(".youtube.com", "SID", "LOGIN_INFO"))
+            res = media.save_cookies(self._file(".facebook.com", "c_user", "xs"))
+        assert check.call_count == 1  # Facebook didn't re-ask YouTube
+        assert res["cookie_sites"] == ["facebook.com", "youtube.com"] and res["youtube_sign_in"] == "signed_in"
+        text = (cookie_dir / "cookies.txt").read_text()
+        assert "LOGIN_INFO" in text and "c_user" in text
+
+    def test_a_new_export_replaces_that_site_only(self, cookie_dir):
+        with patch.object(media, "_check_youtube_sign_in", return_value="signed_in"):
+            media.save_cookies(self._file(".facebook.com", "old_cookie"))
+            media.save_cookies(self._file(".m.facebook.com", "c_user"))
+        text = (cookie_dir / "cookies.txt").read_text()
+        assert "old_cookie" not in text and "c_user" in text
+
+
+def test_original_quality_audio_files_count_as_audio():
+    from telestore.services.pipeline_uploader import AUDIO_EXTS
+    from telestore.services.remote_transfer_manager.helpers import get_file_type
+    # "Original" YouTube audio arrives as .opus (or .m4a): sent to Telegram as audio, with its cover
+    assert get_file_type("Song.opus") == "audio" and get_file_type("Song.aac") == "audio"
+    assert "opus" in AUDIO_EXTS and "aac" in AUDIO_EXTS

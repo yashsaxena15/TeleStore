@@ -1,7 +1,7 @@
 # telestore/api/routes/remote_transfer.py
 
 from fastapi import APIRouter, Request, Depends, HTTPException, UploadFile, File, Form
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import asyncio
 import posixpath
 from typing import Literal, Optional, Union
@@ -361,8 +361,12 @@ MAX_MEDIA_JOBS = 3  # links waiting or running per user
 
 class MediaChoiceModel(BaseModel):
     mode: Literal["video", "audio"] = "video"
-    quality: Literal["best", "1080", "720", "480"] = "best"
-    audio_format: Literal["mp3", "m4a"] = "mp3"
+    # "best", "compat" (H.264 up to 1080p), a height ("2160", "144"…) or "fmt:<id>" (e.g. Facebook "hd")
+    quality: str = Field("best", pattern=r"^(best|compat|\d{3,4}|fmt:[A-Za-z0-9._-]{1,40})$")
+    # "original" keeps the site's audio as is; the rest convert (bitrate for MP3/M4A)
+    audio_format: Literal["original", "mp3", "m4a", "flac", "wav"] = "original"
+    audio_bitrate: Optional[Literal["320", "256", "192", "160", "128"]] = None
+    audio_source: Optional[str] = Field(None, pattern=r"^[A-Za-z0-9._-]{1,40}$")  # one of the site's audio versions
     # Subtitle language: "en", "hi" or "all"; None or False for none (True means English)
     subtitles: Optional[Union[Literal["en", "hi", "all"], bool]] = None
 
@@ -399,6 +403,7 @@ async def preview_media(body: InstagramUrlModel, user: User = Depends(require_up
         "uploader": info.get("uploader"),
         "site": info.get("site"),
         "duration": info.get("duration"),
+        "options": info.get("options"),
         "count": info["count"],
         "thumbnail": await thumbnail(info.get("thumbnail_url")),
         "entries": [{"index": e["index"], "title": e["title"], "duration": e.get("duration")} for e in info["entries"]],

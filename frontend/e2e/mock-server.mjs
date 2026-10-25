@@ -148,7 +148,16 @@ const mutation = (req, res, url, body) => {
         if (body.includes("playlist"))
             return send(res, 200, { kind: "playlist", title: "Road trip", uploader: "Yash", site: "YoutubeTab", count: 3, thumbnail: null,
                 entries: [{ index: 1, title: "Song one", duration: 201 }, { index: 2, title: "Song two", duration: 185 }, { index: 3, title: "Song three", duration: 3725 }] });
-        return send(res, 200, { kind: "video", title: "Never Gonna Give You Up", uploader: "Rick Astley", site: "Youtube", duration: 213, count: 1, thumbnail: null, entries: [{ index: 1, title: "Never Gonna Give You Up", duration: 213 }] });
+        if (body.includes("facebook.com"))
+            return send(res, 200, { kind: "video", title: "How to Share With Just Friends", uploader: "Facebook", site: "Facebook", duration: 47, count: 1, thumbnail: null,
+                options: { video: [{ value: "fmt:hd", label: "HD", size: 0 }, { value: "fmt:sd", label: "SD", size: 0 }], audio: [] },
+                entries: [{ index: 1, title: "How to Share With Just Friends", duration: 47 }] });
+        return send(res, 200, { kind: "video", title: "Never Gonna Give You Up", uploader: "Rick Astley", site: "Youtube", duration: 213, count: 1, thumbnail: null,
+            options: {
+                video: [2160, 1440, 1080, 720, 480, 360, 240, 144].map((h) => ({ value: String(h), height: h, fps: 25, hdr: false, size: h * 110_000 })),
+                audio: [{ id: "140", codec: "AAC", abr: 130, size: 3_449_447 }, { id: "251", codec: "Opus", abr: 129, size: 3_433_755 }, { id: "249", codec: "Opus", abr: 46, size: 1_231_355 }],
+            },
+            entries: [{ index: 1, title: "Never Gonna Give You Up", duration: 213 }] });
     }
     if (url.pathname === "/transfers/remote/media/cookies" && req.method === "POST") {
         return send(res, 200, { version: "2026.10.21", builtin_version: "2026.10.21", updated: false, has_cookies: true, cookie_sites: ["youtube.com"], cookies_updated_at: "2026-10-22T10:00:00Z", youtube_sign_in: "signed_in", pot_helper: true });

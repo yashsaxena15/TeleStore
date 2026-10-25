@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useSaveDestination } from "./SaveDestination";
+import { audioChoices, conversionNote, toChoice, videoChoices } from "./mediaChoices";
 
 const LINK = /^(https?:\/\/)?[^\s/]+\.[^\s/]+\/\S+/i;
 
@@ -22,13 +23,6 @@ const SUBTITLES = [
     { value: "en", label: "English subtitles" },
     { value: "hi", label: "Hindi subtitles" },
     { value: "all", label: "All subtitle languages" },
-];
-
-const QUALITIES = [
-    { value: "best", label: "Best available" },
-    { value: "1080", label: "1080p" },
-    { value: "720", label: "720p" },
-    { value: "480", label: "480p (smaller)" },
 ];
 
 const formatDuration = (seconds) => {
@@ -59,7 +53,7 @@ export const MediaDownloadDialog = ({ open, onOpenChange, defaultDestination, us
     const [busy, setBusy] = useState(false);
     const [mode, setMode] = useState("video");
     const [quality, setQuality] = useState("best");
-    const [audioFormat, setAudioFormat] = useState("mp3");
+    const [audio, setAudio] = useState("original");
     const [subtitles, setSubtitles] = useState("");
     const [sync, setSync] = useState(false);
     const [picked, setPicked] = useState(new Set());
@@ -93,6 +87,9 @@ export const MediaDownloadDialog = ({ open, onOpenChange, defaultDestination, us
                     return;
                 setPreview(res);
                 setPicked(new Set(res.entries.map((e) => e.index)));
+                // The lists are built from this link's own versions: start from the best of each
+                setQuality("best");
+                setAudio("original");
                 // Music links default to audio
                 if (/music\.youtube\.com|soundcloud\.com|bandcamp\.com/i.test(link))
                     setMode("audio");
@@ -127,7 +124,7 @@ export const MediaDownloadDialog = ({ open, onOpenChange, defaultDestination, us
         setBusy(true);
         setError("");
         try {
-            const choice = mode === "audio" ? { mode, audio_format: audioFormat } : { mode, quality, subtitles: subtitles || null };
+            const choice = toChoice({ mode, quality, audio, subtitles });
             const items = isPlaylist ? [...picked].sort((a, b) => a - b) : undefined;
             const res = await api.downloadMedia(url.trim(), choice, save.destination, items, isPlaylist && sync);
             toast.success(res.message || "Download started", { description: "Follow it in Transfers." });
@@ -198,16 +195,20 @@ export const MediaDownloadDialog = ({ open, onOpenChange, defaultDestination, us
             <Label id="media-what">Download</Label>
             <Segmented label="Download" value={mode} onChange={setMode} options={[{ value: "video", label: "Video", icon: Video }, { value: "audio", label: "Audio only", icon: Music }]}/>
             {mode === "video" ? (<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <select aria-label="Quality" value={quality} onChange={(e) => setQuality(e.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-sm">
-                  {QUALITIES.map((q) => <option key={q.value} value={q.value}>{q.label}</option>)}
+                <select aria-label="Quality" value={quality} onChange={(e) => setQuality(e.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-sm max-w-full">
+                  {videoChoices(preview).map((q) => <option key={q.value} value={q.value}>{q.label}</option>)}
                 </select>
                 <select aria-label="Subtitles" value={subtitles} onChange={(e) => setSubtitles(e.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-sm">
                   {SUBTITLES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
-              </div>) : (<select aria-label="Audio format" value={audioFormat} onChange={(e) => setAudioFormat(e.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-sm justify-self-start">
-                <option value="mp3">MP3 (plays everywhere)</option>
-                <option value="m4a">M4A (smaller, same quality)</option>
-              </select>)}
+              </div>) : (<div className="grid gap-1.5">
+                <select aria-label="Audio format" value={audio} onChange={(e) => setAudio(e.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-sm justify-self-start max-w-full">
+                  {audioChoices(preview).map((g) => (<optgroup key={g.group} label={g.group}>
+                      {g.items.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+                    </optgroup>))}
+                </select>
+                {conversionNote(audio, preview) && <p className="text-xs text-muted-foreground">{conversionNote(audio, preview)}</p>}
+              </div>)}
           </div>
 
           {save.field}

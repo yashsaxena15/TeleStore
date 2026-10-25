@@ -1468,7 +1468,7 @@ class RemoteTransferManager:
             ext = os.path.splitext(fname)[1].lower()
             if ext in ['.mp4', '.mkv', '.avi', '.mov', '.webm']:
                 return "video"
-            elif ext in ['.mp3', '.wav', '.ogg', '.flac', '.m4a']:
+            elif ext in ['.mp3', '.wav', '.ogg', '.flac', '.m4a', '.opus', '.aac']:
                 return "audio"
             elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
                 return "photo"

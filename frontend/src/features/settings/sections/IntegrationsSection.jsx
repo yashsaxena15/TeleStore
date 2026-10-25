@@ -139,29 +139,33 @@ const MediaDownloadsPanel = () => {
     };
     const has = Boolean(settings?.has_cookies);
     const signIn = settings?.youtube_sign_in;
-    return (<SettingsPanel icon={Clapperboard} title="Video downloads" description="YouTube, YouTube Music and other sites, downloaded by the server with yt-dlp" actions={<>
+    const hasYouTube = Boolean(settings?.cookie_sites?.some((site) => site.includes("youtube")));
+    return (<SettingsPanel icon={Clapperboard} title="Video downloads" description="YouTube, YouTube Music, Facebook and other sites, downloaded by the server with yt-dlp" actions={<>
         <input ref={fileRef} type="file" accept=".txt,text/plain" className="hidden" aria-label="cookies.txt file" onChange={upload}/>
         <Button size="sm" variant={has ? "outline" : "default"} className="h-8" disabled={Boolean(busy)} onClick={() => fileRef.current?.click()}><Upload className="w-3.5 h-3.5 mr-1.5"/>{busy === "cookies" ? "Checking…" : has ? "Replace cookies" : "Add cookies"}</Button>
       </>}>
       <div className="grid gap-3 text-sm">
         <div className="grid gap-1.5">
           <p className="flex flex-wrap items-center gap-2">
-            {!has ? <StatusPill tone="muted">No cookies</StatusPill> : signIn === "signed_in" ? <StatusPill tone="success">Signed in</StatusPill> : signIn === "signed_out" ? <StatusPill tone="destructive">Not signed in</StatusPill> : <StatusPill tone="warning">Cookies added</StatusPill>}
+            {!has ? <StatusPill tone="muted">No cookies</StatusPill> : signIn === "signed_out" ? <StatusPill tone="destructive">YouTube not signed in</StatusPill> : signIn === "signed_in" ? <StatusPill tone="success">Signed in</StatusPill> : <StatusPill tone="success">Cookies added</StatusPill>}
             <span className="text-muted-foreground min-w-0">
-              {!has ? "Most videos download without them. YouTube sometimes asks servers to prove they aren't a bot, and age-restricted videos and your own private playlists need a sign-in: cookies fix these."
-                : signIn === "signed_in" ? `YouTube confirmed the sign-in${settings.cookies_updated_at ? ` (added ${new Date(settings.cookies_updated_at).toLocaleDateString()})` : ""}.`
-                    : signIn === "signed_out" ? "YouTube says these cookies aren't signed in. Export them again while signed in."
-                        : `Using cookies for ${settings.cookie_sites?.length ? settings.cookie_sites.join(", ") : "your sites"}. YouTube couldn't be asked to confirm the sign-in just now.`}
+              {!has ? "Most public videos download without them. Cookies let the server use a signed-in account: YouTube asks servers to prove they aren't a bot less often, and age-restricted, private and friends-only videos (YouTube, Facebook, Instagram, X…) work."
+                : `Cookies for ${settings.cookie_sites?.length ? settings.cookie_sites.join(", ") : "your sites"}.${!hasYouTube ? ""
+                    : signIn === "signed_in" ? " YouTube confirmed the sign-in."
+                        : signIn === "signed_out" ? " YouTube says its cookies aren't signed in: export them again while signed in."
+                            : " YouTube couldn't be asked to confirm its sign-in just now."}`}
             </span>
           </p>
           {has && <button type="button" onClick={() => run("cookies", api.removeMediaCookies, () => toast.success("Cookies removed"))} className="justify-self-start text-sm text-destructive hover:underline flex items-center gap-1"><Trash2 className="w-3.5 h-3.5"/>Remove cookies</button>}
           <button type="button" className="justify-self-start text-sm text-primary hover:underline" aria-expanded={showHow} onClick={() => setShowHow(!showHow)}>How to get a cookies.txt</button>
           {showHow && (<ol className="text-sm text-muted-foreground list-decimal pl-5 grid gap-1">
-              <li>Use a spare Google account, not your main one: heavy downloading can get an account flagged.</li>
+              <li>Use a spare account, not your main one: heavy downloading can get an account flagged.</li>
               <li>Install the <span className="font-medium text-foreground">Get cookies.txt LOCALLY</span> extension (Chrome, Edge, or Firefox on Android).</li>
-              <li>In a private window, open <span className="font-medium text-foreground">youtube.com</span> (not music.youtube.com) and sign in, until your picture shows at the top right.</li>
-              <li>On that tab, open the extension and export the cookies for the current site.</li>
+              <li>In a private window, sign in on the site: <span className="font-medium text-foreground">youtube.com</span> (not music.youtube.com) or <span className="font-medium text-foreground">facebook.com</span>, until your picture shows.</li>
+              <li>For YouTube, open <span className="font-mono text-foreground">youtube.com/robots.txt</span> in that same tab, so YouTube doesn't replace the cookies while you export.</li>
+              <li>Open the extension and export the cookies for the current site.</li>
               <li>Close the private window without signing out (signing out ends the cookies), then press Add cookies here.</li>
+              <li>Add each site's file the same way: a new file replaces only that site's cookies.</li>
             </ol>)}
         </div>
 

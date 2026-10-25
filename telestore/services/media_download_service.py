@@ -60,8 +60,13 @@ import yt_dlp  # noqa: E402  (after the path above, so an installed update wins)
 
 MAX_PLAYLIST_ITEMS = 200
 MAX_SYNC_ITEMS = 1000  # how far a synced playlist is read when looking for new videos
-QUALITIES = {"best": None, "1080": 1080, "720": 720, "480": 480}
-AUDIO_FORMATS = ("mp3", "m4a")
+# Video: "best", "compat" (H.264, plays everywhere, up to 1080p), a height such as "2160", or
+# "fmt:<id>" for sites that only name their versions (Facebook's "sd"/"hd")
+QUALITY_LADDER = (4320, 2160, 1440, 1080, 720, 480, 360, 240, 144)
+_QUALITY_RE = re.compile(r"^(best|compat|\d{3,4}|fmt:[A-Za-z0-9._-]{1,40})$")
+# Audio: "original" keeps the site's own audio as is (no re-encoding); the others convert
+AUDIO_FORMATS = ("original", "mp3", "m4a", "flac", "wav")
+AUDIO_BITRATES = ("320", "256", "192", "160", "128")
 # Exact codes: "en.*" would also fetch YouTube's machine translations into English from every
 # other language (en-de-DE, en-ja…), one request each, and YouTube then rate-limits the server
 SUBTITLE_LANGS = {"en": ["en", "en-orig", "en-US", "en-GB", "en-IN"], "hi": ["hi", "hi-orig", "hi-IN"], "all": ["all", "-live_chat"]}
@@ -206,26 +211,49 @@ def _subtitle_langs(choice: dict) -> Optional[list]:
     return SUBTITLE_LANGS.get(value) if isinstance(value, str) else None
 
 
+def _video_format(quality: str) -> dict:
+    if quality.startswith("fmt:"):
+        return {"format": f"{quality[4:]}/best"}
+    if quality == "compat":
+        # H.264 + AAC in MP4: plays on every device (YouTube stops H.264 at 1080p)
+        return {"format": "bv*[vcodec^=avc1]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",
+                "format_sort": ["res:1080", "vcodec:h264", "ext:mp4:m4a"], "merge_output_format": "mp4"}
+    sort = ["fps", "ext:mp4:m4a"]  # at the same size prefer MP4 (AV1/H.264) with AAC: an MP4 file
+    if quality.isdigit():
+        h = int(quality)
+        return {"format": f"bv*[height<={h}]+ba/b[height<={h}]/b", "format_sort": [f"res:{h}", *sort],
+                "merge_output_format": "mp4/mkv"}
+    return {"format": "bv*+ba/b", "format_sort": ["res", *sort], "merge_output_format": "mp4/mkv"}
+
+
+def _audio_postprocessors(choice: dict) -> list:
+    fmt = choice.get("audio_format") if choice.get("audio_format") in AUDIO_FORMATS else "original"
+    if fmt == "original":
+        # "best" keeps the codec and only rewraps it (Opus → .opus, AAC → .m4a): nothing re-encoded
+        extract = {"key": "FFmpegExtractAudio", "preferredcodec": "best"}
+    else:
+        bitrate = choice.get("audio_bitrate") if choice.get("audio_bitrate") in AUDIO_BITRATES else "192"
+        extract = {"key": "FFmpegExtractAudio", "preferredcodec": fmt,
+                   "preferredquality": bitrate if fmt in ("mp3", "m4a") else "0"}
+    pps = [extract, {"key": "FFmpegMetadata", "add_metadata": True, "add_chapters": True}]
+    if fmt != "wav":  # WAV can't carry a cover
+        pps.append({"key": "EmbedThumbnail"})
+    return pps
+
+
 def format_options(choice: dict) -> dict:
-    """yt-dlp options for {"mode": "video", "quality", "subtitles"} or {"mode": "audio", "audio_format"}."""
+    """yt-dlp options for a download choice:
+    {"mode": "video", "quality", "subtitles"} or
+    {"mode": "audio", "audio_format", "audio_bitrate", "audio_source"}."""
     if choice.get("mode") == "audio":
-        codec = choice.get("audio_format") if choice.get("audio_format") in AUDIO_FORMATS else "mp3"
-        return {
-            "format": "bestaudio/best",
-            "writethumbnail": True,
-            "postprocessors": [
-                {"key": "FFmpegExtractAudio", "preferredcodec": codec, "preferredquality": "0"},
-                {"key": "FFmpegMetadata", "add_metadata": True, "add_chapters": True},
-                {"key": "EmbedThumbnail"},
-            ],
-        }
-    height = QUALITIES.get(str(choice.get("quality") or "best"))
-    sort = [f"res:{height}"] if height else []
+        source = choice.get("audio_source")
+        audio = f"{source}/bestaudio/best" if source and re.fullmatch(r"[A-Za-z0-9._-]{1,40}", source) else "bestaudio/best"
+        return {"format": audio, "writethumbnail": True, "postprocessors": _audio_postprocessors(choice)}
+    quality = str(choice.get("quality") or "best")
+    if not _QUALITY_RE.match(quality):
+        quality = "best"
     opts = {
-        "format": "bestvideo*+bestaudio/best",
-        # Prefer MP4/H.264 + AAC so the file plays everywhere and streams in TeleStore
-        "format_sort": sort + ["vcodec:h264", "ext:mp4:m4a"],
-        "merge_output_format": "mp4",
+        **_video_format(quality),
         "writethumbnail": True,
         "postprocessors": [
             {"key": "FFmpegMetadata", "add_metadata": True, "add_chapters": True},
@@ -239,6 +267,59 @@ def format_options(choice: dict) -> dict:
         opts.update({"writesubtitles": True, "writeautomaticsub": choice.get("subtitles") != "all", "subtitleslangs": langs, "subtitlesformat": "srt/vtt/best"})
         opts["postprocessors"].insert(0, {"key": "FFmpegEmbedSubtitle", "already_have_subtitle": False})
     return opts
+
+
+_CODEC_NAMES = {"opus": "Opus", "mp4a": "AAC", "aac": "AAC", "vorbis": "Vorbis", "mp3": "MP3", "flac": "FLAC", "ac-3": "AC-3", "ec-3": "E-AC-3"}
+
+
+def _size(f: dict) -> int:
+    return int(f.get("filesize") or f.get("filesize_approx") or 0)
+
+
+def media_options(info: dict) -> dict:
+    """What one video offers: {"video": [{value, height, fps, hdr, size}] largest first, plus named
+    versions for sites without sizes; "audio": [{id, codec, abr, size}] best first}."""
+    formats = info.get("formats") or []
+    has_codec = lambda c: c not in (None, "none")  # noqa: E731
+    audio = [f for f in formats if not has_codec(f.get("vcodec")) and has_codec(f.get("acodec"))]
+    audio_size = max((_size(f) for f in audio if (f.get("ext") == "m4a")), default=0) or max((_size(f) for f in audio), default=0)
+
+    heights, named = {}, []
+    for f in formats:
+        if f.get("ext") == "mhtml" or f.get("vcodec") == "none":
+            continue  # storyboards and audio-only
+        h = f.get("height")
+        if h:
+            if h < 100:
+                continue
+            entry = heights.setdefault(h, {"value": str(h), "height": h, "fps": 0, "hdr": False, "size": 0, "_mp4": 0})
+            entry["fps"] = max(entry["fps"], round(f.get("fps") or 0))
+            entry["hdr"] = entry["hdr"] or (f.get("dynamic_range") or "SDR") != "SDR"
+            total = _size(f) + (audio_size if not has_codec(f.get("acodec")) else 0)
+            if total:
+                entry["size"] = max(entry["size"], total)
+                if f.get("ext") == "mp4":  # what "prefer MP4" will pick at this size
+                    entry["_mp4"] = max(entry["_mp4"], total)
+        elif f.get("format_id"):
+            named.append({"value": f"fmt:{f['format_id']}", "label": (f.get("format_note") or f["format_id"]).upper(),
+                          "size": _size(f)})
+    video = []
+    for h in sorted(heights, reverse=True):
+        e = heights[h]
+        e["size"] = e.pop("_mp4") or e["size"]
+        video.append(e)
+    if not video:
+        video = list(reversed(named))  # e.g. Facebook: HD, SD
+
+    seen, sources = set(), []
+    for f in sorted(audio, key=lambda f: f.get("abr") or 0, reverse=True):
+        codec = _CODEC_NAMES.get((f.get("acodec") or "").split(".")[0].lower(), (f.get("acodec") or "audio").split(".")[0])
+        key = (codec, round(f.get("abr") or 0))
+        if key in seen:
+            continue
+        seen.add(key)
+        sources.append({"id": f.get("format_id"), "codec": codec, "abr": round(f.get("abr") or 0), "size": _size(f)})
+    return {"video": video, "audio": sources}
 
 
 # ── Reading links ──────────────────────────────────────────────────────────────────────────
@@ -305,6 +386,7 @@ def _probe(url: str, limit: int) -> dict:
         "site": info.get("extractor_key"),
         "thumbnail_url": info.get("thumbnail"),
         "duration": info.get("duration"),
+        "options": media_options(info),
         "count": 1,
         "entries": [{"index": 1, "url": link, "title": info.get("title") or link, "duration": info.get("duration")}],
         "url": url,
@@ -428,14 +510,27 @@ def save_cookies(data: bytes) -> dict:
     youtube_names = {r[5] for r in rows if "youtube.com" in r[0].lower()}
     if youtube_names and not all(youtube_names & needed for needed in SIGNED_IN_COOKIES):
         raise MediaError("These cookies aren't from a signed-in YouTube. Sign in at youtube.com (your picture shows at the top right), export again from that tab, then add the new file.")
+    # Merge by site: a Facebook export replaces Facebook's cookies and keeps YouTube's
+    new_sites = {_site(r[0]) for r in rows}
+    kept = []
+    if has_cookies():
+        with open(COOKIES_FILE, encoding="utf-8", errors="replace") as f:
+            kept = ["\t".join(r) for r in _cookie_rows(f.read()) if _site(r[0]) not in new_sites]
+    lines = ["# Netscape HTTP Cookie File", *kept, *("\t".join(r) for r in rows)]
     os.makedirs(SETTINGS_DIR, mode=0o700, exist_ok=True)
     with open(COOKIES_FILE, "w", encoding="utf-8") as f:
-        f.write(text if text.endswith("\n") else text + "\n")
+        f.write("\n".join(lines) + "\n")
     os.chmod(COOKIES_FILE, 0o600)
-    status = _check_youtube_sign_in() if youtube_names else None
-    with open(COOKIES_STATUS_FILE, "w") as f:
-        json.dump({"youtube": status, "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, f)
+    if youtube_names:  # only a new YouTube export changes what YouTube says about the sign-in
+        with open(COOKIES_STATUS_FILE, "w") as f:
+            json.dump({"youtube": _check_youtube_sign_in(), "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, f)
     return settings()
+
+
+def _site(domain: str) -> str:
+    """The site a cookie belongs to: ".m.facebook.com" → "facebook.com"."""
+    parts = domain.lstrip(".").lower().split(".")
+    return ".".join(parts[-2:])
 
 
 def remove_cookies() -> dict:
@@ -523,7 +618,7 @@ def settings() -> dict:
         updated = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(os.path.getmtime(COOKIES_FILE)))
         with open(COOKIES_FILE, encoding="utf-8", errors="replace") as f:
             domains = sorted({r[0].lstrip(".").lower() for r in _cookie_rows(f.read())})
-        sites = sorted({d for d in domains if any(k in d for k in ("youtube", "google", "vimeo", "instagram", "facebook", "twitter", "x.com", "tiktok", "reddit", "soundcloud"))})
+        sites = sorted({_site(d) for d in domains})
         try:
             with open(COOKIES_STATUS_FILE) as f:
                 status = json.load(f).get("youtube")
