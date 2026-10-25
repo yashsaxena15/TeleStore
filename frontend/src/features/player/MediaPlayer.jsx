@@ -9,7 +9,6 @@ import { getApiBaseUrl, fetchWithTimeout } from "@/lib/api";
 import { shouldAutoplayOnBufferReady } from "./videoPlaylistHelpers";
 import { ALL_QUALITIES, formatTime, getFileExtension } from "./playerFormat";
 import { usePlayerKeyboard } from "./hooks/usePlayerKeyboard";
-import { useBackgroundAudio } from "./hooks/useBackgroundAudio";
 import { PlayerControlsBar } from "./theater/PlayerControlsBar";
 import { PlayerSettingsSheet } from "./theater/PlayerSettingsSheet";
 
@@ -148,6 +147,9 @@ export const MediaPlayer = ({
     useEffect(() => {
         const handleFullscreenChange = () => {
             setIsFullscreen(!!document.fullscreenElement);
+            // Leaving fullscreen gives the screen back to the phone's own rotation
+            if (!document.fullscreenElement)
+                screen.orientation?.unlock?.();
         };
         document.addEventListener("fullscreenchange", handleFullscreenChange);
         return () => {
@@ -421,16 +423,28 @@ export const MediaPlayer = ({
     }, [showControls]);
     const toggleFullscreen = useCallback(() => {
         const container = containerRef.current;
+        const video = mediaElementRef.current;
         if (!container)
             return;
-        if (!document.fullscreenElement) {
-            container.requestFullscreen?.().catch((err) => console.warn("Fullscreen request error:", err));
-        }
-        else {
+        if (document.fullscreenElement) {
             document.exitFullscreen?.().catch((err) => console.warn("Exit fullscreen error:", err));
         }
+        else if (container.requestFullscreen) {
+            container.requestFullscreen()
+                .then(() => {
+                    // On phones a wide video turns the screen sideways, like the video apps do
+                    const wide = !video?.videoHeight || video.videoWidth >= video.videoHeight;
+                    if (isMobile && wide)
+                        screen.orientation?.lock?.("landscape").catch(() => { });
+                })
+                .catch((err) => console.warn("Fullscreen request error:", err));
+        }
+        else if (video?.webkitEnterFullscreen) {
+            // iPhone Safari only puts the video itself in fullscreen, in its own player that rotates
+            video.webkitEnterFullscreen();
+        }
         showControls(CONTROLS_HIDE_MS);
-    }, [showControls]);
+    }, [isMobile, showControls]);
     const togglePiP = useCallback(async () => {
         const video = mediaElementRef.current;
         if (!video || !canPiP)
@@ -521,22 +535,6 @@ export const MediaPlayer = ({
         }
     };
     usePlayerKeyboard({ activeMenu, handlePlaybackRateChange, handleVolumeChange, isFullscreen, isMini, onClose, onNext, onPrev, playbackRate, seekRelative, setActiveMenu, toggleFullscreen, toggleMute, togglePlay, volume });
-    // The sound carries on while the user is in another app; the video catches up on return
-    const backgroundAudio = useBackgroundAudio({
-        videoRef: mediaElementRef,
-        title: fileName,
-        position: () => streamStartTimeRef.current + (mediaElementRef.current?.currentTime || 0),
-        audioSource: (at) => (isBrowserNative && currentQuality === "original" && currentAudioTrack === 0
-            ? { url: mediaUrl, startAt: at }
-            : { url: buildStreamUrl(currentQuality, currentAudioTrack, at), startAt: 0 }),
-        resumeAt: (at, playing) => {
-            seekTo(at);
-            if (playing) {
-                userPausedRef.current = false;
-                mediaElementRef.current?.play().catch(() => { });
-            }
-        },
-    });
     // Robust Viewport Pointer/Tap Handler:
     // Handles Single Tap (Toggle controls on touch / Play-Pause on desktop)
     // and Double Tap (Seek -10s left / +10s right) without race conditions.
@@ -838,12 +836,10 @@ export const MediaPlayer = ({
     // Rendered into videoHost, which attachVideo moves between the theater and the dock
     const videoElement = createPortal((
     <video ref={mediaElementRef} src={activeStreamUrl} autoPlay preload="auto" playsInline crossOrigin="anonymous" className={`w-full h-full pointer-events-none ${isMini ? "object-cover" : "object-contain"}`} onTimeUpdate={handleTimeUpdate} onProgress={handleProgress} onLoadedMetadata={handleLoadedMetadata} onPlay={() => {
-          backgroundAudio.onVideoPlay();
           setIsPlaying(true);
           if (!isMini)
               showControls(CONTROLS_HIDE_MS);
       }} onPause={() => {
-          backgroundAudio.onVideoPause();
           setIsPlaying(false);
           if (!isMini)
               setAreControlsVisible(true);

@@ -61,14 +61,14 @@ export const PlayerControlsBar = ({ activeMenu, currentTime, areControlsVisible,
             </button>
           )}
 
-          {/* Rewind 10s */}
-          <button onClick={() => seekRelative(-10)} className="p-2 rounded-full hover:bg-white/10 text-white/85 hover:text-white transition-colors relative focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Rewind 10 seconds (Left Arrow/j)" aria-label="Rewind 10 seconds">
+          {/* Rewind 10s (not on phones: double-tap the sides instead, and the row needs the room) */}
+          <button onClick={() => seekRelative(-10)} className="p-2 rounded-full hover:bg-white/10 text-white/85 hover:text-white transition-colors relative focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[36px] min-h-[36px] hidden sm:flex items-center justify-center" title="Rewind 10 seconds (Left Arrow/j)" aria-label="Rewind 10 seconds">
             <RotateCcw className="w-5 h-5"/>
             <span className="absolute text-[8px] font-bold top-2 left-2">10</span>
           </button>
 
           {/* Forward 10s */}
-          <button onClick={() => seekRelative(10)} className="p-2 rounded-full hover:bg-white/10 text-white/85 hover:text-white transition-colors relative focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center" title="Forward 10 seconds (Right Arrow/l)" aria-label="Forward 10 seconds">
+          <button onClick={() => seekRelative(10)} className="p-2 rounded-full hover:bg-white/10 text-white/85 hover:text-white transition-colors relative focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[36px] min-h-[36px] hidden sm:flex items-center justify-center" title="Forward 10 seconds (Right Arrow/l)" aria-label="Forward 10 seconds">
             <RotateCw className="w-5 h-5"/>
             <span className="absolute text-[8px] font-bold top-2 left-2">10</span>
           </button>
