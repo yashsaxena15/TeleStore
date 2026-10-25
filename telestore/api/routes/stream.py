@@ -1,4 +1,5 @@
 import os
+import time
 import sys
 import re
 import urllib.parse
@@ -35,6 +36,25 @@ executor = ThreadPoolExecutor()
 
 router = APIRouter(tags=["Streaming"])
 class_cache = {}
+
+
+# Players send many range requests for one file (every seek): the file's message is looked up on
+# Telegram once and reused for a few minutes instead of on every request
+_MESSAGE_TTL_S = 600
+_recent_messages: dict = {}
+
+
+def _recent_message(chat_id, message_id):
+    hit = _recent_messages.get((chat_id, message_id))
+    if hit and hit[2] > time.time() and getattr(hit[1], "is_connected", True):
+        return hit[0], hit[1]
+    return None, None
+
+
+def _remember_message(chat_id, message_id, message, client):
+    if len(_recent_messages) > 2000:
+        _recent_messages.clear()
+    _recent_messages[(chat_id, message_id)] = (message, client, time.time() + _MESSAGE_TTL_S)
 
 
 @router.get("/dl/{file_name:path}")
@@ -178,14 +198,14 @@ async def stream_handler(request: Request, file_name: str):
             if c not in clients_to_try:
                 clients_to_try.append(c)
 
-    message = None
-    successful_client = None
-    for c in clients_to_try:
+    message, successful_client = _recent_message(chat_id, message_id)
+    for c in ([] if message else clients_to_try):
         try:
             msg = await c.get_messages(chat_id, message_id)
             if msg and (msg.video or msg.document or msg.photo or msg.audio or msg.voice):
                 message = msg
                 successful_client = c
+                _remember_message(chat_id, message_id, msg, c)
                 break
         except Exception as e:
             LOGGER.warning(f"Client {getattr(c, 'name', str(c))} failed to get_messages for chat {chat_id}, msg {message_id}: {e}")
@@ -453,6 +473,12 @@ async def media_streamer(
 
     parts_list = parts_list or parts
 
+    # Lets browsers resume a download: same tag, same file. If-Range with another tag (or a date)
+    # means the file may have changed, so the whole file is sent instead of a range of it.
+    etag = f'"{getattr(file, "file_unique_id", None) or secure_hash}-{file_size}"'
+    if_range = request.headers.get("If-Range", "").strip()
+    if if_range and if_range != etag:
+        range_header = ""
     try:
         byte_range = parse_byte_range(range_header, file_size)
     except RangeNotSatisfiable:
@@ -503,14 +529,15 @@ async def media_streamer(
         f"Streaming range {from_bytes}-{until_bytes}/{file_size} across {len(parts_to_stream)} part(s) using {len(active_clients)} bot client(s)"
     )
 
+    # Check if this is a watch request
+    is_watch = hasattr(request.state, 'is_watch') and request.state.is_watch
+
     body = tg_connect.yield_parts(
         parts_to_stream=parts_to_stream,
         chunk_size=chunk_size,
         client_list=active_clients,
+        cache_writes=is_watch,  # playback benefits from the SSD cache; a download is read once
     )
-
-    # Check if this is a watch request
-    is_watch = hasattr(request.state, 'is_watch') and request.state.is_watch
 
     if file_name:
         resolved_file_name = file_name
@@ -573,10 +600,11 @@ async def media_streamer(
         "Content-Length": str(req_length),
         "Content-Disposition": content_disposition,
         "Accept-Ranges": "bytes",
+        "ETag": etag,
         # Private: the URL carries the user's sign-in token. Not immutable: WebDAV can replace a file.
         "Cache-Control": "private, max-age=3600",
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges, ETag",
     }
 
     # Add additional headers for video streaming

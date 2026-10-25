@@ -38,6 +38,8 @@ FOLDERS["/trash"] = [
 ];
 // A folder of songs, to check that a long audio queue scrolls
 FOLDERS["/Home/Music"] = Array.from({ length: 20 }, (_, n) => file(3000 + n, `Song ${String(n + 1).padStart(2, "0")}.mp3`, "audio", 5_000_000, "/Home/Music"));
+// A file too big to collect in the page: it goes to the browser's own downloads
+FOLDERS["/Home/Music"].push(file(500, "huge-backup.zip", "archive", 300 * 1024 * 1024, "/Home/Music"));
 // A big folder, to check that long lists stay quick to render
 FOLDERS["/Home/Documents"] = Array.from({ length: 1500 }, (_, n) => file(1000 + n, `scan-${String(n + 1).padStart(4, "0")}.pdf`, "document", 120_000 + n, "/Home/Documents"));
 
@@ -190,6 +192,15 @@ http.createServer((req, res) => {
         if (req.method !== "GET" && req.method !== "HEAD") return mutation(req, res, url, body);
         if (ROUTES[url.pathname]) return send(res, 200, ROUTES[url.pathname]);
         if (url.pathname === "/files") return send(res, 200, listFiles(url));
+        // A 300 MB file: HEAD reports its size; the browser download gets a small stand-in body
+        if (decodeURIComponent(url.pathname) === "/dl/huge-backup.zip") {
+            requests.push({ method: req.method, path: url.pathname, body: url.search });
+            if (req.method === "HEAD") {
+                res.writeHead(200, { "Content-Length": 300 * 1024 * 1024, "Content-Type": "application/zip", "ETag": '"u9-300"' });
+                return res.end();
+            }
+            return send(res, 200, Buffer.from("stand-in"), "application/zip");
+        }
         const ext = path.extname(url.pathname).toLowerCase();
         if (MEDIA[ext] && !url.pathname.startsWith("/assets/")) return serveMedia(req, res, url.pathname);
         const filePath = path.join(DIST, decodeURIComponent(url.pathname));

@@ -215,6 +215,13 @@ export class DownloadManager {
             download.status = 'completed';
             download.progress = 100;
             download.endTime = new Date();
+            if (filePath && typeof filePath === 'object' && filePath.handedToBrowser) {
+                // A big file: the browser saves it (and shows its progress) in its own downloads
+                download.handedToBrowser = true;
+                download.size = filePath.size;
+                logger.info('[DownloadManager] Handed to the browser download manager', { id, size: filePath.size });
+                return;
+            }
             // Store file path/blob URL for opening later
             if (filePath && typeof filePath === 'string') {
                 download.filePath = filePath;
