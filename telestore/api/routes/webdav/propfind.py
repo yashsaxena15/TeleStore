@@ -9,7 +9,9 @@ from telestore.db import database
 
 # --- Handler Implementations ---
 
-from telestore.api.routes.webdav.common import COLLECTION_TYPE, VIRTUAL_TOP_LEVEL, build_response_xml, quota_props
+from telestore.api.routes.webdav.common import (
+    COLLECTION_TYPE, VIRTUAL_TOP_LEVEL, build_response_xml, quota_props, resolve_section_item, section_folder_items,
+)
 
 async def handle_propfind(request: Request, segments: List[str], owner_id: str) -> Response:
     """Handle WebDAV PROPFIND directory and file enumeration."""
@@ -225,6 +227,36 @@ async def handle_propfind(request: Request, segments: List[str], owner_id: str) 
                 mime_type=mimetype or "application/octet-stream",
                 modified=file_doc.get("modified_date")
             ))
+        elif top_name in ("Starred", "Trash"):
+            item = resolve_section_item(segments, owner_id)
+            if not item:
+                raise HTTPException(status_code=404, detail="Item not found")
+            base = "/webdav/" + "/".join(segments)
+            if item.get("file_type") == "folder":
+                responses_xml.append(build_response_xml(f"{base}/", segments[-1], is_collection=True, modified=item.get("modified_date")))
+                if depth == "1":
+                    for child in section_folder_items(top_name, item, owner_id):
+                        cname = child.get("file_name", "Item")
+                        is_fol = child.get("file_type") == "folder"
+                        mimetype, _ = mimetypes.guess_type(cname)
+                        responses_xml.append(build_response_xml(
+                            f"{base}/{cname}/" if is_fol else f"{base}/{cname}",
+                            cname,
+                            is_collection=is_fol,
+                            size=child.get("file_size", 0),
+                            mime_type=mimetype or "application/octet-stream",
+                            modified=child.get("modified_date")
+                        ))
+            else:
+                mimetype, _ = mimetypes.guess_type(segments[-1])
+                responses_xml.append(build_response_xml(
+                    base,
+                    segments[-1],
+                    is_collection=False,
+                    size=item.get("file_size", 0),
+                    mime_type=mimetype or "application/octet-stream",
+                    modified=item.get("modified_date")
+                ))
         else:
             raise HTTPException(status_code=404, detail="Path not found")
 
