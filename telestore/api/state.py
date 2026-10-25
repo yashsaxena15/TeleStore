@@ -40,7 +40,7 @@ def _in_use_prefixes() -> set:
     """Temp names in tg_files/ that belong to uploads or transfers still running."""
     prefixes = {f"dav_{upload_id}" for upload_id in active_dav_uploads}
     try:
-        from telestore.api.routes.files.upload import active_upload_dirs
+        from telestore.api.routes.files.chunked_upload import active_upload_dirs
         prefixes |= active_upload_dirs()
     except Exception:
         pass

@@ -1,4 +1,5 @@
 // End-to-end checks of the main screens against the mock backend (see e2e/mock-server.mjs).
+import fs from "node:fs";
 import { test, expect } from "@playwright/test";
 
 const row = (page, name) => page.getByRole("row", { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")},`) });
@@ -444,10 +445,35 @@ test.describe("item actions", () => {
         await page.getByRole("menuitem", { name: /Upload files/ }).click();
         await (await chooser).setFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
         await expect.poll(async () => (await mutations(request)).some((r) => r.path.startsWith("/files/upload") && r.body.includes("notes.txt") && r.body.includes("/Home/Movies"))).toBe(true);
-        // 5 bytes in 2-byte chunks: 0, 1 (server answers "I expected 2"), then it continues from 2
+        // 5 bytes in 2-byte chunks, sent together as raw bodies; chunk 1 is told to wait (429) once
         await expect.poll(async () => (await mutations(request)).some((r) => r.path === "/files/upload/complete")).toBe(true);
-        const chunks = (await mutations(request)).filter((r) => r.path === "/files/upload/chunk").map((r) => Number(/name="chunk_index"\r\n\r\n(\d+)/.exec(r.body)[1]));
-        expect(chunks).toEqual([0, 1, 2]);
+        const puts = (await mutations(request)).filter((r) => r.method === "PUT" && r.path.startsWith("/files/upload/chunk/up1/"));
+        const indexes = puts.map((r) => Number(r.path.split("/").pop()));
+        expect([...new Set(indexes)].sort()).toEqual([0, 1, 2]);
+        expect(indexes.filter((i) => i === 1)).toHaveLength(2); // asked to wait, then sent again
+        expect(puts.find((r) => r.path.endsWith("/0")).body).toBe("he"); // the raw bytes, no form wrapping
+    });
+
+    test("an upload continues after a page reload", async ({ page, request }, testInfo) => {
+        // The same file picked again (same name, size and modification time) after a reload
+        const filePath = testInfo.outputPath("notes.txt");
+        fs.writeFileSync(filePath, "hello");
+        fs.utimesSync(filePath, 1_700_000_000, 1_700_000_000);
+        // What the page remembered before the reload: this file belongs to session up-old
+        await page.addInitScript(() => {
+            localStorage.setItem("telestore.uploadResume", JSON.stringify({ "/Home/Movies|notes.txt|5|1700000000000": "up-old" }));
+        });
+        await page.goto("/");
+        await row(page, "Movies").dblclick();
+        await expect(row(page, "Arrival.2016.1080p.mkv")).toBeVisible();
+        const chooser = page.waitForEvent("filechooser");
+        await page.getByRole("button", { name: "New", exact: true }).first().click();
+        await page.getByRole("menuitem", { name: /Upload files/ }).click();
+        await (await chooser).setFiles(filePath);
+        await expect.poll(async () => (await mutations(request)).some((r) => r.path === "/files/upload/complete")).toBe(true);
+        const sent = (await mutations(request)).filter((r) => r.method === "PUT").map((r) => r.path);
+        expect(sent.every((p) => p.startsWith("/files/upload/chunk/up-old/"))).toBe(true);
+        expect([...new Set(sent.map((p) => Number(p.split("/").pop())))].sort()).toEqual([1, 2]); // chunk 0 was already there
     });
 
     test("copy in one folder, paste in another", async ({ page, request }) => {

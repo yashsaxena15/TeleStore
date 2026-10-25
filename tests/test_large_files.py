@@ -3,19 +3,17 @@ misplaced bytes, WebDAV saves multi-part and empty files properly, and deleting 
 the data the other copy uses."""
 
 import asyncio
-import io
 import os
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
-from starlette.datastructures import UploadFile
 from starlette.requests import Request
 
 from telestore.api import state
 from telestore.api.app import app
-from telestore.api.routes.files import upload as upload_routes
+from telestore.api.routes.files import chunked_upload as chunked
 from telestore.db import database
 from telestore.db.repositories.files import Files
 from telestore.security.credentials import User
@@ -24,90 +22,111 @@ from telestore.services.streaming_utils import RangeNotSatisfiable, parse_byte_r
 USER = User(username="bob", telegram_user_id=42)
 
 
-def _session(tmp_path, **extra):
-    return {
-        "upload_id": "u1", "filename": "movie.mkv", "filesize": 30, "path": "/Home", "user_id": "42",
-        "created_at": "2026-10-25T00:00:00", "last_activity": time.time(), "next_chunk": 0, "lock": asyncio.Lock(),
-        "total_written": 0, "current_part_index": 1, "current_part_written": 0, "parts": [], "dir": str(tmp_path),
-        "upload_tasks": [], "disk_semaphore": asyncio.Semaphore(1), **extra,
-    }
-
-
-def _chunk(data: bytes) -> UploadFile:
-    return UploadFile(file=io.BytesIO(data), filename="movie.mkv")
-
-
-def _request():
-    return Request({"type": "http", "method": "POST", "path": "/", "headers": [], "query_string": b"", "app": app})
-
-
 class TestChunkedUpload:
-    def _send(self, upload_id, index, data):
-        return asyncio.run(upload_routes.upload_file_chunk(_request(), upload_id, index, _chunk(data), USER))
+    """Tiny chunks (4 bytes, 2 per part) so a 10-byte file has 3 chunks in 2 Telegram parts."""
 
-    def test_a_chunk_sent_twice_is_kept_once(self, tmp_path):
-        upload_routes._active_upload_sessions["u1"] = _session(tmp_path)
-        try:
-            self._send("u1", 0, b"a" * 10)
-            again = self._send("u1", 0, b"a" * 10)  # the reply was lost and the browser retried
-            self._send("u1", 1, b"b" * 10)
-            assert again["status"] == "duplicate"
-            assert (tmp_path / "part_1.tmp").read_bytes() == b"a" * 10 + b"b" * 10
-            assert upload_routes._active_upload_sessions["u1"]["total_written"] == 20
-        finally:
-            upload_routes._active_upload_sessions.pop("u1", None)
+    @pytest.fixture
+    def up(self, tmp_path, monkeypatch, client):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(chunked, "CHUNK_SIZE", 4)
+        monkeypatch.setattr(chunked, "CHUNKS_PER_PART", 2)
+        sent = {}
+        hold = asyncio.Event()
+        hold.set()
 
-    def test_a_chunk_from_the_future_is_refused_with_the_expected_index(self, tmp_path):
-        upload_routes._active_upload_sessions["u1"] = _session(tmp_path)
-        try:
-            with pytest.raises(HTTPException) as e:
-                self._send("u1", 3, b"x")
-            assert e.value.status_code == 409 and e.value.detail["next_chunk"] == 0
-            assert not (tmp_path / "part_1.tmp").exists()
-        finally:
-            upload_routes._active_upload_sessions.pop("u1", None)
-
-    def test_complete_refuses_a_file_with_missing_bytes(self, tmp_path, client):
-        upload_routes._active_upload_sessions["u1"] = _session(tmp_path, total_written=20)
-        app.dependency_overrides[upload_routes.require_auth] = lambda: USER
+        async def fake_upload_part_task(**kw):
+            await hold.wait()
+            with open(kw["part_file_path"], "rb") as f:
+                sent[kw["part_index"]] = f.read()
+            os.remove(kw["part_file_path"])
+            if kw["part_index"] in fail:
+                raise RuntimeError("telegram down")
+            return {"part_index": kw["part_index"], "chat_id": -100, "message_id": 10 + kw["part_index"], "file_unique_id": f"u{kw['part_index']}",
+                    "part_size": kw["part_size"], "start_byte": kw["start_byte"], "end_byte": kw["start_byte"] + kw["part_size"] - 1, "thumbnail": None}
+        fail = set()
+        monkeypatch.setattr(chunked, "upload_part_task", fake_upload_part_task)
         database.Users.find_one.return_value = {"index_chat_id": -100}
         app.state.bot_manager = MagicMock()
-        try:
-            res = client.post("/files/upload/complete", data={"upload_id": "u1"})
-            assert res.status_code == 409 and "received 20 of 30 bytes" in res.json()["detail"]["message"]
-        finally:
-            upload_routes._active_upload_sessions.pop("u1", None)
-            app.dependency_overrides.pop(upload_routes.require_auth, None)
-            app.state.bot_manager = None
+        app.dependency_overrides[chunked.require_auth] = lambda: USER
+        app.dependency_overrides[chunked.require_upload] = lambda: USER
+        ns = MagicMock(sent=sent, fail=fail, hold=hold, client=client)
+        yield ns
+        app.dependency_overrides.pop(chunked.require_auth, None)
+        app.dependency_overrides.pop(chunked.require_upload, None)
+        app.state.bot_manager = None
+        chunked._active_upload_sessions.clear()
 
-    def test_no_bot_at_a_part_boundary_keeps_the_chunk_out(self, tmp_path):
-        upload_routes._active_upload_sessions["u1"] = _session(tmp_path, current_part_written=1950 * 1024 * 1024 - 5)
-        database.Users.find_one.return_value = {}
-        try:
-            with pytest.raises(HTTPException) as e:
-                self._send("u1", 0, b"z" * 10)
-            assert e.value.status_code == 503
-            # Not written, so the retry is a real write and not a "duplicate"
-            assert upload_routes._active_upload_sessions["u1"]["next_chunk"] == 0
-            assert not (tmp_path / "part_1.tmp").exists()
-        finally:
-            upload_routes._active_upload_sessions.pop("u1", None)
+    def _init(self, client, size=10, **extra):
+        return client.post("/files/upload/init", json={"filename": "movie.mkv", "filesize": size, "path": "/Home", **extra}).json()
 
-    def test_long_uploads_are_only_dropped_when_idle(self, tmp_path, client):
-        long_running = _session(tmp_path / "a", created_at="2026-10-24T00:00:00", last_activity=time.time())
-        idle = _session(tmp_path / "b", last_activity=time.time() - 2 * 3600)
-        (tmp_path / "a").mkdir()
-        (tmp_path / "b").mkdir()
-        upload_routes._active_upload_sessions.update({"old_but_busy": long_running, "idle": idle})
-        app.dependency_overrides[upload_routes.require_upload] = lambda: USER
-        try:
-            client.post("/files/upload/init", json={"filename": "x.bin", "filesize": 1, "path": "/Home"})
-            assert "old_but_busy" in upload_routes._active_upload_sessions
-            assert "idle" not in upload_routes._active_upload_sessions
-        finally:
-            for key in list(upload_routes._active_upload_sessions):
-                upload_routes._active_upload_sessions.pop(key, None)
-            app.dependency_overrides.pop(upload_routes.require_upload, None)
+    def _put(self, client, upload_id, index, data):
+        return client.put(f"/files/upload/chunk/{upload_id}/{index}", content=data)
+
+    def test_chunks_in_any_order_and_twice_make_the_right_file(self, up):
+        uid = self._init(up.client)["upload_id"]
+        for index, data in ((1, b"5678"), (2, b"9X"), (0, b"1234"), (1, b"5678")):  # out of order, chunk 1 twice
+            assert self._put(up.client, uid, index, data).status_code == 200
+        res = up.client.post("/files/upload/complete", data={"upload_id": uid})
+        assert res.status_code == 200
+        for _ in range(50):
+            if up.client.get(f"/files/upload/status/{uid}").json()["status"] == "completed":
+                break
+        assert up.sent == {1: b"12345678", 2: b"9X"}
+        kwargs = database.Files.add_multipart_file.call_args.kwargs
+        assert kwargs["file_size"] == 10 and [p["start_byte"] for p in kwargs["parts"]] == [0, 8]
+
+    def test_the_form_upload_still_works(self, up):
+        uid = self._init(up.client, size=3)["upload_id"]
+        res = up.client.post("/files/upload/chunk", data={"upload_id": uid, "chunk_index": "0"}, files={"chunk_file": ("x", b"abc")})
+        assert res.status_code == 200
+        assert up.client.post("/files/upload/complete", data={"upload_id": uid}).status_code == 200
+
+    def test_a_chunk_of_the_wrong_size_is_refused(self, up):
+        uid = self._init(up.client)["upload_id"]
+        assert self._put(up.client, uid, 0, b"12").status_code == 400
+
+    def test_complete_refuses_missing_chunks(self, up):
+        uid = self._init(up.client)["upload_id"]
+        self._put(up.client, uid, 0, b"1234")
+        res = up.client.post("/files/upload/complete", data={"upload_id": uid})
+        assert res.status_code == 409 and res.json()["detail"]["next_chunk"] == 1
+
+    def test_a_full_disk_buffer_asks_the_browser_to_wait(self, up, monkeypatch):
+        monkeypatch.setattr(chunked, "MAX_PARTS_ON_DISK", 1)
+        up.hold.clear()  # part 1 is still on its way to Telegram
+        uid = self._init(up.client)["upload_id"]
+        self._put(up.client, uid, 0, b"1234")
+        self._put(up.client, uid, 1, b"5678")
+        res = self._put(up.client, uid, 2, b"9X")
+        assert res.status_code == 429 and res.headers["retry-after"]
+
+    def test_a_failed_part_stops_the_upload_at_once(self, up):
+        up.fail.add(1)
+        uid = self._init(up.client)["upload_id"]
+        self._put(up.client, uid, 0, b"1234")
+        self._put(up.client, uid, 1, b"5678")  # part 1 complete: sent, and fails
+        res = self._put(up.client, uid, 2, b"9X")
+        assert res.status_code == 500 and "couldn't be saved to Telegram" in res.json()["detail"]
+
+    def test_resume_after_a_page_reload(self, up):
+        first = self._init(up.client)
+        self._put(up.client, first["upload_id"], 0, b"1234")
+        again = self._init(up.client, resume_upload_id=first["upload_id"])
+        assert again["upload_id"] == first["upload_id"] and again["received"] == [0] and again["resumed"]
+        other = self._init(up.client, size=11, resume_upload_id=first["upload_id"])  # a different file
+        assert other["upload_id"] != first["upload_id"]
+
+    def test_empty_files_are_refused(self, up):
+        res = up.client.post("/files/upload/init", json={"filename": "e.txt", "filesize": 0, "path": "/Home"})
+        assert res.status_code == 400
+
+    def test_long_uploads_are_only_dropped_when_idle(self, up):
+        busy = self._init(up.client)["upload_id"]
+        idle = self._init(up.client)["upload_id"]
+        chunked._active_upload_sessions[busy]["created_at"] = "2026-10-24T00:00:00"
+        chunked._active_upload_sessions[idle]["last_activity"] = time.time() - 2 * 3600
+        self._init(up.client)
+        assert busy in chunked._active_upload_sessions and idle not in chunked._active_upload_sessions
 
 
 class TestJanitor:
@@ -125,12 +144,12 @@ class TestJanitor:
         for root, dirs, files in os.walk(tg):
             for n in dirs + files:
                 os.utime(os.path.join(root, n), (old, old))
-        upload_routes._active_upload_sessions["live"] = {"dir": str(tg / "chunk_live")}
+        chunked._active_upload_sessions["live"] = {"dir": str(tg / "chunk_live")}
         state.active_dav_uploads.add("live")
         try:
             state.cleanup_stale_upload_files(3600)
         finally:
-            upload_routes._active_upload_sessions.pop("live", None)
+            chunked._active_upload_sessions.pop("live", None)
             state.active_dav_uploads.discard("live")
         assert sorted(os.listdir(tg)) == ["chunk_live", "dav_live_part_1.tmp"]
 
