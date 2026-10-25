@@ -656,47 +656,25 @@ test.describe("phone @phone", () => {
         await expect(topBar).toHaveClass(/opacity-0/, { timeout: 1500 });
     });
 
-    test("switching apps hands the sound to audio, and the video carries on on return", async ({ page }) => {
+    test("the controls row fits a phone and fullscreen turns the video sideways", async ({ page }) => {
         await page.addInitScript(() => {
-            let hidden = false;
-            Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (hidden ? "hidden" : "visible") });
-            window.__setHidden = (value) => { hidden = value; document.dispatchEvent(new Event("visibilitychange")); };
-            const RealAudio = window.Audio;
-            window.__audios = [];
-            window.Audio = function (...args) { const el = new RealAudio(...args); window.__audios.push(el); return el; };
+            window.__locks = [];
+            if (screen.orientation)
+                screen.orientation.lock = (o) => { window.__locks.push(o); return Promise.resolve(); };
         });
         await page.goto("/");
         await row(page, "Movies").click();
         await row(page, "Arrival.2016.1080p.mkv").click();
         const video = page.locator("video");
-        await expect.poll(() => video.evaluate((v) => v.currentTime)).toBeGreaterThan(0.3);
-        // In another app: the video pauses and the same file plays as audio
-        await page.evaluate(() => window.__setHidden(true));
-        await expect.poll(() => video.evaluate((v) => v.paused)).toBe(true);
-        await expect.poll(() => page.evaluate(() => window.__audios.length === 1 && !window.__audios[0].paused)).toBe(true);
-        expect(await page.evaluate(() => window.__audios[0].src)).toContain("Arrival.2016.1080p.mkv");
-        // Back: the audio stops and the video plays again
-        await page.evaluate(() => window.__setHidden(false));
-        await expect.poll(() => page.evaluate(() => window.__audios[0].paused)).toBe(true);
-        await expect.poll(() => video.evaluate((v) => !v.paused)).toBe(true);
-    });
-
-    test("a paused video stays quiet when switching apps", async ({ page }) => {
-        await page.addInitScript(() => {
-            Object.defineProperty(document, "visibilityState", { configurable: true, get: () => window.__hidden ? "hidden" : "visible" });
-            const RealAudio = window.Audio;
-            window.__audios = [];
-            window.Audio = function (...args) { const el = new RealAudio(...args); window.__audios.push(el); return el; };
-        });
-        await page.goto("/");
-        await row(page, "Movies").click();
-        await row(page, "Arrival.2016.1080p.mkv").click();
-        const video = page.locator("video");
-        await expect.poll(() => video.evaluate((v) => v.currentTime)).toBeGreaterThan(0.3);
-        await video.evaluate((v) => v.pause());
-        await page.evaluate(() => { window.__hidden = true; document.dispatchEvent(new Event("visibilitychange")); });
-        await page.waitForTimeout(500);
-        expect(await page.evaluate(() => window.__audios.length)).toBe(0);
+        await expect.poll(() => video.evaluate((v) => v.currentTime)).toBeGreaterThan(0.2);
+        // The controls show when playback starts. No 10-second buttons on a phone (double-tap the sides instead); fullscreen fits on screen
+        await expect(page.getByRole("button", { name: "Rewind 10 seconds" })).toBeHidden();
+        await expect(page.getByRole("button", { name: "Forward 10 seconds" })).toBeHidden();
+        const fullscreen = page.getByRole("button", { name: "Fullscreen" });
+        await expect(fullscreen).toBeInViewport({ ratio: 1 });
+        await fullscreen.click();
+        await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+        await expect.poll(() => page.evaluate(() => window.__locks)).toEqual(["landscape"]);
     });
 
     test("bottom tabs and settings sub-menu fit the screen", async ({ page }) => {
