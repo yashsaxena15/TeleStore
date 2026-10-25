@@ -125,11 +125,11 @@ export const PlayerControlsBar = ({ activeMenu, currentTime, areControlsVisible,
             <Settings className="w-5 h-5"/>
           </button>
 
-          {/* Picture-in-Picture (hidden on mobile small screens) */}
+          {/* Picture-in-Picture: the video keeps playing in a small window over other apps */}
           {canPiP && (<button onClick={(e) => {
               e.stopPropagation();
               togglePiP();
-          }} className={`hidden sm:inline-flex p-2 rounded-full hover:bg-white/10 text-white/85 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation ${isPiPActive ? "bg-primary text-primary-foreground" : ""}`} title="Picture-in-Picture" aria-label="Picture-in-Picture">
+          }} className={`inline-flex p-2 rounded-full hover:bg-white/10 text-white/85 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[36px] min-h-[36px] items-center justify-center ${isPiPActive ? "bg-primary text-primary-foreground" : ""}`} title="Picture-in-Picture" aria-label="Picture-in-Picture">
               <PictureInPicture2 className="w-5 h-5"/>
             </button>)}
 

@@ -9,12 +9,16 @@ import { getApiBaseUrl, fetchWithTimeout } from "@/lib/api";
 import { shouldAutoplayOnBufferReady } from "./videoPlaylistHelpers";
 import { ALL_QUALITIES, formatTime, getFileExtension } from "./playerFormat";
 import { usePlayerKeyboard } from "./hooks/usePlayerKeyboard";
+import { useBackgroundAudio } from "./hooks/useBackgroundAudio";
 import { PlayerControlsBar } from "./theater/PlayerControlsBar";
 import { PlayerSettingsSheet } from "./theater/PlayerSettingsSheet";
 
 // Holds the video for the instant between leaving the theater and the dock appearing: a video
 // taken out of the page pauses, one moved within it keeps playing
 let videoParking = null;
+// How long the controls stay up after a tap or other action while the video plays
+const CONTROLS_HIDE_MS = 3000;
+
 function parkVideoHost(host) {
     if (!videoParking) {
         videoParking = document.createElement("div");
@@ -151,7 +155,7 @@ export const MediaPlayer = ({
         };
     }, []);
     // Clean, deterministic controls visibility management
-    const showControls = useCallback((delay = 4500) => {
+    const showControls = useCallback((delay = CONTROLS_HIDE_MS) => {
         setAreControlsVisible(true);
         if (controlsTimeoutRef.current) {
             clearTimeout(controlsTimeoutRef.current);
@@ -176,7 +180,7 @@ export const MediaPlayer = ({
     // When playing state or active menu changes, update timeout
     useEffect(() => {
         if (isPlaying && activeMenu === "none" && !isScrubbing) {
-            showControls(4500);
+            showControls(CONTROLS_HIDE_MS);
         }
         else {
             // Keep controls visible when paused or menu is open
@@ -214,7 +218,7 @@ export const MediaPlayer = ({
                 setIsPlaying(true);
                 setCentralPulse("play");
                 setTimeout(() => setCentralPulse(null), 500);
-                showControls(4500);
+                showControls(CONTROLS_HIDE_MS);
             }).catch((err) => {
                 console.warn("Play failed:", err);
             });
@@ -291,7 +295,7 @@ export const MediaPlayer = ({
         setTimeout(() => {
             setRippleFeedback((prev) => (prev?.type === type ? null : prev));
         }, 600);
-        showControls(4500);
+        showControls(CONTROLS_HIDE_MS);
     }, [currentTime, seekTo, showControls]);
     // Theater and dock share one <video> element, moved between them (see attachVideo), so the
     // switch keeps playing: no reload, no seek. Only whether it was playing is remembered.
@@ -385,7 +389,7 @@ export const MediaPlayer = ({
             el.volume = clamped;
             el.muted = clamped === 0;
         }
-        showControls(4500);
+        showControls(CONTROLS_HIDE_MS);
     }, [showControls]);
     const toggleMute = useCallback(() => {
         const el = mediaElementRef.current;
@@ -405,7 +409,7 @@ export const MediaPlayer = ({
             el.volume = 0;
             el.muted = true;
         }
-        showControls(4500);
+        showControls(CONTROLS_HIDE_MS);
     }, [isMuted, volume, showControls]);
     const handlePlaybackRateChange = useCallback((rate) => {
         const el = mediaElementRef.current;
@@ -413,7 +417,7 @@ export const MediaPlayer = ({
         if (el) {
             el.playbackRate = rate;
         }
-        showControls(4500);
+        showControls(CONTROLS_HIDE_MS);
     }, [showControls]);
     const toggleFullscreen = useCallback(() => {
         const container = containerRef.current;
@@ -425,7 +429,7 @@ export const MediaPlayer = ({
         else {
             document.exitFullscreen?.().catch((err) => console.warn("Exit fullscreen error:", err));
         }
-        showControls(4500);
+        showControls(CONTROLS_HIDE_MS);
     }, [showControls]);
     const togglePiP = useCallback(async () => {
         const video = mediaElementRef.current;
@@ -444,8 +448,22 @@ export const MediaPlayer = ({
         catch (err) {
             console.warn("PiP toggle error:", err);
         }
-        showControls(4500);
+        showControls(CONTROLS_HIDE_MS);
     }, [canPiP, showControls]);
+    // Closing the floating window from the phone's own controls must update the button too
+    useEffect(() => {
+        const el = mediaElementRef.current;
+        if (!el)
+            return;
+        const entered = () => setIsPiPActive(true);
+        const left = () => setIsPiPActive(false);
+        el.addEventListener("enterpictureinpicture", entered);
+        el.addEventListener("leavepictureinpicture", left);
+        return () => {
+            el.removeEventListener("enterpictureinpicture", entered);
+            el.removeEventListener("leavepictureinpicture", left);
+        };
+    }, []);
     const handleDownloadAction = useCallback(() => {
         if (onDownload) {
             onDownload();
@@ -492,7 +510,7 @@ export const MediaPlayer = ({
             }
             catch { }
             setIsScrubbing(false);
-            showControls(4500);
+            showControls(CONTROLS_HIDE_MS);
             // Commit the seek cleanly
             seekTo(currentTime);
         }
@@ -503,6 +521,22 @@ export const MediaPlayer = ({
         }
     };
     usePlayerKeyboard({ activeMenu, handlePlaybackRateChange, handleVolumeChange, isFullscreen, isMini, onClose, onNext, onPrev, playbackRate, seekRelative, setActiveMenu, toggleFullscreen, toggleMute, togglePlay, volume });
+    // The sound carries on while the user is in another app; the video catches up on return
+    const backgroundAudio = useBackgroundAudio({
+        videoRef: mediaElementRef,
+        title: fileName,
+        position: () => streamStartTimeRef.current + (mediaElementRef.current?.currentTime || 0),
+        audioSource: (at) => (isBrowserNative && currentQuality === "original" && currentAudioTrack === 0
+            ? { url: mediaUrl, startAt: at }
+            : { url: buildStreamUrl(currentQuality, currentAudioTrack, at), startAt: 0 }),
+        resumeAt: (at, playing) => {
+            seekTo(at);
+            if (playing) {
+                userPausedRef.current = false;
+                mediaElementRef.current?.play().catch(() => { });
+            }
+        },
+    });
     // Robust Viewport Pointer/Tap Handler:
     // Handles Single Tap (Toggle controls on touch / Play-Pause on desktop)
     // and Double Tap (Seek -10s left / +10s right) without race conditions.
@@ -510,7 +544,7 @@ export const MediaPlayer = ({
         // If a menu or modal is open, tapping the viewport closes it and reveals controls
         if (activeMenu !== "none") {
             setActiveMenu("none");
-            showControls(4500);
+            showControls(CONTROLS_HIDE_MS);
             return;
         }
         const isTouch = e.pointerType === "touch" || e.pointerType === "pen";
@@ -543,7 +577,7 @@ export const MediaPlayer = ({
             else {
                 togglePlay();
             }
-            showControls(4500);
+            showControls(CONTROLS_HIDE_MS);
         }
         else {
             // First tap: register timestamp and schedule single-tap action
@@ -555,11 +589,11 @@ export const MediaPlayer = ({
             singleTapTimerRef.current = setTimeout(() => {
                 singleTapTimerRef.current = null;
                 if (isTouch) {
-                    // On touch screens: a tap shows the controls (for 4.5 s while playing) or hides them
+                    // On touch screens: a tap shows the controls (for 3 s while playing) or hides them
                     if (visibleAtTap)
                         hideControls();
                     else
-                        showControls(4500);
+                        showControls(CONTROLS_HIDE_MS);
                 }
                 else {
                     // On desktop mouse: single click toggles play/pause
@@ -804,10 +838,12 @@ export const MediaPlayer = ({
     // Rendered into videoHost, which attachVideo moves between the theater and the dock
     const videoElement = createPortal((
     <video ref={mediaElementRef} src={activeStreamUrl} autoPlay preload="auto" playsInline crossOrigin="anonymous" className={`w-full h-full pointer-events-none ${isMini ? "object-cover" : "object-contain"}`} onTimeUpdate={handleTimeUpdate} onProgress={handleProgress} onLoadedMetadata={handleLoadedMetadata} onPlay={() => {
+          backgroundAudio.onVideoPlay();
           setIsPlaying(true);
           if (!isMini)
-              showControls(4500);
+              showControls(CONTROLS_HIDE_MS);
       }} onPause={() => {
+          backgroundAudio.onVideoPause();
           setIsPlaying(false);
           if (!isMini)
               setAreControlsVisible(true);
