@@ -11,6 +11,19 @@ import { ALL_QUALITIES, formatTime, getFileExtension } from "./playerFormat";
 import { usePlayerKeyboard } from "./hooks/usePlayerKeyboard";
 import { PlayerControlsBar } from "./theater/PlayerControlsBar";
 import { PlayerSettingsSheet } from "./theater/PlayerSettingsSheet";
+
+// Holds the video for the instant between leaving the theater and the dock appearing: a video
+// taken out of the page pauses, one moved within it keeps playing
+let videoParking = null;
+function parkVideoHost(host) {
+    if (!videoParking) {
+        videoParking = document.createElement("div");
+        videoParking.setAttribute("aria-hidden", "true");
+        videoParking.style.cssText = "position:fixed;left:-10000px;top:0;width:160px;height:90px;opacity:0;pointer-events:none";
+        document.body.appendChild(videoParking);
+    }
+    videoParking.appendChild(host);
+}
 import { PlayerInfoDialogs } from "./theater/PlayerInfoDialogs";
 export const MediaPlayer = ({
     mediaUrl,
@@ -278,31 +291,36 @@ export const MediaPlayer = ({
         }, 600);
         showControls(4500);
     }, [currentTime, seekTo, showControls]);
-    // Theater and dock use separate <video> elements: carry over position and play state
+    // Theater and dock share one <video> element, moved between them (see attachVideo), so the
+    // switch keeps playing: no reload, no seek. Only whether it was playing is remembered.
     const switchPlayerMode = useCallback((mini) => {
-        modeSwitchRef.current = { time: currentTime, play: isPlaying };
+        modeSwitchRef.current = { play: isPlaying };
         setIsMini(mini);
-    }, [currentTime, isPlaying, setIsMini]);
-    const resumeAfterModeSwitch = useCallback(() => {
-        const pending = modeSwitchRef.current;
-        if (!pending)
+    }, [isPlaying, setIsMini]);
+    const [videoHost] = useState(() => {
+        const host = document.createElement("div");
+        host.className = "w-full h-full";
+        return host;
+    });
+    const attachVideo = useCallback((place) => {
+        if (!place) {
+            // Between places (the dock appears a moment later): keep it in the page so it plays on
+            parkVideoHost(videoHost);
             return;
-        modeSwitchRef.current = null;
-        if (pending.time > 1)
-            seekTo(pending.time);
-        if (pending.play) {
-            userPausedRef.current = false;
-            mediaElementRef.current?.play().catch(() => { });
-        } else {
-            userPausedRef.current = true;
         }
-    }, [seekTo]);
+        if (videoHost.parentNode !== place)
+            place.appendChild(videoHost);
+        const pending = modeSwitchRef.current;
+        modeSwitchRef.current = null;
+        const el = mediaElementRef.current;
+        if (pending?.play && el?.paused)
+            el.play().catch(() => { });
+    }, [videoHost]);
+    useEffect(() => () => videoHost.remove(), [videoHost]);
     const handleCanPlay = useCallback(() => {
         setIsBuffering(false);
         setHasPlaybackError(false);
-        if (modeSwitchRef.current) {
-            resumeAfterModeSwitch();
-        } else if (!autoplayedRef.current && shouldAutoplayOnBufferReady(userPausedRef.current, mediaElementRef.current?.paused ?? false, true)) {
+        if (!autoplayedRef.current && shouldAutoplayOnBufferReady(userPausedRef.current, mediaElementRef.current?.paused ?? false, true)) {
             autoplayedRef.current = true;
             mediaElementRef.current?.play().then(() => {
                 setIsPlaying(true);
@@ -320,7 +338,7 @@ export const MediaPlayer = ({
                 console.warn("Failed to set currentTime on canplay:", err);
             }
         }
-    }, [resumeAfterModeSwitch]);
+    }, []);
     const handleVideoEnded = useCallback(() => {
         if (playlist && playlist.length > 1 && onNext && currentIndex < playlist.length - 1) {
             onNext();
@@ -787,14 +805,63 @@ export const MediaPlayer = ({
         return Math.min(100, Math.max(0, (bufferedEnd / duration) * 100));
     }, [bufferedEnd, duration]);
     const fileExt = useMemo(() => getFileExtension(fileName), [fileName]);
+    // Rendered into videoHost, which attachVideo moves between the theater and the dock
+    const videoElement = createPortal((
+    <video ref={mediaElementRef} src={activeStreamUrl} autoPlay preload="auto" playsInline crossOrigin="anonymous" className={`w-full h-full pointer-events-none ${isMini ? "object-cover" : "object-contain"}`} onTimeUpdate={handleTimeUpdate} onProgress={handleProgress} onLoadedMetadata={handleLoadedMetadata} onPlay={() => {
+          setIsPlaying(true);
+          if (!isMini)
+              showControls(4500);
+      }} onPause={() => {
+          setIsPlaying(false);
+          if (!isMini)
+              setAreControlsVisible(true);
+      }} onEnded={handleVideoEnded} onWaiting={() => setIsBuffering(true)} onPlaying={() => {
+          setIsBuffering(false);
+          setHasPlaybackError(false);
+      }} onCanPlay={handleCanPlay} onError={() => {
+          const videoEl = mediaElementRef.current;
+          const err = videoEl?.error;
+          console.warn("Video playback error code:", err?.code, err?.message);
+          // Code 1: MEDIA_ERR_ABORTED - aborted by browser during seek or range change
+          if (err && err.code === 1) {
+              return;
+          }
+          // Code 2: MEDIA_ERR_NETWORK - network issue or temporary Telegram hiccup
+          if (err && err.code === 2) {
+              if (retryCountRef.current < 3) {
+                  retryCountRef.current += 1;
+                  console.log("Retrying video playback after network error, attempt:", retryCountRef.current);
+                  setIsBuffering(true);
+                  setTimeout(() => {
+                      if (mediaElementRef.current) {
+                          mediaElementRef.current.load();
+                          mediaElementRef.current.play().catch(() => { });
+                      }
+                  }, 1200);
+                  return;
+              }
+          }
+          // Code 3: MEDIA_ERR_DECODE or Code 4: MEDIA_ERR_SRC_NOT_SUPPORTED
+          // Browser cannot decode this format (e.g. 4K HEVC unsupported profile)
+          if ((err?.code === 3 || err?.code === 4) && currentQuality === "original") {
+              console.log("Codec not supported by browser, falling back to 1080p transcode...");
+              toast.info("Optimizing video playback for your browser...");
+              handleQualityChange("1080p");
+              return;
+          }
+          setHasPlaybackError(true);
+          setIsBuffering(false);
+      }}>
+      {subtitlesList
+          .filter((sub) => sub.id === currentSubtitle)
+          .map((sub) => (<track key={sub.id} kind="subtitles" src={sub.src} label={sub.label} srcLang="en" default/>))}
+    </video>
+    ), videoHost);
     // Docked (minimized) video: compact controls rendered into the app dock
     if (isMini) {
         const docked = (<div className="flex items-center gap-2.5 w-full min-w-0">
           <button onClick={() => switchPlayerMode(false)} className="group relative w-[84px] h-[47px] rounded-md overflow-hidden bg-black shrink-0 border border-border" title="Open in theater mode" aria-label="Open video in theater mode">
-            <video ref={mediaElementRef} src={activeStreamUrl} autoPlay preload="auto" playsInline crossOrigin="anonymous" className="w-full h-full object-cover pointer-events-none" onTimeUpdate={handleTimeUpdate} onProgress={handleProgress} onLoadedMetadata={handleLoadedMetadata} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onEnded={handleVideoEnded} onWaiting={() => setIsBuffering(true)} onPlaying={() => {
-                setIsBuffering(false);
-                setHasPlaybackError(false);
-            }} onCanPlay={handleCanPlay}/>
+            <span ref={attachVideo} className="block w-full h-full pointer-events-none"/>
             <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity">
               <Maximize2 className="w-4 h-4 text-white"/>
             </span>
@@ -839,60 +906,20 @@ export const MediaPlayer = ({
             <X className="w-4 h-4"/>
           </button>
         </div>);
-        return dock?.mediaSlot ? createPortal(docked, dock.mediaSlot) : null;
+        // Same shape as the theater return (video first), so React keeps the one <video>
+        return (<>
+          {videoElement}
+          {dock?.mediaSlot ? createPortal(docked, dock.mediaSlot) : null}
+        </>);
     }
     // =========================================================================
     // Google Drive Style Video Player
     // =========================================================================
-    return (<div ref={containerRef} onMouseMove={() => showControls(4000)} className={`fixed inset-0 z-50 bg-[#0a0a0a] text-white flex flex-col select-none overflow-hidden ${!areControlsVisible && isPlaying ? "cursor-none" : "cursor-default"}`}>
-      {/* Native Video Element */}
-      <video ref={mediaElementRef} src={activeStreamUrl} autoPlay preload="auto" playsInline crossOrigin="anonymous" className="w-full h-full object-contain pointer-events-none" onTimeUpdate={handleTimeUpdate} onProgress={handleProgress} onLoadedMetadata={handleLoadedMetadata} onPlay={() => {
-            setIsPlaying(true);
-            showControls(4500);
-        }} onPause={() => {
-            setIsPlaying(false);
-            setAreControlsVisible(true);
-        }} onEnded={handleVideoEnded} onWaiting={() => setIsBuffering(true)} onPlaying={() => {
-            setIsBuffering(false);
-            setHasPlaybackError(false);
-        }} onCanPlay={handleCanPlay} onError={() => {
-            const videoEl = mediaElementRef.current;
-            const err = videoEl?.error;
-            console.warn("Video playback error code:", err?.code, err?.message);
-            // Code 1: MEDIA_ERR_ABORTED - aborted by browser during seek or range change
-            if (err && err.code === 1) {
-                return;
-            }
-            // Code 2: MEDIA_ERR_NETWORK - network issue or temporary Telegram hiccup
-            if (err && err.code === 2) {
-                if (retryCountRef.current < 3) {
-                    retryCountRef.current += 1;
-                    console.log("Retrying video playback after network error, attempt:", retryCountRef.current);
-                    setIsBuffering(true);
-                    setTimeout(() => {
-                        if (mediaElementRef.current) {
-                            mediaElementRef.current.load();
-                            mediaElementRef.current.play().catch(() => { });
-                        }
-                    }, 1200);
-                    return;
-                }
-            }
-            // Code 3: MEDIA_ERR_DECODE or Code 4: MEDIA_ERR_SRC_NOT_SUPPORTED
-            // Browser cannot decode this format (e.g. 4K HEVC unsupported profile)
-            if ((err?.code === 3 || err?.code === 4) && currentQuality === "original") {
-                console.log("Codec not supported by browser, falling back to 1080p transcode...");
-                toast.info("Optimizing video playback for your browser...");
-                handleQualityChange("1080p");
-                return;
-            }
-            setHasPlaybackError(true);
-            setIsBuffering(false);
-        }}>
-        {subtitlesList
-            .filter((sub) => sub.id === currentSubtitle)
-            .map((sub) => (<track key={sub.id} kind="subtitles" src={sub.src} label={sub.label} srcLang="en" default/>))}
-      </video>
+    return (<>
+      {videoElement}
+      <div ref={containerRef} onMouseMove={() => showControls(4000)} className={`fixed inset-0 z-50 bg-[#0a0a0a] text-white flex flex-col select-none overflow-hidden ${!areControlsVisible && isPlaying ? "cursor-none" : "cursor-default"}`}>
+      {/* The one video element (theater and dock share it) */}
+      <div ref={attachVideo} className="w-full h-full"/>
 
       {/* Interactive Video Viewport: Double-tap left/right & Tap to toggle controls */}
       <div className="absolute inset-0 z-10 touch-manipulation cursor-pointer" onPointerUp={handleViewportPointerUp}/>
@@ -991,5 +1018,6 @@ export const MediaPlayer = ({
       <PlayerSettingsSheet activeMenu={activeMenu} audioTracks={audioTracks} availableQualities={availableQualities} currentAudioTrack={currentAudioTrack} currentIndex={currentIndex} currentQuality={currentQuality} currentSubtitle={currentSubtitle} customSubtitleInputRef={customSubtitleInputRef} handleAudioTrackChange={handleAudioTrackChange} handleCustomSubtitleUpload={handleCustomSubtitleUpload} handlePlaybackRateChange={handlePlaybackRateChange} handleQualityChange={handleQualityChange} onSelectTrack={onSelectTrack} playbackRate={playbackRate} playlist={playlist} setActiveMenu={setActiveMenu} setCurrentSubtitle={setCurrentSubtitle} showControls={showControls} subtitlesList={subtitlesList}/>
 
       <PlayerInfoDialogs activeMenu={activeMenu} duration={duration} fileExt={fileExt} fileName={fileName} fullMediaUrl={fullMediaUrl} setActiveMenu={setActiveMenu} showControls={showControls} videoDimensions={videoDimensions}/>
-    </div>);
+    </div>
+    </>);
 };
