@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-AUDIO_EXTS = ["mp3", "wav", "ogg", "flac", "m4a"]
+AUDIO_EXTS = ["mp3", "wav", "ogg", "flac", "m4a", "opus", "aac"]
 
 
 async def extract_audio_cover(audio_path: str) -> Optional[str]:

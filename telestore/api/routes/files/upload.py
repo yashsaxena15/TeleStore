@@ -82,7 +82,7 @@ async def upload_file(
         file_type = "document"
         if file_extension in ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.ts', '.3gp', '.ogv']:
             file_type = "video"
-        elif file_extension in ['.mp3', '.wav', '.ogg', '.flac', '.m4a']:
+        elif file_extension in ['.mp3', '.wav', '.ogg', '.flac', '.m4a', '.opus', '.aac']:
             file_type = "audio"
         elif file_extension in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
             file_type = "photo"
@@ -440,7 +440,7 @@ async def _write_chunk(request: Request, session: dict, upload_id: str, chunk_in
             file_type = "document"
             if file_extension in ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv']:
                 file_type = "video"
-            elif file_extension in ['.mp3', '.wav', '.ogg', '.flac', '.m4a']:
+            elif file_extension in ['.mp3', '.wav', '.ogg', '.flac', '.m4a', '.opus', '.aac']:
                 file_type = "audio"
             elif file_extension in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
                 file_type = "photo"
@@ -499,7 +499,7 @@ async def _process_upload_completion(upload_id: str, session: dict, bot_manager,
         file_type = "document"
         if file_extension in ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv']:
             file_type = "video"
-        elif file_extension in ['.mp3', '.wav', '.ogg', '.flac', '.m4a']:
+        elif file_extension in ['.mp3', '.wav', '.ogg', '.flac', '.m4a', '.opus', '.aac']:
             file_type = "audio"
         elif file_extension in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
             file_type = "photo"

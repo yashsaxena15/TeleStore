@@ -212,9 +212,37 @@ test.describe("video and audio downloads", () => {
         await expect(dialog.getByLabel("Link preview")).toContainText("Never Gonna Give You Up");
         await expect(dialog.getByLabel("Link preview")).toContainText("3:33");
         await dialog.getByRole("radio", { name: "Audio only" }).click();
+        // The site's own audio first; MP3 320 says it won't sound better than the 130 kbps source
+        await dialog.getByLabel("Audio format").selectOption("mp3:320");
+        await expect(dialog.getByText(/source is 130 kbps/)).toBeVisible();
         await dialog.getByRole("button", { name: "Download", exact: true }).click();
         await expect(page.getByText("Downloading 2 video files.")).toBeVisible();
-        expect(await downloadBody(request)).toEqual({ url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", choice: { mode: "audio", audio_format: "mp3" }, destination: { kind: "home", path: "/Home" }, sync: false });
+        expect(await downloadBody(request)).toEqual({ url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", choice: { mode: "audio", audio_format: "mp3", audio_bitrate: "320" }, destination: { kind: "home", path: "/Home" }, sync: false });
+    });
+
+    test("the quality list shows exactly what the video has", async ({ page, request }) => {
+        const dialog = await openDialog(page);
+        await dialog.getByLabel("Link", { exact: true }).fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+        await expect(dialog.getByLabel("Link preview")).toContainText("Never Gonna Give You Up");
+        const options = await dialog.getByLabel("Quality").locator("option").allTextContents();
+        expect(options[0]).toBe("Best available (2160p)");
+        expect(options.slice(1, 9).map((o) => o.split(" ")[0])).toEqual(["2160p", "1440p", "1080p", "720p", "480p", "360p", "240p", "144p"]);
+        expect(options.at(-1)).toMatch(/Most compatible/);
+        await dialog.getByLabel("Quality").selectOption("2160");
+        await dialog.getByRole("button", { name: "Download", exact: true }).click();
+        await expect.poll(async () => (await mutations(request)).some((r) => r.path === "/transfers/remote/media")).toBe(true);
+        expect((await downloadBody(request)).choice.quality).toBe("2160");
+    });
+
+    test("Facebook shows its HD and SD versions", async ({ page, request }) => {
+        const dialog = await openDialog(page);
+        await dialog.getByLabel("Link", { exact: true }).fill("https://www.facebook.com/facebook/videos/10153231379946729/");
+        await expect(dialog.getByLabel("Link preview")).toContainText("How to Share With Just Friends");
+        expect(await dialog.getByLabel("Quality").locator("option").allTextContents()).toEqual(["Best available", "HD", "SD"]);
+        await dialog.getByLabel("Quality").selectOption("fmt:hd");
+        await dialog.getByRole("button", { name: "Download", exact: true }).click();
+        await expect.poll(async () => (await mutations(request)).some((r) => r.path === "/transfers/remote/media")).toBe(true);
+        expect((await downloadBody(request)).choice.quality).toBe("fmt:hd");
     });
 
     test("chosen playlist videos at 720p with subtitles", async ({ page, request }) => {

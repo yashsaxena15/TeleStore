@@ -228,7 +228,7 @@ async def handle_put(request: Request, segments: List[str], owner_id: str, defau
         file_type = "video"
     elif ext in ["jpg", "jpeg", "png", "gif", "webp"]:
         file_type = "photo"
-    elif ext in ["mp3", "wav", "ogg", "flac", "m4a"]:
+    elif ext in ["mp3", "wav", "ogg", "flac", "m4a", "opus", "aac"]:
         file_type = "audio"
 
     part_f = await aiofiles.open(current_part_file, "wb")
