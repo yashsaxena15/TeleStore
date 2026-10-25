@@ -125,17 +125,21 @@ const mutation = (req, res, url, body) => {
             ? send(res, 400, { detail: "This post is private or was removed." })
             : send(res, 200, { shortcode: "ABCdef12345", owner: "nasa", caption: "Earth from orbit", thumbnail: null, items: [{ index: 1, is_video: false }, { index: 2, is_video: true }] });
     }
-    // Chunked uploads: 2-byte chunks; the server "already has" chunk 1 the first time it is sent,
-    // like after a reply that got lost, and says which chunk it expects next
+    // Chunked uploads: 2-byte chunks sent as raw PUT bodies. The first time chunk 1 arrives the
+    // server says "disk buffer full, try again in a second" (429). Continuing an upload after a
+    // reload: init with resume_upload_id "up-old" says chunk 0 is already there.
     if (url.pathname === "/files/upload/init") {
         uploadState.sentOne = false;
-        return send(res, 200, { upload_id: "up1", chunk_size: 2, part_max_size: 1950 * 1024 * 1024 });
+        const resumed = body.includes('"resume_upload_id":"up-old"');
+        return send(res, 200, { upload_id: resumed ? "up-old" : "up1", chunk_size: 2, part_max_size: 1950 * 1024 * 1024, received: resumed ? [0] : [], resumed });
     }
-    if (url.pathname === "/files/upload/chunk") {
-        const index = Number((/name="chunk_index"\r\n\r\n(\d+)/.exec(body) || [])[1]);
+    const chunkPut = /^\/files\/upload\/chunk\/([^/]+)\/(\d+)$/.exec(url.pathname);
+    if (chunkPut) {
+        const index = Number(chunkPut[2]);
         if (index === 1 && !uploadState.sentOne) {
             uploadState.sentOne = true;
-            return send(res, 409, { detail: { message: "Expected chunk 2, got 1", next_chunk: 2 } });
+            res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "1" });
+            return res.end(JSON.stringify({ detail: "Waiting for earlier parts", retry_after: 1 }));
         }
         return send(res, 200, { status: "ok", chunk_index: index });
     }

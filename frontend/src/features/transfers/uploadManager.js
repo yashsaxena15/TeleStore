@@ -1,6 +1,58 @@
 import { getApiBaseUrl } from '@/lib/api';
 import authService from '@/features/auth/authService';
 import logger from '@/lib/logger';
+// Chunks of one file sent at the same time. The server writes each at its own place in the file.
+const PARALLEL_CHUNKS = 4;
+const RESUME_KEY = 'telestore.uploadResume';
+
+const chunkLength = (item, index) => Math.min(item.chunkSize, item.filesize - index * item.chunkSize);
+
+function wait(ms, signal) {
+    return new Promise((resolve) => {
+        const timer = setTimeout(resolve, ms);
+        signal?.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+    });
+}
+
+// Which server session belongs to which file, so a reload can continue it: the user picks the same
+// file again (a page can't keep a file across a reload) and the missing chunks are sent.
+const fileKey = (item) => [item.path, item.filename, item.filesize, item.file?.lastModified || 0].join('|');
+
+function readResumeMap() {
+    try {
+        return JSON.parse(localStorage.getItem(RESUME_KEY) || '{}');
+    }
+    catch {
+        return {};
+    }
+}
+
+function readResumeId(item) {
+    return readResumeMap()[fileKey(item)] || null;
+}
+
+function saveResumeId(item) {
+    try {
+        const map = readResumeMap();
+        map[fileKey(item)] = item.uploadId;
+        localStorage.setItem(RESUME_KEY, JSON.stringify(map));
+    }
+    catch {
+        // Storage blocked: uploads still work, they just can't continue after a reload
+    }
+}
+
+function clearResumeId(item) {
+    try {
+        const map = readResumeMap();
+        delete map[fileKey(item)];
+        localStorage.setItem(RESUME_KEY, JSON.stringify(map));
+    }
+    catch {
+        // Storage blocked
+    }
+}
+
 export class UploadManager {
     uploads = new Map();
     queue = [];
@@ -123,6 +175,7 @@ export class UploadManager {
         item.bytesUploaded = 0;
         item.chunkIndex = 0;
         item.uploadId = undefined;
+        item.received = undefined;
         item.error = undefined;
         item.startTime = undefined;
         item.endTime = undefined;
@@ -205,7 +258,8 @@ export class UploadManager {
         const baseUrl = getApiBaseUrl() || '';
         const authHeaders = authService.getAuthHeaders();
         try {
-            // Step 1: Initialize session on backend if not already created
+            // Step 1: Initialize session on backend if not already created. The same file to the
+            // same folder after a page reload continues the server's session (resume_upload_id).
             if (!item.uploadId) {
                 item.abortController = new AbortController();
                 const initRes = await fetch(`${baseUrl}/files/upload/init`, {
@@ -219,7 +273,8 @@ export class UploadManager {
                     body: JSON.stringify({
                         filename: item.filename,
                         filesize: item.filesize,
-                        path: item.path
+                        path: item.path,
+                        resume_upload_id: readResumeId(item) || undefined,
                     })
                 });
                 if (!initRes.ok) {
@@ -232,89 +287,91 @@ export class UploadManager {
                     item.chunkSize = initData.chunk_size;
                     item.totalChunks = Math.max(1, Math.ceil(item.filesize / item.chunkSize));
                 }
+                item.received = new Set(initData.received || []);
+                item.bytesUploaded = [...item.received].reduce((sum, i) => sum + chunkLength(item, i), 0);
+                saveResumeId(item);
             }
+            item.received = item.received || new Set();
+            // Step 2: Send the missing chunks, several at once (the server writes each at its own
+            // place, so order doesn't matter). 429 means "the disk buffer is full, try shortly".
+            item.abortController = new AbortController();
+            const signal = item.abortController.signal;
+            const pending = Array.from({ length: item.totalChunks }, (_, i) => i).filter((i) => !item.received.has(i));
+            let fatal = null;
             let lastTime = Date.now();
             let lastLoaded = item.bytesUploaded;
             let currentSpeed = item.speed || 0;
-            // Step 2: Upload chunks starting from current chunkIndex
-            while (item.chunkIndex < item.totalChunks) {
-                if (item.status !== 'uploading') {
-                    // Upload was paused or cancelled
-                    return;
-                }
-                const chunkIdx = item.chunkIndex;
-                const start = chunkIdx * item.chunkSize;
-                const end = Math.min(start + item.chunkSize, item.filesize);
-                const chunkBlob = item.file.slice(start, end);
-                let success = false;
-                let lastErr = null;
-                let jumpTo = null; // the server already has a different number of chunks
-                for (let attempt = 0; attempt < 3; attempt++) {
-                    if (item.status !== 'uploading')
-                        return;
-                    try {
-                        item.abortController = new AbortController();
-                        const chunkFormData = new FormData();
-                        chunkFormData.append('upload_id', item.uploadId);
-                        chunkFormData.append('chunk_index', chunkIdx.toString());
-                        chunkFormData.append('chunk_file', chunkBlob, item.filename);
-                        const chunkRes = await fetch(`${baseUrl}/files/upload/chunk`, {
-                            method: 'POST',
-                            headers: { ...authHeaders },
-                            credentials: 'include',
-                            signal: item.abortController.signal,
-                            body: chunkFormData
-                        });
-                        if (chunkRes.status === 409) {
-                            const errData = await chunkRes.json().catch(() => ({}));
-                            if (Number.isInteger(errData.detail?.next_chunk)) {
-                                jumpTo = errData.detail.next_chunk;
-                                break;
-                            }
-                        }
-                        if (!chunkRes.ok) {
-                            const errData = await chunkRes.json().catch(() => ({}));
-                            const detail = typeof errData.detail === "string" ? errData.detail : errData.detail?.message;
-                            throw new Error(detail || `Chunk upload failed (${chunkRes.status})`);
-                        }
-                        success = true;
-                        break;
-                    }
-                    catch (err) {
-                        if (item.status !== 'uploading' || err.name === 'AbortError') {
-                            // Intentionally paused/cancelled
-                            return;
-                        }
-                        lastErr = err;
-                        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
-                    }
-                }
-                if (jumpTo !== null) {
-                    // Continue from the chunk the server expects (chunks are kept exactly once)
-                    item.chunkIndex = jumpTo;
-                    item.bytesUploaded = Math.min(item.filesize, jumpTo * item.chunkSize);
-                    continue;
-                }
-                if (!success) {
-                    throw new Error(`Failed to upload chunk ${chunkIdx + 1}/${item.totalChunks}: ${lastErr?.message || 'Network error'}`);
-                }
-                // Chunk uploaded successfully
-                item.chunkIndex = chunkIdx + 1;
-                item.bytesUploaded += (end - start);
+            const reportProgress = () => {
                 const now = Date.now();
                 const timeDiff = (now - lastTime) / 1000;
                 if (timeDiff >= 0.3) {
-                    const bytesDiff = item.bytesUploaded - lastLoaded;
-                    const instantSpeed = bytesDiff / timeDiff;
+                    const instantSpeed = (item.bytesUploaded - lastLoaded) / timeDiff;
                     currentSpeed = currentSpeed === 0 ? instantSpeed : 0.7 * currentSpeed + 0.3 * instantSpeed;
                     lastTime = now;
                     lastLoaded = item.bytesUploaded;
                 }
                 item.speed = currentSpeed;
-                const remaining = item.filesize - item.bytesUploaded;
-                item.eta = currentSpeed > 0 ? Math.round(remaining / currentSpeed) : 0;
+                item.eta = currentSpeed > 0 ? Math.round((item.filesize - item.bytesUploaded) / currentSpeed) : 0;
                 item.progress = Math.min(99, Math.round((item.bytesUploaded / item.filesize) * 100));
+                item.chunkIndex = item.received.size;
                 this.notifyListeners();
+            };
+            const sendChunk = async (index) => {
+                const start = index * item.chunkSize;
+                const blob = item.file.slice(start, start + chunkLength(item, index));
+                let failures = 0;
+                while (!signal.aborted && !fatal) {
+                    try {
+                        const res = await fetch(`${baseUrl}/files/upload/chunk/${encodeURIComponent(item.uploadId)}/${index}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/octet-stream', ...authHeaders },
+                            credentials: 'include',
+                            signal,
+                            body: blob,
+                        });
+                        if (res.status === 429) {
+                            const data = await res.json().catch(() => ({}));
+                            await wait((Number(res.headers.get('Retry-After')) || data.retry_after || 3) * 1000, signal);
+                            continue;
+                        }
+                        if (!res.ok) {
+                            const data = await res.json().catch(() => ({}));
+                            const detail = typeof data.detail === 'string' ? data.detail : data.detail?.message;
+                            const error = new Error(detail || `Chunk upload failed (${res.status})`);
+                            // The server gave up on this upload (a part failed on Telegram, bad chunk)
+                            if (res.status === 400 || res.status === 404 || (res.status === 500 && /Upload failed/.test(detail || '')))
+                                error.fatal = true;
+                            throw error;
+                        }
+                        if (!item.received.has(index)) {
+                            item.received.add(index);
+                            item.bytesUploaded += chunkLength(item, index);
+                            reportProgress();
+                        }
+                        return;
+                    }
+                    catch (err) {
+                        if (signal.aborted || err.name === 'AbortError')
+                            return;
+                        failures += 1;
+                        if (err.fatal || failures >= 4) {
+                            fatal = new Error(`Failed to upload chunk ${index + 1}/${item.totalChunks}: ${err.message || 'Network error'}`);
+                            return;
+                        }
+                        await wait(1000 * failures, signal);
+                    }
+                }
+            };
+            const worker = async () => {
+                while (pending.length && !fatal && !signal.aborted && item.status === 'uploading')
+                    await sendChunk(pending.shift());
+            };
+            await Promise.all(Array.from({ length: Math.min(PARALLEL_CHUNKS, pending.length || 1) }, worker));
+            if (item.status !== 'uploading')
+                return; // paused or cancelled: the chunks already received stay on the server
+            if (fatal) {
+                clearResumeId(item);
+                throw fatal;
             }
             // Step 3: Trigger completion on backend
             if (item.status !== 'uploading')
@@ -349,6 +406,7 @@ export class UploadManager {
             }
             if (initialResponse?.status === 'completed' && initialResponse?.file) {
                 item.status = 'completed';
+                clearResumeId(item);
                 item.progress = 100;
                 item.resultFile = initialResponse.file;
                 item.endTime = new Date();
@@ -379,6 +437,7 @@ export class UploadManager {
                         const statusData = await statusRes.json();
                         if (statusData.status === 'completed') {
                             item.status = 'completed';
+                            clearResumeId(item);
                             item.progress = 100;
                             item.resultFile = statusData.file;
                             item.endTime = new Date();
