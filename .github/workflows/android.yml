@@ -59,7 +59,20 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew :app:lintDebug :app:testDebugUnitTest :app:assembleRelease --console=plain
+        run: |
+          set -o pipefail
+          ./gradlew :app:lintDebug :app:testDebugUnitTest :app:assembleRelease --console=plain 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      # Run logs need a GitHub login; annotations don't. Publish the failure lines so they can be read.
+      - name: Show build errors
+        if: failure()
+        run: |
+          for f in "$RUNNER_TEMP/build.log" app/build/reports/lint-results-debug.txt; do
+            [ -f "$f" ] || continue
+            grep -E "^e: |error:|Error:|What went wrong|^> |FAILED|Lint found" "$f" | head -40 | sed 's/%/%25/g' | while IFS= read -r line; do
+              echo "::error::${line:0:900}"
+            done
+          done
 
       - name: Name the APK
         run: |

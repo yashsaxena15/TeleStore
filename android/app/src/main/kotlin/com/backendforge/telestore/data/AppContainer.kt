@@ -5,11 +5,32 @@ import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.backendforge.telestore.core.ServerAddress
 import com.backendforge.telestore.core.TeleStoreApi
+import com.backendforge.telestore.player.MusicController
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import okhttp3.HttpUrl
 
 /** The app's shared objects, made once in [com.backendforge.telestore.TeleStoreApplication]. */
 class AppContainer(val context: Context) {
     val session = SessionStore(context.applicationContext)
+    val playback = PlaybackQueue()
+
+    /** Background music; made on first use so the service only starts when a song plays. */
+    val music: MusicController by lazy { MusicController(context.applicationContext) }
+    private var musicStarted = false
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    init {
+        // Signing out stops the music (its stream needs the token that just ended)
+        scope.launch {
+            session.state.collect { if (it == null && musicStarted) music.stop() }
+        }
+    }
+
+    /** The music controller, marking that it exists (see the sign-out rule above). */
+    fun startMusic(): MusicController = music.also { musicStarted = true }
 
     private var cached: TeleStoreApi? = null
 

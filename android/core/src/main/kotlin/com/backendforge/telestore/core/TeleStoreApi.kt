@@ -95,6 +95,10 @@ class TeleStoreApi(
             .build()
     )
 
+    // ── Playback ────────────────────────────────────────────────────────────────
+    /** Size, length, audio tracks and subtitles of a video (the server probes it once, then caches it). */
+    suspend fun mediaInfo(item: FileItem): MediaInfo = get(media.info(item))
+
     // ── Folder & File Actions ───────────────────────────────────────────────────
     suspend fun createFolder(name: String, parentPath: String = HOME): MessageReply =
         post(url("folders/create"), buildJsonObject {

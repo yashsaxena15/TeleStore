@@ -76,6 +76,18 @@ def _get_internal_stream_url(file_name: str, token: Optional[str] = None, file_i
     return url
 
 
+def copy_video_args(file_data: Optional[dict]) -> list:
+    """ffmpeg arguments that copy the video stream unchanged.
+
+    HEVC gets the hvc1 tag Apple players need; any other codec must not (ffmpeg refuses to write
+    an H.264 stream tagged hvc1, so the stream would come out empty).
+    """
+    codec = ((file_data or {}).get("media_info") or {}).get("video_codec")
+    if codec in ("hevc", "h265"):
+        return ["-c:v", "copy", "-tag:v", "hvc1"]
+    return ["-c:v", "copy"]
+
+
 def _owner_ids(user) -> list:
     return [i for i in {str(user.telegram_user_id) if user.telegram_user_id else None, user.username} if i]
 
@@ -449,7 +461,7 @@ async def media_transcode_stream(
 
     if is_original_quality or not target_height:
         # Remux video without re-encoding (0% video CPU load!)
-        cmd.extend(["-c:v", "copy", "-tag:v", "hvc1"])
+        cmd.extend(copy_video_args(file_data))
     else:
         # Downscale video with single-thread ultrafast to protect VPS CPU
         scale_filter = f"scale=-2:{target_height}"

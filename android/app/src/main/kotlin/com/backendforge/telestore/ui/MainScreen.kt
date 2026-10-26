@@ -1,6 +1,19 @@
 package com.backendforge.telestore.ui
 
 import android.net.Uri
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.backendforge.telestore.core.FileItem
+import com.backendforge.telestore.core.FileKind
+import com.backendforge.telestore.core.PlayQueue
+import com.backendforge.telestore.photos.PhotoViewerScreen
+import com.backendforge.telestore.player.MiniPlayer
+import com.backendforge.telestore.player.NowPlayingScreen
+import com.backendforge.telestore.player.VideoScreen
+import com.backendforge.telestore.player.VideoViewModel
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.fillMaxSize
@@ -41,6 +54,10 @@ import com.backendforge.telestore.ui.search.SearchScreen
 import com.backendforge.telestore.ui.search.SearchViewModel
 import com.backendforge.telestore.ui.transfers.TransfersPlaceholderScreen
 
+private const val ROUTE_VIDEO = "video"
+private const val ROUTE_PHOTOS = "photos"
+private const val ROUTE_NOW_PLAYING = "now_playing"
+
 private enum class MainTab(val title: String, val icon: ImageVector, val graphRoute: String) {
     HOME("Home", Icons.Default.Home, "home_graph"),
     STARRED("Starred", Icons.Default.Star, "starred_graph"),
@@ -70,6 +87,31 @@ fun MainScreen(
     }
 
     val isSearch = currentRoute == "search"
+    // The players take the whole screen: no tabs, no mini player
+    val isPlayer = currentRoute in setOf(ROUTE_VIDEO, ROUTE_PHOTOS, ROUTE_NOW_PLAYING)
+    val music = remember { container.startMusic() }
+    val musicState by music.state.collectAsStateWithLifecycle()
+
+    /** Opens a video, song or photo with the folder's others queued after it. False: no viewer. */
+    fun openFile(item: FileItem, siblings: List<FileItem>): Boolean {
+        val (queue, index) = PlayQueue.around(siblings, item)
+        when (item.kind) {
+            FileKind.VIDEO -> {
+                container.playback.openVideos(queue, index)
+                navController.navigate(ROUTE_VIDEO)
+            }
+            FileKind.AUDIO -> {
+                music.play(container.api(), queue, index)
+                navController.navigate(ROUTE_NOW_PLAYING)
+            }
+            FileKind.PHOTO -> {
+                container.playback.openPhotos(queue, index)
+                navController.navigate(ROUTE_PHOTOS)
+            }
+            else -> return false
+        }
+        return true
+    }
 
     fun navigateToFolder(prefix: String, path: String) {
         val encoded = Uri.encode(path)
@@ -125,8 +167,9 @@ fun MainScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         bottomBar = {
-            if (!isSearch) {
-                NavigationBar {
+            if (!isPlayer) Column {
+                if (musicState.hasMedia) MiniPlayer(musicState, music, onOpen = { navController.navigate(ROUTE_NOW_PLAYING) })
+                if (!isSearch) NavigationBar {
                     MainTab.entries.forEach { tab ->
                         val isSelected = selectedTab == tab
                         NavigationBarItem(
@@ -143,7 +186,8 @@ fun MainScreen(
         NavHost(
             navController = navController,
             startDestination = "home_graph",
-            modifier = Modifier.padding(padding),
+            // Players draw edge to edge and handle the system bars themselves
+            modifier = Modifier.padding(if (isPlayer) PaddingValues(0.dp) else padding),
         ) {
             navigation(
                 startDestination = "home_folder?path=${Uri.encode(TeleStoreApi.HOME)}",
@@ -168,6 +212,7 @@ fun MainScreen(
                         onNavigateFolder = { navigateToFolder("home", it) },
                         onNavigateCrumb = { navigateToCrumb("home", it) },
                         onOpenSearch = { navController.navigate("search") },
+                        onOpenFile = ::openFile,
                     )
                 }
             }
@@ -195,6 +240,7 @@ fun MainScreen(
                         onNavigateFolder = { navigateToFolder("starred", it) },
                         onNavigateCrumb = { navigateToCrumb("starred", it) },
                         onOpenSearch = { navController.navigate("search") },
+                        onOpenFile = ::openFile,
                     )
                 }
             }
@@ -222,6 +268,7 @@ fun MainScreen(
                         onNavigateFolder = { navigateToFolder("recent", it) },
                         onNavigateCrumb = { navigateToCrumb("recent", it) },
                         onOpenSearch = { navController.navigate("search") },
+                        onOpenFile = ::openFile,
                     )
                 }
             }
@@ -262,6 +309,7 @@ fun MainScreen(
                         onNavigateFolder = { navigateToFolder("more", it) },
                         onNavigateCrumb = { navigateToCrumb("more", it) },
                         onOpenSearch = { navController.navigate("search") },
+                        onOpenFile = ::openFile,
                     )
                 }
             }
@@ -275,7 +323,26 @@ fun MainScreen(
                     api = container.api(),
                     onNavigateFolder = { navigateToFolder("home", it) },
                     onBack = { navController.popBackStack() },
+                    onOpenFile = ::openFile,
                 )
+            }
+
+            composable(ROUTE_VIDEO) {
+                val vm: VideoViewModel = viewModel { VideoViewModel(container) }
+                VideoScreen(vm, onBack = { navController.popBackStack() })
+            }
+
+            composable(ROUTE_PHOTOS) {
+                PhotoViewerScreen(
+                    photos = container.playback.photos,
+                    startIndex = container.playback.photoIndex,
+                    api = container.api(),
+                    onBack = { navController.popBackStack() },
+                )
+            }
+
+            composable(ROUTE_NOW_PLAYING) {
+                NowPlayingScreen(musicState, music, onClose = { navController.popBackStack() })
             }
         }
     }
