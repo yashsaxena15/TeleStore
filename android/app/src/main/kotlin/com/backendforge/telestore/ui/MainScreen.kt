@@ -1,6 +1,16 @@
 package com.backendforge.telestore.ui
 
 import android.net.Uri
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import com.backendforge.telestore.core.AppRelease
+import com.backendforge.telestore.data.AppVersion
+import com.backendforge.telestore.data.openInBrowser
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.ui.platform.LocalConfiguration
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -239,6 +249,31 @@ fun MainScreen(
         activity?.finish()
     }
 
+    val wide = LocalConfiguration.current.screenWidthDp >= 600
+
+    // Once a day, look for a newer APK on GitHub and offer it
+    var update by remember { mutableStateOf<AppRelease?>(null) }
+    LaunchedEffect(Unit) {
+        val settings = container.settings
+        if (System.currentTimeMillis() - settings.lastUpdateCheck < 24 * 60 * 60 * 1000L) return@LaunchedEffect
+        try {
+            update = container.updates.newerThan(AppVersion.of(context).build)
+            settings.lastUpdateCheck = System.currentTimeMillis()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Offline or GitHub unreachable: try again next time
+        }
+    }
+    update?.let { release ->
+        AlertDialog(
+            onDismissRequest = { update = null },
+            title = { Text("Update available") },
+            text = { Text("TeleStore ${release.version} is ready. Download it, then open the file to install it over this version.") },
+            confirmButton = { TextButton(onClick = { openInBrowser(context, release.apkUrl); update = null }) { Text("Download") } },
+            dismissButton = { TextButton(onClick = { update = null }) { Text("Later") } },
+        )
+    }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(transferMessage) {
         transferMessage?.takeIf { it.isNotEmpty() }?.let {
@@ -269,7 +304,7 @@ fun MainScreen(
         bottomBar = {
             if (!isPlayer) Column {
                 if (musicState.hasMedia) MiniPlayer(musicState, music, onOpen = { navController.navigate(ROUTE_NOW_PLAYING) })
-                if (!isSearch) NavigationBar {
+                if (!isSearch && !wide) NavigationBar {
                     MainTab.entries.forEach { tab ->
                         val isSelected = selectedTab == tab
                         NavigationBarItem(
@@ -283,179 +318,194 @@ fun MainScreen(
             }
         },
     ) { padding ->
-        NavHost(
-            navController = navController,
-            startDestination = "home_graph",
-            // Players draw edge to edge and handle the system bars themselves
-            modifier = Modifier.padding(if (isPlayer) PaddingValues(0.dp) else padding),
-        ) {
-            navigation(
-                startDestination = "home_folder?path=${Uri.encode(TeleStoreApi.HOME)}",
-                route = "home_graph",
-            ) {
-                composable(
-                    route = "home_folder?path={path}",
-                    arguments = listOf(
-                        navArgument("path") {
-                            type = NavType.StringType
-                            defaultValue = TeleStoreApi.HOME
-                        }
-                    ),
-                ) { backStackEntry ->
-                    val path = backStackEntry.arguments?.getString("path") ?: TeleStoreApi.HOME
-                    val vm: FolderViewModel = viewModel(key = "$path-${session.token}") {
-                        FolderViewModel(container, initialPath = path)
+        // Players draw edge to edge and handle the system bars themselves
+        Row(Modifier.fillMaxSize().padding(if (isPlayer) PaddingValues(0.dp) else padding)) {
+            // Tablets and landscape: the tabs move to a rail on the left
+            if (wide && !isPlayer && !isSearch) {
+                NavigationRail {
+                    MainTab.entries.forEach { tab ->
+                        NavigationRailItem(
+                            selected = selectedTab == tab,
+                            onClick = { navigateToTab(tab) },
+                            icon = { Icon(tab.icon, contentDescription = tab.title) },
+                            label = { Text(tab.title) },
+                        )
                     }
-                    FolderScreen(
+                }
+            }
+            NavHost(
+                navController = navController,
+                startDestination = "home_graph",
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+            ) {
+                navigation(
+                    startDestination = "home_folder?path=${Uri.encode(TeleStoreApi.HOME)}",
+                    route = "home_graph",
+                ) {
+                    composable(
+                        route = "home_folder?path={path}",
+                        arguments = listOf(
+                            navArgument("path") {
+                                type = NavType.StringType
+                                defaultValue = TeleStoreApi.HOME
+                            }
+                        ),
+                    ) { backStackEntry ->
+                        val path = backStackEntry.arguments?.getString("path") ?: TeleStoreApi.HOME
+                        val vm: FolderViewModel = viewModel(key = "$path-${session.token}") {
+                            FolderViewModel(container, initialPath = path)
+                        }
+                        FolderScreen(
+                            vm = vm,
+                            api = container.api(),
+                            onNavigateFolder = { navigateToFolder("home", it) },
+                            onNavigateCrumb = { navigateToCrumb("home", it) },
+                            onOpenSearch = { navController.navigate("search") },
+                            onOpenFile = ::openFile,
+                            onUpload = ::upload,
+                            onDownload = ::download,
+                            offlineIds = offlineIds,
+                        )
+                    }
+                }
+
+                navigation(
+                    startDestination = "starred_folder?path=starred",
+                    route = "starred_graph",
+                ) {
+                    composable(
+                        route = "starred_folder?path={path}",
+                        arguments = listOf(
+                            navArgument("path") {
+                                type = NavType.StringType
+                                defaultValue = "starred"
+                            }
+                        ),
+                    ) { backStackEntry ->
+                        val path = backStackEntry.arguments?.getString("path") ?: "starred"
+                        val vm: FolderViewModel = viewModel(key = "$path-${session.token}") {
+                            FolderViewModel(container, initialPath = path)
+                        }
+                        FolderScreen(
+                            vm = vm,
+                            api = container.api(),
+                            onNavigateFolder = { navigateToFolder("starred", it) },
+                            onNavigateCrumb = { navigateToCrumb("starred", it) },
+                            onOpenSearch = { navController.navigate("search") },
+                            onOpenFile = ::openFile,
+                            onUpload = ::upload,
+                            onDownload = ::download,
+                            offlineIds = offlineIds,
+                        )
+                    }
+                }
+
+                navigation(
+                    startDestination = "recent_folder?path=all",
+                    route = "recent_graph",
+                ) {
+                    composable(
+                        route = "recent_folder?path={path}",
+                        arguments = listOf(
+                            navArgument("path") {
+                                type = NavType.StringType
+                                defaultValue = "all"
+                            }
+                        ),
+                    ) { backStackEntry ->
+                        val path = backStackEntry.arguments?.getString("path") ?: "all"
+                        val vm: FolderViewModel = viewModel(key = "$path-${session.token}") {
+                            FolderViewModel(container, initialPath = path)
+                        }
+                        FolderScreen(
+                            vm = vm,
+                            api = container.api(),
+                            onNavigateFolder = { navigateToFolder("recent", it) },
+                            onNavigateCrumb = { navigateToCrumb("recent", it) },
+                            onOpenSearch = { navController.navigate("search") },
+                            onOpenFile = ::openFile,
+                            onUpload = ::upload,
+                            onDownload = ::download,
+                            offlineIds = offlineIds,
+                        )
+                    }
+                }
+
+                composable("transfers") {
+                    TransfersScreen(container)
+                }
+
+                navigation(
+                    startDestination = "more_root",
+                    route = "more_graph",
+                ) {
+                    composable("more_root") {
+                        MoreScreen(
+                            container = container,
+                            session = session,
+                            onNavigateTrash = { navigateToFolder("more", "trash") },
+                            onNavigateInbox = { navigateToFolder("more", "inbox") },
+                        )
+                    }
+
+                    composable(
+                        route = "more_folder?path={path}",
+                        arguments = listOf(
+                            navArgument("path") {
+                                type = NavType.StringType
+                                defaultValue = "trash"
+                            }
+                        ),
+                    ) { backStackEntry ->
+                        val path = backStackEntry.arguments?.getString("path") ?: "trash"
+                        val vm: FolderViewModel = viewModel(key = "$path-${session.token}") {
+                            FolderViewModel(container, initialPath = path)
+                        }
+                        FolderScreen(
+                            vm = vm,
+                            api = container.api(),
+                            onNavigateFolder = { navigateToFolder("more", it) },
+                            onNavigateCrumb = { navigateToCrumb("more", it) },
+                            onOpenSearch = { navController.navigate("search") },
+                            onOpenFile = ::openFile,
+                            onUpload = ::upload,
+                            onDownload = ::download,
+                            offlineIds = offlineIds,
+                        )
+                    }
+                }
+
+                composable("search") {
+                    val vm: SearchViewModel = viewModel(key = "search-${session.token}") {
+                        SearchViewModel(container)
+                    }
+                    SearchScreen(
                         vm = vm,
                         api = container.api(),
                         onNavigateFolder = { navigateToFolder("home", it) },
-                        onNavigateCrumb = { navigateToCrumb("home", it) },
-                        onOpenSearch = { navController.navigate("search") },
+                        onBack = { navController.popBackStack() },
                         onOpenFile = ::openFile,
-                        onUpload = ::upload,
-                        onDownload = ::download,
-                        offlineIds = offlineIds,
                     )
                 }
-            }
 
-            navigation(
-                startDestination = "starred_folder?path=starred",
-                route = "starred_graph",
-            ) {
-                composable(
-                    route = "starred_folder?path={path}",
-                    arguments = listOf(
-                        navArgument("path") {
-                            type = NavType.StringType
-                            defaultValue = "starred"
-                        }
-                    ),
-                ) { backStackEntry ->
-                    val path = backStackEntry.arguments?.getString("path") ?: "starred"
-                    val vm: FolderViewModel = viewModel(key = "$path-${session.token}") {
-                        FolderViewModel(container, initialPath = path)
-                    }
-                    FolderScreen(
-                        vm = vm,
+                composable(ROUTE_VIDEO) {
+                    val vm: VideoViewModel = viewModel { VideoViewModel(container) }
+                    VideoScreen(vm, onBack = { navController.popBackStack() })
+                }
+
+                composable(ROUTE_PHOTOS) {
+                    PhotoViewerScreen(
+                        photos = container.playback.photos,
+                        startIndex = container.playback.photoIndex,
                         api = container.api(),
-                        onNavigateFolder = { navigateToFolder("starred", it) },
-                        onNavigateCrumb = { navigateToCrumb("starred", it) },
-                        onOpenSearch = { navController.navigate("search") },
-                        onOpenFile = ::openFile,
-                        onUpload = ::upload,
-                        onDownload = ::download,
-                        offlineIds = offlineIds,
-                    )
-                }
-            }
-
-            navigation(
-                startDestination = "recent_folder?path=all",
-                route = "recent_graph",
-            ) {
-                composable(
-                    route = "recent_folder?path={path}",
-                    arguments = listOf(
-                        navArgument("path") {
-                            type = NavType.StringType
-                            defaultValue = "all"
-                        }
-                    ),
-                ) { backStackEntry ->
-                    val path = backStackEntry.arguments?.getString("path") ?: "all"
-                    val vm: FolderViewModel = viewModel(key = "$path-${session.token}") {
-                        FolderViewModel(container, initialPath = path)
-                    }
-                    FolderScreen(
-                        vm = vm,
-                        api = container.api(),
-                        onNavigateFolder = { navigateToFolder("recent", it) },
-                        onNavigateCrumb = { navigateToCrumb("recent", it) },
-                        onOpenSearch = { navController.navigate("search") },
-                        onOpenFile = ::openFile,
-                        onUpload = ::upload,
-                        onDownload = ::download,
-                        offlineIds = offlineIds,
-                    )
-                }
-            }
-
-            composable("transfers") {
-                TransfersScreen(container)
-            }
-
-            navigation(
-                startDestination = "more_root",
-                route = "more_graph",
-            ) {
-                composable("more_root") {
-                    MoreScreen(
-                        container = container,
-                        session = session,
-                        onNavigateTrash = { navigateToFolder("more", "trash") },
-                        onNavigateInbox = { navigateToFolder("more", "inbox") },
+                        onBack = { navController.popBackStack() },
+                        offlineCopy = { container.transfers.store.offlineCopy(context, it.id) },
                     )
                 }
 
-                composable(
-                    route = "more_folder?path={path}",
-                    arguments = listOf(
-                        navArgument("path") {
-                            type = NavType.StringType
-                            defaultValue = "trash"
-                        }
-                    ),
-                ) { backStackEntry ->
-                    val path = backStackEntry.arguments?.getString("path") ?: "trash"
-                    val vm: FolderViewModel = viewModel(key = "$path-${session.token}") {
-                        FolderViewModel(container, initialPath = path)
-                    }
-                    FolderScreen(
-                        vm = vm,
-                        api = container.api(),
-                        onNavigateFolder = { navigateToFolder("more", it) },
-                        onNavigateCrumb = { navigateToCrumb("more", it) },
-                        onOpenSearch = { navController.navigate("search") },
-                        onOpenFile = ::openFile,
-                        onUpload = ::upload,
-                        onDownload = ::download,
-                        offlineIds = offlineIds,
-                    )
+                composable(ROUTE_NOW_PLAYING) {
+                    NowPlayingScreen(musicState, music, onClose = { navController.popBackStack() })
                 }
-            }
-
-            composable("search") {
-                val vm: SearchViewModel = viewModel(key = "search-${session.token}") {
-                    SearchViewModel(container)
-                }
-                SearchScreen(
-                    vm = vm,
-                    api = container.api(),
-                    onNavigateFolder = { navigateToFolder("home", it) },
-                    onBack = { navController.popBackStack() },
-                    onOpenFile = ::openFile,
-                )
-            }
-
-            composable(ROUTE_VIDEO) {
-                val vm: VideoViewModel = viewModel { VideoViewModel(container) }
-                VideoScreen(vm, onBack = { navController.popBackStack() })
-            }
-
-            composable(ROUTE_PHOTOS) {
-                PhotoViewerScreen(
-                    photos = container.playback.photos,
-                    startIndex = container.playback.photoIndex,
-                    api = container.api(),
-                    onBack = { navController.popBackStack() },
-                    offlineCopy = { container.transfers.store.offlineCopy(context, it.id) },
-                )
-            }
-
-            composable(ROUTE_NOW_PLAYING) {
-                NowPlayingScreen(musicState, music, onClose = { navController.popBackStack() })
             }
         }
     }

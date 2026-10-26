@@ -96,6 +96,10 @@ class TeleStoreApi(
             .build()
     )
 
+    // ── Account ─────────────────────────────────────────────────────────────────
+    /** How much the account stores, out of its quota. */
+    suspend fun storage(): StorageStats = get(url("files/analytics"))
+
     // ── Playback ────────────────────────────────────────────────────────────────
     /** Size, length, audio tracks and subtitles of a video (the server probes it once, then caches it). */
     suspend fun mediaInfo(item: FileItem): MediaInfo = get(media.info(item))
