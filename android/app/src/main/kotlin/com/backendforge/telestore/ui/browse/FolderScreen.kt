@@ -92,6 +92,8 @@ fun FolderScreen(
     /** A breadcrumb was tapped; null opens the folder like any other folder. */
     onNavigateCrumb: ((targetPath: String) -> Unit)? = null,
     onOpenSearch: () -> Unit,
+    /** Plays or shows a file; false means there's no viewer for it (its Info opens instead). */
+    onOpenFile: (item: FileItem, siblings: List<FileItem>) -> Boolean = { _, _ -> false },
     modifier: Modifier = Modifier,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -391,7 +393,7 @@ fun FolderScreen(
                                                 infoItem = item
                                             } else if (item.isFolder) {
                                                 onNavigateFolder(FolderPaths.childPath(item))
-                                            } else {
+                                            } else if (!onOpenFile(item, state.items)) {
                                                 infoItem = item
                                             }
                                         },
@@ -439,7 +441,7 @@ fun FolderScreen(
                                                 infoItem = item
                                             } else if (item.isFolder) {
                                                 onNavigateFolder(FolderPaths.childPath(item))
-                                            } else {
+                                            } else if (!onOpenFile(item, state.items)) {
                                                 infoItem = item
                                             }
                                         },

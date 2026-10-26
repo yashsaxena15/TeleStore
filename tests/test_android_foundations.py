@@ -153,3 +153,11 @@ class TestThumbnails:
         database.Users.get_auth_token.return_value = None
         res = client.get("/files/thumbnail/AAA", params={"auth_token": "gone"})
         assert res.status_code == 401
+
+
+class TestCopyVideoArgs:
+    def test_only_hevc_gets_the_hvc1_tag(self):
+        assert media_routes.copy_video_args({"media_info": {"video_codec": "hevc"}}) == ["-c:v", "copy", "-tag:v", "hvc1"]
+        assert media_routes.copy_video_args({"media_info": {"video_codec": "h264"}}) == ["-c:v", "copy"]
+        assert media_routes.copy_video_args({}) == ["-c:v", "copy"]
+        assert media_routes.copy_video_args(None) == ["-c:v", "copy"]
