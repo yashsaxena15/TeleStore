@@ -6,7 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.backendforge.telestore.ui.home.HomeScreen
+import com.backendforge.telestore.ui.MainScreen
 import com.backendforge.telestore.ui.signin.SignInScreen
 import com.backendforge.telestore.ui.theme.TeleStoreTheme
 
@@ -22,7 +22,7 @@ class MainActivity : ComponentActivity() {
                 if (current == null) {
                     SignInScreen(container)
                 } else {
-                    HomeScreen(container, current)
+                    MainScreen(container, current)
                 }
             }
         }

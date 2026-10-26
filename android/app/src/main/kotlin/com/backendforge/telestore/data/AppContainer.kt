@@ -1,15 +1,25 @@
 package com.backendforge.telestore.data
 
 import android.content.Context
+import coil3.ImageLoader
+import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.backendforge.telestore.core.ServerAddress
 import com.backendforge.telestore.core.TeleStoreApi
 import okhttp3.HttpUrl
 
 /** The app's shared objects, made once in [com.backendforge.telestore.TeleStoreApplication]. */
-class AppContainer(context: Context) {
+class AppContainer(val context: Context) {
     val session = SessionStore(context.applicationContext)
 
     private var cached: TeleStoreApi? = null
+
+    val imageLoader: ImageLoader by lazy {
+        ImageLoader.Builder(context)
+            .components {
+                add(OkHttpNetworkFetcherFactory(callFactory = { api().http }))
+            }
+            .build()
+    }
 
     /** The API for the signed-in server; a 401 anywhere signs the app out. */
     fun api(): TeleStoreApi {
@@ -23,3 +33,4 @@ class AppContainer(context: Context) {
     fun apiFor(base: HttpUrl): TeleStoreApi =
         TeleStoreApi(base, token = { session.state.value?.token }, onUnauthorized = { session.signedOut() })
 }
+
