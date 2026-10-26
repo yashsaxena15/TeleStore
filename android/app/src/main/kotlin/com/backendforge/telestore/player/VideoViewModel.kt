@@ -205,6 +205,14 @@ class VideoViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     // ── Opening ────────────────────────────────────────────────────────────────
+    /** Another video was picked while this player is open (full screen or minimized). */
+    fun start(queue: List<FileItem>, index: Int) {
+        if (index !in queue.indices) return
+        saveProgress()
+        _state.update { it.copy(queue = queue) }
+        open(index)
+    }
+
     fun playAt(index: Int) {
         if (index !in _state.value.queue.indices) return
         saveProgress()

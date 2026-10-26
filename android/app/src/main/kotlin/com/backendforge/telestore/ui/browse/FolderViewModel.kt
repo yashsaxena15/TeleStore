@@ -185,7 +185,7 @@ class FolderViewModel(
                 _state.update { current ->
                     if (current.path == requestPath && current.sortBy == requestSortBy && current.ascending == requestAscending) {
                         current.copy(
-                            items = current.items + res.files,
+                            items = (current.items + res.files).distinctBy { f -> f.id },
                             page = page,
                             hasNext = res.pagination?.hasNext ?: false,
                             loadingMore = false,

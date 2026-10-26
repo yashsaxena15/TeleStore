@@ -202,6 +202,14 @@ class TeleStoreApi(
 
     private fun cloudUrl(accountId: String, path: String) = url("cloud").newBuilder().addPathSegment(accountId).addPathSegments(path).build()
 
+    /** What made the app close unexpectedly, so it can be fixed (the server logs it). */
+    suspend fun reportCrash(report: String, version: String, device: String): MessageReply =
+        post(url("system/app-crash"), buildJsonObject {
+            put("report", report.take(19_000))
+            put("version", version.take(40))
+            put("device", device.take(120))
+        })
+
     // ── Account ─────────────────────────────────────────────────────────────────
     /** How much the account stores, out of its quota. */
     suspend fun storage(): StorageStats = get(url("files/analytics"))

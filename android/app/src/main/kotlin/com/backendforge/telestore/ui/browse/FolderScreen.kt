@@ -1,5 +1,6 @@
 package com.backendforge.telestore.ui.browse
 
+import com.backendforge.telestore.ui.components.rememberHaptics
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -104,6 +105,7 @@ fun FolderScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val haptics = rememberHaptics()
     val snackbarHostState = remember { SnackbarHostState() }
 
     BackHandler(enabled = state.isSelectionMode) {
@@ -343,7 +345,7 @@ fun FolderScreen(
 
             PullToRefreshBox(
                 isRefreshing = state.refreshing,
-                onRefresh = vm::refresh,
+                onRefresh = { haptics.confirm(); vm.refresh() },
                 modifier = Modifier.fillMaxSize(),
             ) {
                 when {

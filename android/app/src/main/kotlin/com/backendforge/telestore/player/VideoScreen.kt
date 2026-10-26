@@ -112,13 +112,15 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import com.backendforge.telestore.ui.components.PullDownState
+import com.backendforge.telestore.ui.components.pullDownOffset
+import com.backendforge.telestore.ui.components.pullDownToClose
+import com.backendforge.telestore.ui.components.rememberHaptics
+import com.backendforge.telestore.ui.components.rememberPullDownState
 import com.backendforge.telestore.MainActivity
 import com.backendforge.telestore.core.FileItem
 import com.backendforge.telestore.core.Quality
@@ -162,6 +164,9 @@ fun VideoScreen(vm: VideoViewModel, api: TeleStoreApi, onBack: () -> Unit, onDow
     var locked by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<SheetPage?>(null) }
     var info by remember { mutableStateOf<FileItem?>(null) }
+    val haptics = rememberHaptics()
+    // Pulling the video down shrinks it to the mini player (portrait only; full screen keeps brightness and volume)
+    val pull = rememberPullDownState(onBack)
 
     if (state.item == null) {
         LaunchedEffect(Unit) { onBack() }
@@ -208,21 +213,11 @@ fun VideoScreen(vm: VideoViewModel, api: TeleStoreApi, onBack: () -> Unit, onDow
     val playing by rememberUpdatedState(state.isPlaying)
     LaunchedEffect(ratio, state.isPlaying) { activity?.updatePictureInPicture(ratio, state.isPlaying) }
 
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(activity, lifecycleOwner) {
+    // Leaving the app (Play in background or pause) is handled by MainScreen, as the video may be minimized
+    DisposableEffect(activity) {
         activity?.pictureInPictureRatio = { if (playing) currentRatio else null }
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        // Leaving the app: keep the sound (Play in background) or pause; coming back shows the picture
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_STOP -> if (activity?.isInPictureInPictureMode != true) vm.onAppHidden()
-                Lifecycle.Event.ON_START -> vm.onAppShown()
-                else -> {}
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
             activity?.pictureInPictureRatio = null
             activity?.updatePictureInPicture(null, playing = false)
             activity?.window?.let { window ->
@@ -258,6 +253,7 @@ fun VideoScreen(vm: VideoViewModel, api: TeleStoreApi, onBack: () -> Unit, onDow
                         player = vm.player
                     }
                 },
+                onRelease = { it.player = null },
                 update = {
                     it.player = vm.player
                     it.resizeMode = when (state.zoom) {
@@ -271,8 +267,10 @@ fun VideoScreen(vm: VideoViewModel, api: TeleStoreApi, onBack: () -> Unit, onDow
             if (!inPip) {
                 GestureLayer(
                     enabled = !locked,
+                    pull = if (immersive) null else pull,
                     onTap = { controlsVisible = !controlsVisible; touchTick++ },
                     onDoubleTap = { forward ->
+                        haptics.tick()
                         vm.seekBy(if (forward) 10_000 else -10_000)
                         hint = GestureHint.Skip(forward)
                     },
@@ -288,7 +286,7 @@ fun VideoScreen(vm: VideoViewModel, api: TeleStoreApi, onBack: () -> Unit, onDow
                 if (locked) {
                     AnimatedVisibility(visible = controlsVisible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.CenterStart)) {
                         IconButton(
-                            onClick = { locked = false; touchTick++ },
+                            onClick = { haptics.click(); locked = false; touchTick++ },
                             modifier = Modifier.padding(24.dp).size(52.dp).background(Color(0x99000000), CircleShape),
                         ) { Icon(Icons.Filled.LockOpen, contentDescription = "Unlock", tint = Color.White) }
                     }
@@ -298,13 +296,13 @@ fun VideoScreen(vm: VideoViewModel, api: TeleStoreApi, onBack: () -> Unit, onDow
                             FullscreenControls(
                                 state = state,
                                 onBack = { if (fullscreen) toggleFullscreen() else onBack() },
-                                onTogglePlay = { vm.togglePlay(); touchTick++ },
+                                onTogglePlay = { haptics.click(); vm.togglePlay(); touchTick++ },
                                 onSeek = { vm.seekTo(it); touchTick++ },
                                 onScrub = { touchTick++ },
                                 onPrevious = { vm.previous(); touchTick++ },
                                 onNext = { vm.next(); touchTick++ },
                                 onSheet = { sheet = it },
-                                onLock = { locked = true; controlsVisible = true; touchTick++ },
+                                onLock = { haptics.click(); locked = true; controlsVisible = true; touchTick++ },
                                 onZoom = { vm.setZoom(Zoom.entries[(state.zoom.ordinal + 1) % Zoom.entries.size]); touchTick++ },
                                 onRotate = {
                                     activity?.requestedOrientation = if (LocalOrientation.isLandscape(activity)) {
@@ -321,7 +319,7 @@ fun VideoScreen(vm: VideoViewModel, api: TeleStoreApi, onBack: () -> Unit, onDow
                             PortraitControls(
                                 state = state,
                                 onMinimize = onBack,
-                                onTogglePlay = { vm.togglePlay(); touchTick++ },
+                                onTogglePlay = { haptics.click(); vm.togglePlay(); touchTick++ },
                                 onPrevious = { vm.previous(); touchTick++ },
                                 onNext = { vm.next(); touchTick++ },
                                 onBackgroundPlay = { vm.setBackgroundPlay(!state.backgroundPlay); touchTick++ },
@@ -342,7 +340,7 @@ fun VideoScreen(vm: VideoViewModel, api: TeleStoreApi, onBack: () -> Unit, onDow
     if (immersive) {
         video(Modifier.fillMaxSize())
     } else {
-        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Column(Modifier.fillMaxSize().pullDownOffset(pull).background(MaterialTheme.colorScheme.background)) {
             Spacer(Modifier.fillMaxWidth().background(Color.Black).statusBarsPadding())
             val boxRatio = ratio.toFloat().coerceIn(1f, 2.4f)
             video(Modifier.fillMaxWidth().aspectRatio(boxRatio))
@@ -375,7 +373,14 @@ private object LocalOrientation {
 
 /** Tap: show/hide controls. Double-tap a side: skip 10 s. Swipe up/down: brightness (left), volume (right). */
 @Composable
-private fun GestureLayer(enabled: Boolean, onTap: () -> Unit, onDoubleTap: (forward: Boolean) -> Unit, onHint: (GestureHint) -> Unit) {
+private fun GestureLayer(
+    enabled: Boolean,
+    /** Set in portrait: a vertical swipe pulls the video down to minimize it instead. */
+    pull: PullDownState?,
+    onTap: () -> Unit,
+    onDoubleTap: (forward: Boolean) -> Unit,
+    onHint: (GestureHint) -> Unit,
+) {
     val context = LocalContext.current
     val activity = context.findActivity()
     val audio = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
@@ -395,7 +400,7 @@ private fun GestureLayer(enabled: Boolean, onTap: () -> Unit, onDoubleTap: (forw
                     onDoubleTap = { if (active) doubleTap(it.x > size.width / 2) else tap() },
                 )
             }
-            .pointerInput(Unit) {
+            .then(if (pull != null) Modifier.pullDownToClose(pull, enabled) else Modifier.pointerInput(Unit) {
                 detectVerticalDragGestures(
                     onDragStart = { start ->
                         leftSide = start.x < size.width / 2
@@ -416,7 +421,7 @@ private fun GestureLayer(enabled: Boolean, onTap: () -> Unit, onDoubleTap: (forw
                         }
                     },
                 )
-            },
+            }),
     )
 }
 
@@ -708,7 +713,7 @@ private fun SettingsSheet(page: SheetPage, state: VideoState, vm: VideoViewModel
                 SheetRow(Icons.Filled.Tune, "Additional settings", "Zoom, volume boost") { onPage(SheetPage.MORE) }
             }
             SheetPage.QUALITY -> Choices("Quality", state.qualities.map { (if (it == Quality.ORIGINAL) "Original (the file itself)" else it.label) to (it == state.quality) }) {
-                vm.setQuality(state.qualities[it]); onClose()
+                state.qualities.getOrNull(it)?.let(vm::setQuality); onClose()
             }
             SheetPage.CAPTIONS -> if (state.subtitles.isEmpty()) {
                 Text(
@@ -716,9 +721,9 @@ private fun SettingsSheet(page: SheetPage, state: VideoState, vm: VideoViewModel
                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(20.dp),
                 )
             } else {
-                Choices("Captions", state.subtitles.map { it.label to it.selected }) { vm.selectSubtitle(state.subtitles[it].index); onClose() }
+                Choices("Captions", state.subtitles.map { it.label to it.selected }) { state.subtitles.getOrNull(it)?.let { t -> vm.selectSubtitle(t.index) }; onClose() }
             }
-            SheetPage.AUDIO -> Choices("Audio track", state.audio.map { it.label to it.selected }) { vm.selectAudio(state.audio[it].index); onClose() }
+            SheetPage.AUDIO -> Choices("Audio track", state.audio.map { it.label to it.selected }) { state.audio.getOrNull(it)?.let { t -> vm.selectAudio(t.index) }; onClose() }
             SheetPage.SPEED -> Choices("Playback speed", SPEEDS.map { (if (it == 1f) "Normal" else "${it}×") to (it == state.speed) }) { vm.setSpeed(SPEEDS[it]); onClose() }
             SheetPage.SLEEP -> Choices("Sleep timer", SLEEP_CHOICES.map { (minutes, label) ->
                 label to (if (minutes == 0) state.sleepLabel == null else state.sleepLabel == if (minutes == -1) "End of video" else "$minutes min")

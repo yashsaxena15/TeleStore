@@ -101,6 +101,12 @@ import coil3.toBitmap
 import com.backendforge.telestore.core.ApiException
 import com.backendforge.telestore.core.Lyrics
 import com.backendforge.telestore.data.AppContainer
+import com.backendforge.telestore.ui.components.miniPlayerSwipes
+import com.backendforge.telestore.ui.components.pullDownOffset
+import com.backendforge.telestore.ui.components.pullDownToClose
+import com.backendforge.telestore.ui.components.rememberHaptics
+import com.backendforge.telestore.ui.components.rememberPullDownState
+import com.backendforge.telestore.ui.components.swipeSideways
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -113,12 +119,15 @@ private val lyricsCache = mutableMapOf<String, Lyrics?>()
 /** A small bar above the tabs while music plays: tap it to open Now Playing. */
 @Composable
 fun MiniPlayer(state: MusicState, controller: MusicController, onOpen: () -> Unit) {
+    val haptics = rememberHaptics()
     Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, tonalElevation = 2.dp) {
         Column {
             val progress = if (state.durationMs > 0) (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f) else 0f
             LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(2.dp))
             Row(
-                Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                Modifier.fillMaxWidth()
+                    .miniPlayerSwipes(onNext = controller::next, onPrevious = controller::previous, onOpen = onOpen)
+                    .clickable(onClick = onOpen).padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Artwork(state.artworkUri, size = 40.dp)
@@ -126,7 +135,7 @@ fun MiniPlayer(state: MusicState, controller: MusicController, onOpen: () -> Uni
                     Text(state.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                     Text(state.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                IconButton(onClick = controller::togglePlay) {
+                IconButton(onClick = { haptics.click(); controller.togglePlay() }) {
                     Icon(if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = if (state.isPlaying) "Pause" else "Play")
                 }
                 IconButton(onClick = controller::next, enabled = state.index < state.queue.lastIndex) {
@@ -154,6 +163,9 @@ fun NowPlayingScreen(state: MusicState, controller: MusicController, container: 
     var sheet by remember { mutableStateOf<MusicSheet?>(null) }
     var scrubbing by remember { mutableStateOf<Float?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
+    val haptics = rememberHaptics()
+    // Pull down anywhere (outside the lyrics and sliders) to go back to the mini player
+    val pull = rememberPullDownState(onClose)
 
     // Lyrics for the song playing (looked up once per song)
     val item = state.item
@@ -176,7 +188,7 @@ fun NowPlayingScreen(state: MusicState, controller: MusicController, container: 
         lyricsLoading = false
     }
 
-    Box(Modifier.fillMaxSize().background(ground)) {
+    Box(Modifier.fillMaxSize().background(ground).pullDownToClose(pull).pullDownOffset(pull)) {
         if (!state.hasMedia) {
             Text("Nothing is playing.", color = muted, modifier = Modifier.align(Alignment.Center))
             return@Box
@@ -200,6 +212,7 @@ fun NowPlayingScreen(state: MusicState, controller: MusicController, container: 
             ) {
                 Box(
                     Modifier.widthIn(max = 420.dp).fillMaxWidth().aspectRatio(1f, matchHeightConstraintsFirst = true)
+                        .swipeSideways(onNext = controller::next, onPrevious = controller::previous)
                         .scale(artScale).shadow(24.dp, RoundedCornerShape(10.dp)).clip(RoundedCornerShape(10.dp)),
                 ) { Artwork(state.artworkUri, size = null) }
             }
@@ -254,12 +267,12 @@ fun NowPlayingScreen(state: MusicState, controller: MusicController, container: 
                     IconButton(onClick = controller::toggleShuffle) {
                         Icon(Icons.Filled.Shuffle, contentDescription = if (state.shuffle) "Shuffle on" else "Shuffle off", tint = if (state.shuffle) onGround else muted.copy(alpha = 0.5f))
                     }
-                    IconButton(onClick = controller::previous, modifier = Modifier.size(56.dp)) { Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous", tint = onGround, modifier = Modifier.size(34.dp)) }
-                    IconButton(onClick = controller::togglePlay, modifier = Modifier.size(76.dp).background(onGround, CircleShape)) {
+                    IconButton(onClick = { haptics.click(); controller.previous() }, modifier = Modifier.size(56.dp)) { Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous", tint = onGround, modifier = Modifier.size(34.dp)) }
+                    IconButton(onClick = { haptics.click(); controller.togglePlay() }, modifier = Modifier.size(76.dp).background(onGround, CircleShape)) {
                         if (state.buffering) CircularProgressIndicator(Modifier.size(30.dp), color = ground, strokeWidth = 3.dp)
                         else Icon(if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = if (state.isPlaying) "Pause" else "Play", tint = ground, modifier = Modifier.size(38.dp))
                     }
-                    IconButton(onClick = controller::next, modifier = Modifier.size(56.dp)) { Icon(Icons.Filled.SkipNext, contentDescription = "Next", tint = onGround, modifier = Modifier.size(34.dp)) }
+                    IconButton(onClick = { haptics.click(); controller.next() }, modifier = Modifier.size(56.dp)) { Icon(Icons.Filled.SkipNext, contentDescription = "Next", tint = onGround, modifier = Modifier.size(34.dp)) }
                     IconButton(onClick = controller::cycleRepeat) {
                         val (icon, label) = when (state.repeatMode) {
                             Player.REPEAT_MODE_ONE -> Icons.Filled.RepeatOne to "Repeat this song"

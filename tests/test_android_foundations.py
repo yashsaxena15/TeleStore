@@ -279,3 +279,24 @@ class TestDriveConnectState:
             res = client.get("/cloud/gdrive/callback", params={"code": "c", "state": forged})
         assert res.status_code == 400
         exchange.assert_not_called()
+
+
+class TestAppCrashReports:
+    def test_reports_are_logged_for_signed_in_users(self, client):
+        app.dependency_overrides[require_auth] = lambda: User(username="bob", telegram_user_id=42)
+        try:
+            with patch("telestore.api.routes.system.logger") as log:
+                res = client.post("/system/app-crash", json={"report": "java.lang.IllegalStateException: boom", "version": "1.0.48", "device": "Pixel 8"})
+            assert res.status_code == 200
+            text = log.warning.call_args.args[0]
+            assert "[APP_CRASH] user=bob version=1.0.48" in text and "boom" in text
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_needs_sign_in_and_a_sane_size(self, client):
+        assert client.post("/system/app-crash", json={"report": "x"}).status_code == 401
+        app.dependency_overrides[require_auth] = lambda: User(username="bob", telegram_user_id=42)
+        try:
+            assert client.post("/system/app-crash", json={"report": "x" * 20001}).status_code == 422
+        finally:
+            app.dependency_overrides.clear()

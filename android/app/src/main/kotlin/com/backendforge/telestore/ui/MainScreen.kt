@@ -1,6 +1,13 @@
 package com.backendforge.telestore.ui
 
 import android.net.Uri
+import com.backendforge.telestore.data.CrashReporter
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.backendforge.telestore.player.VideoHost
+import com.backendforge.telestore.player.VideoMiniPlayer
 import com.backendforge.telestore.core.CloudAccount
 import com.backendforge.telestore.ui.drive.CopyToDriveSheet
 import com.backendforge.telestore.ui.drive.DriveAccountsScreen
@@ -60,7 +67,7 @@ import com.backendforge.telestore.photos.PhotoViewerScreen
 import com.backendforge.telestore.player.MiniPlayer
 import com.backendforge.telestore.player.NowPlayingScreen
 import com.backendforge.telestore.player.VideoScreen
-import com.backendforge.telestore.player.VideoViewModel
+import com.backendforge.telestore.player.findActivity
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.fillMaxSize
@@ -142,14 +149,37 @@ fun MainScreen(
 
     val context = LocalContext.current
 
+    // The video player outlives its screen: pulled down, it keeps playing in a mini player
+    val videos = remember { VideoHost(container) }
+    val video by videos.player.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        // Leaving the app: keep the sound (Play in background) or pause; coming back shows the picture
+        val observer = LifecycleEventObserver { _, event ->
+            val player = videos.player.value ?: return@LifecycleEventObserver
+            when (event) {
+                Lifecycle.Event.ON_STOP -> if (context.findActivity()?.isInPictureInPictureMode != true) player.onAppHidden()
+                Lifecycle.Event.ON_START -> player.onAppShown()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            videos.close()
+        }
+    }
+
+    fun openVideo(queue: List<FileItem>, index: Int) {
+        videos.open(queue, index)
+        if (currentRoute != ROUTE_VIDEO) navController.navigate(ROUTE_VIDEO)
+    }
+
     /** Opens a video, song or photo with the folder's others queued after it. False: no viewer. */
     fun openFile(item: FileItem, siblings: List<FileItem>): Boolean {
         val (queue, index) = PlayQueue.around(siblings, item)
         when (item.kind) {
-            FileKind.VIDEO -> {
-                container.playback.openVideos(queue, index)
-                navController.navigate(ROUTE_VIDEO)
-            }
+            FileKind.VIDEO -> openVideo(queue, index)
             FileKind.AUDIO -> {
                 music.play(container.api(), queue, index) { container.transfers.store.offlineCopy(context, it.id) }
                 navController.navigate(ROUTE_NOW_PLAYING)
@@ -271,6 +301,13 @@ fun MainScreen(
 
     val wide = LocalConfiguration.current.screenWidthDp >= 600
 
+    // The app closed unexpectedly last time: send the details to the server so it can be fixed
+    LaunchedEffect(Unit) {
+        val report = CrashReporter.takePending(context) ?: return@LaunchedEffect
+        val sent = runCatching { container.api().reportCrash(report, AppVersion.of(context).name, CrashReporter.device()) }.isSuccess
+        transferMessage = if (sent) "TeleStore closed unexpectedly last time. The details were sent so it can be fixed." else null
+    }
+
     // Once a day, look for a newer APK on GitHub and offer it
     var update by remember { mutableStateOf<AppRelease?>(null) }
     LaunchedEffect(Unit) {
@@ -338,6 +375,7 @@ fun MainScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             if (!isPlayer) Column {
+                video?.let { vm -> VideoMiniPlayer(vm, onOpen = { navController.navigate(ROUTE_VIDEO) { launchSingleTop = true } }, onClose = videos::close) }
                 if (musicState.hasMedia) MiniPlayer(musicState, music, onOpen = { navController.navigate(ROUTE_NOW_PLAYING) })
                 if (!isSearch && !wide) NavigationBar {
                     MainTab.entries.forEach { tab ->
@@ -393,10 +431,7 @@ fun MainScreen(
                             },
                             onOpenFolder = { navigateToFolder("home", it) },
                             onOpenFile = ::openFile,
-                            onResume = { entry ->
-                                container.playback.openVideos(listOf(entry.asFile()), 0)
-                                navController.navigate(ROUTE_VIDEO)
-                            },
+                            onResume = { entry -> openVideo(listOf(entry.asFile()), 0) },
                             onUpload = ::upload,
                             onAddLink = { navController.navigate("add_link") },
                             onCreateFolder = { name ->
@@ -572,8 +607,12 @@ fun MainScreen(
                 }
 
                 composable(ROUTE_VIDEO) {
-                    val vm: VideoViewModel = viewModel { VideoViewModel(container) }
-                    VideoScreen(vm, api = container.api(), onBack = { navController.popBackStack() }, onDownload = ::download)
+                    val vm = video
+                    if (vm == null) {
+                        LaunchedEffect(Unit) { navController.popBackStack() }
+                    } else {
+                        VideoScreen(vm, api = container.api(), onBack = { navController.popBackStack() }, onDownload = ::download)
+                    }
                 }
 
                 composable(ROUTE_PHOTOS) {

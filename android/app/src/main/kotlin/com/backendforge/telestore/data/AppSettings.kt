@@ -31,6 +31,11 @@ class AppSettings(context: Context) {
         get() = prefs.getBoolean(KEY_ONLINE_LYRICS, true)
         set(value) = prefs.edit().putBoolean(KEY_ONLINE_LYRICS, value).apply()
 
+    /** Vibration on long-press, swipes and PIN keys. */
+    var haptics: Boolean
+        get() = prefs.getBoolean(KEY_HAPTICS, true)
+        set(value) = prefs.edit().putBoolean(KEY_HAPTICS, value).apply()
+
     /** When the app last looked for an update (it checks at most once a day by itself). */
     var lastUpdateCheck: Long
         get() = prefs.getLong(KEY_UPDATE_CHECK, 0)
@@ -41,5 +46,6 @@ class AppSettings(context: Context) {
         const val KEY_UPDATE_CHECK = "last_update_check"
         const val KEY_BG_PLAY = "video_background_play"
         const val KEY_ONLINE_LYRICS = "online_lyrics"
+        const val KEY_HAPTICS = "haptics"
     }
 }

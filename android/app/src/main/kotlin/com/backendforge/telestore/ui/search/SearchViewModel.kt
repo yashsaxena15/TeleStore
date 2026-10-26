@@ -80,7 +80,7 @@ class SearchViewModel(
                     pageSize = 50,
                 )
                 _state.update {
-                    val combined = if (isMore) it.results + res.files else res.files
+                    val combined = (if (isMore) it.results + res.files else res.files).distinctBy { f -> f.id }
                     it.copy(
                         results = combined,
                         page = page,

@@ -42,6 +42,7 @@ fun FileRow(
     /** A downloaded copy is on this phone. */
     offline: Boolean = false,
 ) {
+    val haptics = rememberHaptics()
     val dateStr = DateFormatter.formatShort(item.modified)
     val detailsText = when {
         item.isFolder -> dateStr
@@ -56,7 +57,7 @@ fun FileRow(
             .fillMaxWidth()
             .combinedClickable(
                 onClick = { if (isSelectionMode) onToggleSelect() else onClick() },
-                onLongClick = onLongClick,
+                onLongClick = { haptics.longPress(); onLongClick() },
             )
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
