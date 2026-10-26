@@ -51,6 +51,11 @@ class AppContainer(val context: Context) {
         }
     }
 
+    /** Locks the Private Vault on the server (the app was left); never throws. */
+    fun lockVaultInBackground() {
+        scope.launch { runCatching { api().vaultLock() } }
+    }
+
     /** The music controller, marking that it exists (see the sign-out rule above). */
     fun startMusic(): MusicController = music.also { musicStarted = true }
 

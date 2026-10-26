@@ -226,3 +226,29 @@ class TestPhotosTimeline:
         pipeline = agg.call_args.args[0]
         assert {"$addFields": {"sort_date": {"$ifNull": ["$taken_at", "$modified_date"]}}} in pipeline
         assert {"$sort": {"sort_date": -1}} in pipeline
+
+
+class TestVaultListing:
+    def test_locked_vault_is_not_listed(self, client):
+        app.dependency_overrides[require_auth] = lambda: User(username="bob", telegram_user_id=42)
+        try:
+            with patch.object(database.Files, "get_files_by_path", return_value=([], 0)) as listing:
+                for path in ("/Vault", "vault", "/Vault/Private stuff"):
+                    res = client.get("/files", params={"path": path})
+                    assert res.status_code == 403, path
+                    assert "locked" in res.json()["detail"]
+                assert listing.call_count == 0
+                # A folder that merely starts with "Vault" in Home is not the vault
+                res = client.get("/files", params={"path": "/Home/Vaults of gold", "page": 1, "page_size": 10})
+                assert res.status_code == 200
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_unlocked_vault_is_listed(self, client):
+        app.dependency_overrides[require_auth] = lambda: User(username="bob", telegram_user_id=42)
+        try:
+            with patch("telestore.api.routes.vault.is_vault_unlocked", return_value=True), \
+                    patch.object(database.Files, "get_files_by_path", return_value=[]):
+                assert client.get("/files", params={"path": "/Vault"}).status_code == 200
+        finally:
+            app.dependency_overrides.clear()

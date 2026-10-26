@@ -306,6 +306,22 @@ class FolderViewModel(
         }
     }
 
+    /** Needs the vault unlocked (More → Private Vault); the server says so otherwise. */
+    fun moveToVault(item: FileItem) {
+        viewModelScope.launch {
+            try {
+                api.moveIntoVault(item)
+                _state.update { it.copy(snackbarMessage = "Moved to the Private Vault") }
+                refresh()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val locked = (e as? ApiException)?.status == 403
+                _state.update { it.copy(snackbarMessage = if (locked) "Open the Private Vault with your PIN first (More → Private Vault)." else (e as? ApiException)?.message ?: "Couldn't move it.") }
+            }
+        }
+    }
+
     fun emptyTrash() {
         viewModelScope.launch {
             try {

@@ -40,6 +40,8 @@ class TeleStoreApi(
 ) {
     /** Shared with image loading and the player so they use the same connections and token. */
     val http: OkHttpClient = client.newBuilder()
+        // The server's session cookie: it holds "vault unlocked". Kept in memory only, so closing the app locks the vault.
+        .cookieJar(MemoryCookieJar())
         .addInterceptor { chain ->
             val request = chain.request()
             val t = token()
@@ -101,6 +103,45 @@ class TeleStoreApi(
             .apply { (if (mediaOnly) "media" else kind?.wire)?.let { addQueryParameter("kind", it) } }
             .build()
     )
+
+    // ── Private Vault ───────────────────────────────────────────────────────────
+    suspend fun vaultStatus(): VaultStatus = get(url("vault/status"))
+    suspend fun vaultSetupCode(email: String): MessageReply = post(url("vault/setup/request-otp"), buildJsonObject { put("email", email.trim()) })
+    suspend fun vaultCheckCode(code: String, email: String): MessageReply = post(url("vault/verify-otp"), buildJsonObject {
+        put("otp_code", code.trim())
+        put("purpose", "Private Vault Setup")
+        put("email", email.trim())
+    })
+    suspend fun vaultCreate(email: String, code: String, pin: String): MessageReply = post(url("vault/setup/verify-and-create"), buildJsonObject {
+        put("email", email.trim())
+        put("otp_code", code.trim())
+        put("pin", pin)
+    })
+    suspend fun vaultUnlock(pin: String): MessageReply = post(url("vault/unlock"), buildJsonObject { put("pin", pin) })
+    suspend fun vaultLock(): MessageReply = post(url("vault/lock"), buildJsonObject { })
+    suspend fun vaultForgotCode(): MessageReply = post(url("vault/forgot-pin/request-otp"), buildJsonObject { })
+    suspend fun vaultResetPin(code: String, newPin: String): MessageReply = post(url("vault/forgot-pin/reset"), buildJsonObject {
+        put("otp_code", code.trim())
+        put("new_pin", newPin)
+    })
+    suspend fun vaultChangePin(current: String, newPin: String): MessageReply = post(url("vault/change-pin"), buildJsonObject {
+        put("current_pin", current)
+        put("new_pin", newPin)
+    })
+    suspend fun vaultAutoLock(minutes: Int): MessageReply =
+        call(Request.Builder().url(url("vault/settings")).put(buildJsonObject { put("auto_lock_minutes", minutes) }.toString().toRequestBody(JSON)).build())
+    suspend fun moveIntoVault(item: FileItem, folder: String = VAULT): MessageReply = post(url("vault/move-in"), buildJsonObject {
+        put("file_id", item.id)
+        put("target_path", folder)
+    })
+    suspend fun moveOutOfVault(item: FileItem, folder: String = HOME): MessageReply = post(url("vault/move-out"), buildJsonObject {
+        put("file_id", item.id)
+        put("target_path", folder)
+    })
+    suspend fun createVaultFolder(name: String, parent: String = VAULT): MessageReply = post(url("vault/create-folder"), buildJsonObject {
+        put("folder_name", name.trim())
+        put("current_path", parent)
+    })
 
     // ── Account ─────────────────────────────────────────────────────────────────
     /** How much the account stores, out of its quota. */
@@ -299,6 +340,7 @@ class TeleStoreApi(
         const val TOKEN_HEADER = "X-Auth-Token"
         const val DEVICE = "android"
         const val HOME = "/Home"
+        const val VAULT = "/Vault"
         private val JSON = "application/json".toMediaType()
         private val OCTET = "application/octet-stream".toMediaType()
         private val EMPTY_JSON = "{}".toRequestBody(JSON)
