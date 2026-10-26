@@ -39,12 +39,15 @@ fun FileRow(
     onLongClick: () -> Unit,
     onOpenActions: () -> Unit,
     modifier: Modifier = Modifier,
+    /** A downloaded copy is on this phone. */
+    offline: Boolean = false,
 ) {
     val dateStr = DateFormatter.formatShort(item.modified)
     val detailsText = when {
         item.isFolder -> dateStr
         dateStr.isNotEmpty() -> "${formatBytes(item.size)} • $dateStr"
         else -> formatBytes(item.size)
+    }.let { if (offline) "$it • Offline" else it
     }
 
     Row(

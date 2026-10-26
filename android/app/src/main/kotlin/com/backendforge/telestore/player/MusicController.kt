@@ -85,9 +85,9 @@ class MusicController(private val context: Context) {
     }
 
     /** Plays [items] (songs of one folder) starting at [index]. */
-    fun play(api: TeleStoreApi, items: List<FileItem>, index: Int) {
+    fun play(api: TeleStoreApi, items: List<FileItem>, index: Int, localCopy: (FileItem) -> Uri? = { null }) {
         val mediaItems = items.map { item ->
-            val uri = Uri.parse(api.media.file(item).toString())
+            val uri = localCopy(item) ?: Uri.parse(api.media.file(item).toString())
             val folder = item.path.trimEnd('/').substringAfterLast('/').ifEmpty { "TeleStore" }
             MediaItem.Builder()
                 .setMediaId(item.id)

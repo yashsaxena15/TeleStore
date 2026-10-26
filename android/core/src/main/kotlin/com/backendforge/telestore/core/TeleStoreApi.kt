@@ -13,6 +13,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -98,6 +99,46 @@ class TeleStoreApi(
     // ── Playback ────────────────────────────────────────────────────────────────
     /** Size, length, audio tracks and subtitles of a video (the server probes it once, then caches it). */
     suspend fun mediaInfo(item: FileItem): MediaInfo = get(media.info(item))
+
+    // ── Uploads (the website's chunked protocol) ────────────────────────────────
+    /** Starts an upload, or continues [resumeId] when the server still has it. */
+    suspend fun uploadInit(name: String, size: Long, folder: String, resumeId: String? = null): UploadSession =
+        post(url("files/upload/init"), buildJsonObject {
+            put("filename", name)
+            put("filesize", size)
+            put("path", folder)
+            resumeId?.let { put("resume_upload_id", it) }
+        })
+
+    /** One chunk as the raw body; a chunk sent twice is simply written again in place. */
+    suspend fun uploadChunk(uploadId: String, index: Int, bytes: ByteArray, length: Int = bytes.size) {
+        val body = bytes.toRequestBody(OCTET, 0, length)
+        val request = Request.Builder().url(url("files/upload/chunk/$uploadId/$index")).put(body).build()
+        withContext(io) { execute(request).close() }
+    }
+
+    suspend fun uploadComplete(uploadId: String): UploadStatus =
+        call(Request.Builder().url(url("files/upload/complete")).post(FormBody.Builder().add("upload_id", uploadId).build()).build())
+
+    suspend fun uploadStatus(uploadId: String): UploadStatus = get(url("files/upload/status/$uploadId"))
+
+    /** Drops the server's half-uploaded copy; never throws. */
+    suspend fun uploadAbort(uploadId: String) {
+        runCatching { post<MessageReply>(url("files/upload/abort"), buildJsonObject { put("upload_id", uploadId) }) }
+    }
+
+    // ── Folder downloads and server transfers ──────────────────────────────────
+    /** A folder is downloaded as one or more ZIP files of up to 2 GB each. */
+    suspend fun folderDownloadInfo(folderPath: String): FolderDownloadInfo =
+        get(url("folders/download-info").newBuilder().addQueryParameter("path", folderPath).build())
+
+    /** The server's own transfers (cloud leech, Google Drive, video links). */
+    suspend fun remoteTasks(): RemoteTaskList = get(url("transfers/remote/tasks"))
+    suspend fun cancelRemote(taskId: String): MessageReply = post(url("transfers/remote/cancel"), buildJsonObject { put("task_id", taskId) })
+    suspend fun retryRemote(taskId: String): MessageReply = post(url("transfers/remote/retry"), buildJsonObject { put("task_id", taskId) })
+    suspend fun cancelRemoteGroup(groupId: String): MessageReply = post(url("transfers/remote/cancel-group"), buildJsonObject { put("group_id", groupId) })
+    suspend fun resumeRemoteGroup(groupId: String): MessageReply = post(url("transfers/remote/resume-group"), buildJsonObject { put("group_id", groupId) })
+    suspend fun clearFinishedRemote(): MessageReply = post(url("transfers/remote/clear-completed"), buildJsonObject { })
 
     // ── Folder & File Actions ───────────────────────────────────────────────────
     suspend fun createFolder(name: String, parentPath: String = HOME): MessageReply =
@@ -186,6 +227,10 @@ class TeleStoreApi(
             onUnauthorized()
             throw UnauthorizedException(message ?: "Please sign in again.")
         }
+        if (response.code == 429) {
+            val wait = response.header("Retry-After")?.toLongOrNull() ?: 3
+            throw RetryLaterException(wait.coerceIn(1, 60), message ?: "The server is busy. Trying again shortly.")
+        }
         throw ApiException(response.code, message ?: "The server answered with an error (${response.code}).")
     }
 
@@ -194,6 +239,7 @@ class TeleStoreApi(
         const val DEVICE = "android"
         const val HOME = "/Home"
         private val JSON = "application/json".toMediaType()
+        private val OCTET = "application/octet-stream".toMediaType()
         private val EMPTY_JSON = "{}".toRequestBody(JSON)
         val json = Json { ignoreUnknownKeys = true; explicitNulls = false; coerceInputValues = true }
 
