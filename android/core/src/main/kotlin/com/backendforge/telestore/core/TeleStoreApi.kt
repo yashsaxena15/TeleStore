@@ -45,7 +45,9 @@ class TeleStoreApi(
         .addInterceptor { chain ->
             val request = chain.request()
             val t = token()
-            chain.proceed(if (t != null && request.header(TOKEN_HEADER) == null) request.newBuilder().header(TOKEN_HEADER, t).build() else request)
+            // Only to our own server: thumbnails from Google Drive etc. use this client too
+            val ours = request.url.host == baseUrl.host && request.url.port == baseUrl.port
+            chain.proceed(if (t != null && ours && request.header(TOKEN_HEADER) == null) request.newBuilder().header(TOKEN_HEADER, t).build() else request)
         }
         .build()
 
@@ -142,6 +144,63 @@ class TeleStoreApi(
         put("folder_name", name.trim())
         put("current_path", parent)
     })
+
+    // ── Google Drive ────────────────────────────────────────────────────────────
+    suspend fun cloudAccounts(): CloudAccounts = get(url("cloud/accounts"))
+
+    /** The Google page that lets TeleStore use a Drive account (opened in the browser). */
+    suspend fun driveConnectUrl(): DriveAuthUrl = post(url("cloud/gdrive/auth-url"), buildJsonObject { })
+
+    suspend fun disconnectCloud(accountId: String) {
+        withContext(io) { execute(Request.Builder().url(url("cloud/accounts").newBuilder().addPathSegment(accountId).build()).delete().build()).close() }
+    }
+
+    suspend fun driveFiles(accountId: String, folderId: String = "root", pageToken: String? = null, query: String? = null): DriveList =
+        get(
+            url("cloud").newBuilder().addPathSegment(accountId).addPathSegment("files")
+                .addQueryParameter("folder_id", folderId)
+                .addQueryParameter("page_size", "100")
+                .apply { pageToken?.let { addQueryParameter("page_token", it) } }
+                .apply { query?.trim()?.takeIf { it.isNotEmpty() }?.let { addQueryParameter("query", it) } }
+                .build(),
+        )
+
+    suspend fun driveQuota(accountId: String): DriveQuota = get(url("cloud").newBuilder().addPathSegment(accountId).addPathSegment("storage").build())
+
+    /** A Drive file or folder into TeleStore ("copy", or "cut" to remove it from Drive). */
+    suspend fun driveToTelestore(accountId: String, fileId: String, folder: String, cut: Boolean = false): AddReply =
+        post(cloudUrl(accountId, "transfer-to-telegram"), buildJsonObject {
+            put("source_file_id", fileId)
+            put("destination_path", folder)
+            put("operation", if (cut) "cut" else "copy")
+        })
+
+    /** TeleStore files and folders into a Drive folder. */
+    suspend fun telestoreToDrive(accountId: String, items: List<FileItem>, driveFolderId: String): AddReply =
+        post(cloudUrl(accountId, "transfer-from-telegram"), buildJsonObject {
+            put("source_file_ids", JsonArray(items.filterNot { it.isFolder }.map { JsonPrimitive(it.id) }))
+            put("source_folder_paths", JsonArray(items.filter { it.isFolder }.map { JsonPrimitive(FolderPaths.childPath(it)) }))
+            put("target_folder_id", driveFolderId)
+            put("operation", "copy")
+        })
+
+    suspend fun driveMkdir(accountId: String, name: String, parentId: String): MessageReply =
+        post(cloudUrl(accountId, "files/mkdir"), buildJsonObject { put("folder_name", name.trim()); put("parent_id", parentId) })
+
+    suspend fun driveRename(accountId: String, fileId: String, name: String): MessageReply =
+        post(cloudUrl(accountId, "files/rename"), buildJsonObject { put("file_id", fileId); put("new_name", name.trim()) })
+
+    /** To Drive's own trash (or gone for good with [permanent]). */
+    suspend fun driveDelete(accountId: String, fileId: String, permanent: Boolean = false): MessageReply =
+        post(cloudUrl(accountId, "files/delete"), buildJsonObject { put("file_id", fileId); put("permanent", permanent) })
+
+    suspend fun driveStar(accountId: String, fileId: String, starred: Boolean): MessageReply =
+        post(cloudUrl(accountId, "files/star"), buildJsonObject { put("file_id", fileId); put("starred", starred) })
+
+    /** Where a Drive file can be downloaded through this server (the phone never talks to Google). */
+    fun driveDownloadPath(accountId: String, fileId: String): String = "/cloud/$accountId/download/$fileId"
+
+    private fun cloudUrl(accountId: String, path: String) = url("cloud").newBuilder().addPathSegment(accountId).addPathSegments(path).build()
 
     // ── Account ─────────────────────────────────────────────────────────────────
     /** How much the account stores, out of its quota. */

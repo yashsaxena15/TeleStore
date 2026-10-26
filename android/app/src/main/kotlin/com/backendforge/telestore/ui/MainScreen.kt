@@ -1,6 +1,11 @@
 package com.backendforge.telestore.ui
 
 import android.net.Uri
+import com.backendforge.telestore.core.CloudAccount
+import com.backendforge.telestore.ui.drive.CopyToDriveSheet
+import com.backendforge.telestore.ui.drive.DriveAccountsScreen
+import com.backendforge.telestore.ui.drive.DriveBrowserScreen
+import com.backendforge.telestore.ui.drive.WebDavScreen
 import com.backendforge.telestore.ui.vault.VaultScreen
 import com.backendforge.telestore.ui.vault.VaultViewModel
 import com.backendforge.telestore.ui.links.AddLinkScreen
@@ -291,6 +296,12 @@ fun MainScreen(
     }
     val snackbar = remember { SnackbarHostState() }
 
+    // "Copy to Google Drive" from a file's menu
+    var copyToDrive by remember { mutableStateOf<List<FileItem>?>(null) }
+    copyToDrive?.let { files ->
+        CopyToDriveSheet(container, files, onDone = { copyToDrive = null; transferMessage = it }, onDismiss = { copyToDrive = null })
+    }
+
     // A link shared into TeleStore from another app opens "Add from link"
     val sharedLink by container.pendingLink.collectAsStateWithLifecycle()
     LaunchedEffect(sharedLink) {
@@ -419,6 +430,7 @@ fun MainScreen(
                             onUpload = ::upload,
                             onDownload = ::download,
                             offlineIds = offlineIds,
+                            onCopyToDrive = { copyToDrive = listOf(it) },
                         )
                     }
                     composable("home_kind/{kind}", arguments = listOf(navArgument("kind") { type = NavType.StringType })) { backStackEntry ->
@@ -459,6 +471,7 @@ fun MainScreen(
                             onUpload = ::upload,
                             onDownload = ::download,
                             offlineIds = offlineIds,
+                            onCopyToDrive = { copyToDrive = listOf(it) },
                         )
                     }
                 }
@@ -480,6 +493,7 @@ fun MainScreen(
                             onUpload = ::upload,
                             onDownload = ::download,
                             offlineIds = offlineIds,
+                            onCopyToDrive = { copyToDrive = listOf(it) },
                         )
                     }
                 }
@@ -511,6 +525,8 @@ fun MainScreen(
                             onNavigateStarred = { navigateToFolder("more", "starred") },
                             onNavigateRecent = { navigateToFolder("more", "all") },
                             onNavigateVault = { navController.navigate(ROUTE_VAULT) },
+                            onNavigateDrive = { navController.navigate("drive") },
+                            onNavigateWebDav = { navController.navigate("webdav") },
                         )
                     }
 
@@ -537,6 +553,7 @@ fun MainScreen(
                             onUpload = ::upload,
                             onDownload = ::download,
                             offlineIds = offlineIds,
+                            onCopyToDrive = { copyToDrive = listOf(it) },
                         )
                     }
                 }
@@ -568,6 +585,20 @@ fun MainScreen(
                         offlineCopy = { container.transfers.store.offlineCopy(context, it.id) },
                     )
                 }
+
+                composable("drive") {
+                    DriveAccountsScreen(container, onBack = { navController.popBackStack() }, onOpen = { acc ->
+                        navController.navigate("drive_account/${Uri.encode(acc.id)}?email=${Uri.encode(acc.email.orEmpty())}")
+                    })
+                }
+                composable(
+                    "drive_account/{id}?email={email}",
+                    arguments = listOf(navArgument("id") { type = NavType.StringType }, navArgument("email") { type = NavType.StringType; defaultValue = "" }),
+                ) { entry ->
+                    val account = CloudAccount(id = entry.arguments?.getString("id").orEmpty(), email = entry.arguments?.getString("email")?.ifEmpty { null })
+                    DriveBrowserScreen(container, account, onBack = { navController.popBackStack() })
+                }
+                composable("webdav") { WebDavScreen(container, session, onBack = { navController.popBackStack() }) }
 
                 composable(ROUTE_VAULT) {
                     val vm: VaultViewModel = viewModel(key = "vault-${session.token}") { VaultViewModel(container) }

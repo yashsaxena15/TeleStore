@@ -252,3 +252,30 @@ class TestVaultListing:
                 assert client.get("/files", params={"path": "/Vault"}).status_code == 200
         finally:
             app.dependency_overrides.clear()
+
+
+class TestDriveConnectState:
+    def test_signed_state_round_trips_and_forgeries_fail(self):
+        import base64 as b64
+        import json as js
+        from datetime import datetime as dt, timezone as tz
+        from telestore.api.routes import cloud
+        payload = {"user_id": "42", "timestamp": int(dt.now(tz.utc).timestamp())}
+        state = cloud._sign_state(payload)
+        assert cloud._read_state(state)["user_id"] == "42"
+        # The old unsigned form, or someone else's user id under the old signature
+        assert cloud._read_state(b64.urlsafe_b64encode(js.dumps(payload).encode()).decode()) is None
+        body, _, mac = state.rpartition(".")
+        forged = b64.urlsafe_b64encode(js.dumps({**payload, "user_id": "999"}).encode()).decode()
+        assert cloud._read_state(f"{forged}.{mac}") is None
+        old = cloud._sign_state({**payload, "timestamp": payload["timestamp"] - 7200})
+        assert cloud._read_state(old) is None
+
+    def test_callback_refuses_a_forged_state(self, client):
+        import base64 as b64
+        import json as js
+        forged = b64.urlsafe_b64encode(js.dumps({"user_id": "42", "timestamp": 1}).encode()).decode()
+        with patch("telestore.api.routes.cloud.GoogleDriveManager.exchange_code") as exchange:
+            res = client.get("/cloud/gdrive/callback", params={"code": "c", "state": forged})
+        assert res.status_code == 400
+        exchange.assert_not_called()

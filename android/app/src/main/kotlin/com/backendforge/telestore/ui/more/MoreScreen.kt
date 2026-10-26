@@ -20,6 +20,8 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Inbox
+import androidx.compose.material.icons.filled.Lan
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
@@ -60,6 +62,8 @@ fun MoreScreen(
     onNavigateStarred: () -> Unit = {},
     onNavigateRecent: () -> Unit = {},
     onNavigateVault: () -> Unit = {},
+    onNavigateDrive: () -> Unit = {},
+    onNavigateWebDav: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -150,6 +154,10 @@ fun MoreScreen(
             ) {
                 Column {
                     MoreNavRow(icon = Icons.Default.Lock, label = "Private Vault", onClick = onNavigateVault)
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
+                    MoreNavRow(icon = Icons.Default.Cloud, label = "Google Drive", onClick = onNavigateDrive)
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
+                    MoreNavRow(icon = Icons.Default.Lan, label = "WebDAV (use in other apps)", onClick = onNavigateWebDav)
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
                     MoreNavRow(icon = Icons.Default.Star, label = "Starred", onClick = onNavigateStarred)
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))

@@ -4,6 +4,8 @@ import os
 import re
 import json
 import base64
+import hashlib
+import hmac
 import secrets
 import logging
 import urllib.parse
@@ -64,6 +66,35 @@ class CloudInternalTransferRequest(BaseModel):
     target_folder_id: Optional[str] = "root"
     operation: Optional[str] = "copy"  # "copy" or "cut"
 
+STATE_MAX_AGE_S = 3600
+
+
+def _sign_state(payload: dict) -> str:
+    """The OAuth "state": the payload plus an HMAC with the server's secret, so nobody can make
+    one that attaches their own Google Drive to another TeleStore user."""
+    from telestore.config import SESSION_SECRET_KEY
+    body = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    mac = hmac.new(SESSION_SECRET_KEY.encode(), body.encode(), hashlib.sha256).hexdigest()
+    return f"{body}.{mac}"
+
+
+def _read_state(state: str) -> Optional[dict]:
+    """The payload of a state this server made in the last hour, else None."""
+    from telestore.config import SESSION_SECRET_KEY
+    body, _, mac = (state or "").rpartition(".")
+    if not body or not mac:
+        return None
+    expected = hmac.new(SESSION_SECRET_KEY.encode(), body.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(mac, expected):
+        return None
+    try:
+        data = json.loads(base64.urlsafe_b64decode(body.encode()).decode())
+    except Exception:
+        return None
+    age = int(datetime.now(timezone.utc).timestamp()) - int(data.get("timestamp") or 0)
+    return data if 0 <= age <= STATE_MAX_AGE_S else None
+
+
 def _get_base_redirect_uri(request: Request, provided_uri: Optional[str] = None) -> str:
     if provided_uri and provided_uri.strip():
         return provided_uri.strip()
@@ -107,7 +138,7 @@ async def generate_gdrive_auth_url(
         "redirect_uri": redirect_uri,
         "timestamp": int(datetime.now(timezone.utc).timestamp())
     }
-    state_token = base64.urlsafe_b64encode(json.dumps(state_payload).encode()).decode()
+    state_token = _sign_state(state_payload)
 
     try:
         auth_url = GoogleDriveManager.generate_auth_url(
@@ -154,11 +185,9 @@ async def gdrive_oauth_callback(
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing code or state parameter.")
 
-    try:
-        raw_state = base64.urlsafe_b64decode(state.encode()).decode()
-        state_data = json.loads(raw_state)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid state parameter: {e}")
+    state_data = _read_state(state)
+    if state_data is None:
+        raise HTTPException(status_code=400, detail="This Google sign-in link is invalid or expired. Start connecting again.")
 
     user_id = state_data.get("user_id")
     custom_cid = state_data.get("custom_client_id")

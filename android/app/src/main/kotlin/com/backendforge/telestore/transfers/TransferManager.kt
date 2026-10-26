@@ -46,6 +46,13 @@ class TransferManager(private val context: Context) {
         enqueue(transfer)
     }
 
+    /** Any file the server offers at [remotePath] (e.g. a Google Drive file it fetches for us). */
+    fun downloadRemote(name: String, size: Long, remotePath: String) {
+        val transfer = PhoneTransfer(direction = Direction.DOWNLOAD, name = name, size = size, remotePath = remotePath)
+        store.add(listOf(transfer))
+        enqueue(transfer)
+    }
+
     /** A folder comes down as ZIP files of up to 2 GB (what the server makes of it). */
     suspend fun downloadFolder(api: TeleStoreApi, folderPath: String): Int {
         val info = api.folderDownloadInfo(folderPath)
