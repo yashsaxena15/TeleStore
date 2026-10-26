@@ -17,6 +17,7 @@ import androidx.compose.runtime.getValue
 import com.backendforge.telestore.data.ThemeMode
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.backendforge.telestore.core.LinkKind
 import com.backendforge.telestore.transfers.describe
 import com.backendforge.telestore.ui.MainScreen
 import com.backendforge.telestore.ui.signin.SignInScreen
@@ -75,8 +76,13 @@ class MainActivity : ComponentActivity() {
             Intent.ACTION_SEND_MULTIPLE -> IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
             else -> emptyList()
         }
-        if (uris.isEmpty()) return
         val container = (application as TeleStoreApplication).container
+        if (uris.isEmpty()) {
+            // Shared text with a link in it (YouTube, Instagram, a browser…): "Add from link"
+            val text = intent?.getStringExtra(Intent.EXTRA_TEXT)
+            if (intent?.action == Intent.ACTION_SEND && text != null) LinkKind.firstLink(text)?.let { container.pendingLink.value = it }
+            return
+        }
         container.pendingShare.value = uris.map { describe(this, it) }
     }
 

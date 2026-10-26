@@ -1,6 +1,8 @@
 package com.backendforge.telestore.ui
 
 import android.net.Uri
+import com.backendforge.telestore.ui.links.AddLinkScreen
+import com.backendforge.telestore.ui.links.AddLinkViewModel
 import com.backendforge.telestore.ui.photos.AlbumsScreen
 import com.backendforge.telestore.ui.photos.BackupScreen
 import com.backendforge.telestore.ui.photos.PhotosScreen
@@ -285,6 +287,15 @@ fun MainScreen(
         )
     }
     val snackbar = remember { SnackbarHostState() }
+
+    // A link shared into TeleStore from another app opens "Add from link"
+    val sharedLink by container.pendingLink.collectAsStateWithLifecycle()
+    LaunchedEffect(sharedLink) {
+        sharedLink?.let {
+            container.pendingLink.value = null
+            navController.navigate("add_link?link=${Uri.encode(it)}")
+        }
+    }
     LaunchedEffect(transferMessage) {
         transferMessage?.takeIf { it.isNotEmpty() }?.let {
             snackbar.showSnackbar(it)
@@ -372,6 +383,7 @@ fun MainScreen(
                                 navController.navigate(ROUTE_VIDEO)
                             },
                             onUpload = ::upload,
+                            onAddLink = { navController.navigate("add_link") },
                             onCreateFolder = { name ->
                                 scope.launch {
                                     transferMessage = try {
@@ -469,7 +481,17 @@ fun MainScreen(
                 }
 
                 composable("transfers") {
-                    TransfersScreen(container)
+                    TransfersScreen(container, onAddLink = { navController.navigate("add_link") })
+                }
+
+                composable("add_link?link={link}", arguments = listOf(navArgument("link") { type = NavType.StringType; nullable = true; defaultValue = null })) { entry ->
+                    val link = entry.arguments?.getString("link")
+                    val vm: AddLinkViewModel = viewModel(key = "link-${link.orEmpty()}") { AddLinkViewModel(container, link) }
+                    AddLinkScreen(
+                        vm, container,
+                        onClose = { navController.popBackStack() },
+                        onTransfers = { navController.popBackStack(); navigateToTab(MainTab.TRANSFERS) },
+                    )
                 }
 
                 navigation(

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.AssistChip
@@ -88,6 +89,7 @@ fun HomeScreen(
     onResume: (WatchEntry) -> Unit,
     onUpload: (String) -> Unit,
     onCreateFolder: (String) -> Unit,
+    onAddLink: () -> Unit = {},
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val history by container.watchHistory.entries.collectAsStateWithLifecycle()
@@ -105,6 +107,7 @@ fun HomeScreen(
                 DropdownMenu(expanded = newMenu, onDismissRequest = { newMenu = false }) {
                     DropdownMenuItem(text = { Text("Upload files") }, leadingIcon = { Icon(Icons.Filled.Upload, null) }, onClick = { newMenu = false; onUpload(TeleStoreApi.HOME) })
                     DropdownMenuItem(text = { Text("New folder") }, leadingIcon = { Icon(Icons.Filled.CreateNewFolder, null) }, onClick = { newMenu = false; newFolder = true })
+                    DropdownMenuItem(text = { Text("Add from link") }, leadingIcon = { Icon(Icons.Filled.Link, null) }, onClick = { newMenu = false; onAddLink() })
                 }
             }
         },

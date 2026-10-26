@@ -18,10 +18,12 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -62,7 +64,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TransfersScreen(container: AppContainer) {
+fun TransfersScreen(container: AppContainer, onAddLink: () -> Unit = {}) {
     val manager = container.transfers
     val phone by manager.store.items.collectAsStateWithLifecycle()
     var server by remember { mutableStateOf<RemoteTaskList?>(null) }
@@ -100,6 +102,9 @@ fun TransfersScreen(container: AppContainer) {
 
     val running = phone.count { !it.status.finished && it.status != TransferStatus.PAUSED }
     Scaffold(
+        floatingActionButton = {
+            ExtendedFloatingActionButton(onClick = onAddLink, icon = { Icon(Icons.Filled.Link, contentDescription = null) }, text = { Text("Add from link") })
+        },
         topBar = {
             TopAppBar(
                 title = {

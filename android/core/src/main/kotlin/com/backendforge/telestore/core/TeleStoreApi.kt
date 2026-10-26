@@ -14,6 +14,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import okhttp3.FormBody
+import okhttp3.MultipartBody
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -154,6 +155,52 @@ class TeleStoreApi(
     suspend fun resumeRemoteGroup(groupId: String): MessageReply = post(url("transfers/remote/resume-group"), buildJsonObject { put("group_id", groupId) })
     suspend fun clearFinishedRemote(): MessageReply = post(url("transfers/remote/clear-completed"), buildJsonObject { })
 
+    // ── Add from a link (the server fetches it) ────────────────────────────────
+    /** A Google Drive file or folder, a magnet, or a direct link, saved into [folder]. */
+    suspend fun addFromLink(link: String, folder: String): AddReply =
+        post(url("transfers/remote/add"), buildJsonObject {
+            put("url", link.trim())
+            put("destination_path", folder)
+        })
+
+    /** A .torrent file's bytes. */
+    suspend fun addTorrent(name: String, bytes: ByteArray, folder: String): AddReply =
+        call(
+            Request.Builder().url(url("transfers/remote/upload-torrent")).post(
+                MultipartBody.Builder().setType(MultipartBody.FORM)
+                    .addFormDataPart("file", name, bytes.toRequestBody("application/x-bittorrent".toMediaType()))
+                    .addFormDataPart("destination_path", folder)
+                    .build(),
+            ).build(),
+        )
+
+    /** What a video link holds (title, sizes, or a playlist's videos). Can take a while: the server asks the site. */
+    suspend fun mediaPreview(link: String): MediaPreview =
+        post(url("transfers/remote/media/preview"), buildJsonObject { put("url", link.trim()) })
+
+    suspend fun downloadMedia(link: String, choice: JsonObject, folder: String, items: List<Int>? = null, sync: Boolean = false): AddReply =
+        post(url("transfers/remote/media"), buildJsonObject {
+            put("url", link.trim())
+            put("choice", choice)
+            put("destination", homeDestination(folder))
+            items?.let { put("items", JsonArray(it.map { i -> JsonPrimitive(i) })) }
+            put("sync", sync)
+        })
+
+    suspend fun instagramPreview(link: String): InstagramPreview =
+        post(url("transfers/remote/instagram/preview"), buildJsonObject { put("url", link.trim()) })
+
+    suspend fun importInstagram(link: String, folder: String): AddReply =
+        post(url("transfers/remote/instagram"), buildJsonObject {
+            put("url", link.trim())
+            put("destination", homeDestination(folder))
+        })
+
+    private fun homeDestination(folder: String) = buildJsonObject {
+        put("kind", "home")
+        put("path", folder)
+    }
+
     // ── Folder & File Actions ───────────────────────────────────────────────────
     suspend fun createFolder(name: String, parentPath: String = HOME): MessageReply =
         post(url("folders/create"), buildJsonObject {
@@ -259,7 +306,7 @@ class TeleStoreApi(
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS) // video link previews ask the site and can be slow
             .build()
 
         /** FastAPI's {"detail": "..."} (or a list of validation problems) as one readable line. */
