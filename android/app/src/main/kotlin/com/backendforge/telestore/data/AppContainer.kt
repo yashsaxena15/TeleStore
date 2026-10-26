@@ -21,6 +21,7 @@ class AppContainer(val context: Context) {
     val session = SessionStore(context.applicationContext)
     val playback = PlaybackQueue()
     val settings = AppSettings(context.applicationContext)
+    val watchHistory = WatchHistory(context.applicationContext)
     /** Looks for new APKs on GitHub, with its own client: the sign-in token must never go there. */
     val updates = UpdateChecker(TeleStoreApi.defaultClient())
     val transfers = TransferManager(context.applicationContext)

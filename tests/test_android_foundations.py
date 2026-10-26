@@ -161,3 +161,32 @@ class TestCopyVideoArgs:
         assert media_routes.copy_video_args({"media_info": {"video_codec": "h264"}}) == ["-c:v", "copy"]
         assert media_routes.copy_video_args({}) == ["-c:v", "copy"]
         assert media_routes.copy_video_args(None) == ["-c:v", "copy"]
+
+
+class TestKindListing:
+    def test_all_of_one_kind_matches_type_or_extension(self):
+        repo = Files.__new__(Files)
+        with patch.object(Files, "find", return_value=[]) as find:
+            repo.get_files_by_path(path="all", owner_id="42", kind="video")
+        query = find.call_args.args[0]
+        assert query["owner_id"] == "42" and query["trashed"] == {"$ne": True}
+        assert query["$or"][0] == {"file_type": "video"}
+        import re
+        pattern = re.compile(query["$or"][1]["file_name"]["$regex"], re.I)
+        assert pattern.search("Movie.MKV") and not pattern.search("notes.mkv.txt")
+
+    def test_unknown_kind_is_ignored(self):
+        repo = Files.__new__(Files)
+        with patch.object(Files, "find", return_value=[]) as find:
+            repo.get_files_by_path(path="all", owner_id="42", kind="nonsense")
+        assert "$or" not in find.call_args.args[0]
+
+    def test_route_passes_kind(self, client):
+        app.dependency_overrides[require_auth] = lambda: User(username="bob", telegram_user_id=42)
+        try:
+            with patch.object(database.Files, "get_files_by_path", return_value=([], 0)) as listing:
+                res = client.get("/files", params={"path": "all", "kind": "photo", "page": 1, "page_size": 50})
+            assert res.status_code == 200
+            assert listing.call_args.kwargs["kind"] == "photo"
+        finally:
+            app.dependency_overrides.clear()

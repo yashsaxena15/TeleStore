@@ -20,6 +20,8 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Inbox
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -54,6 +56,8 @@ fun MoreScreen(
     session: Session,
     onNavigateTrash: () -> Unit,
     onNavigateInbox: () -> Unit,
+    onNavigateStarred: () -> Unit = {},
+    onNavigateRecent: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -143,6 +147,10 @@ fun MoreScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column {
+                    MoreNavRow(icon = Icons.Default.Star, label = "Starred", onClick = onNavigateStarred)
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
+                    MoreNavRow(icon = Icons.Default.Schedule, label = "Recent", onClick = onNavigateRecent)
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
                     MoreNavRow(
                         icon = Icons.Default.Delete,
                         label = "Trash",

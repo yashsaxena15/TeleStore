@@ -9,6 +9,14 @@ from pymongo.collection import Collection
 
 logger = setup_logger(__name__)
 
+# kind -> (stored file_type, file-name pattern) for GET /files?path=all&kind=…
+KIND_FILTERS = {
+    "video": ("video", r"\.(mp4|mkv|avi|mov|webm|flv|wmv|m4v|3gp|ts)$"),
+    "photo": ("photo", r"\.(jpe?g|png|gif|webp|bmp|heic|heif)$"),
+    "audio": ("audio", r"\.(mp3|wav|flac|aac|ogg|m4a|wma|opus)$"),
+    "document": ("document", r"\.(pdf|docx?|xlsx?|pptx?|txt|csv|md|epub)$"),
+}
+
 
 @dataclass
 class FileData:
@@ -265,7 +273,8 @@ class Files(Collection):
         sort_by: str = None,
         sort_order: str = None,
         folders_first: bool = True,
-        q: str = None
+        q: str = None,
+        kind: str = None
     ):
         """Get files and folders for a specific path with optional pagination and sorting.
 
@@ -306,6 +315,11 @@ class Files(Collection):
         elif path == "all":
             # Get all files except folders
             query = build_query({"file_type": {"$ne": "folder"}, "trashed": {"$ne": True}, "is_vault": {"$ne": True}, "file_path": {"$not": {"$regex": "^/?Vault"}}})
+            # One kind only (the app's Videos / Photos / Music / Documents): by stored type or extension,
+            # since some uploads (e.g. over WebDAV) are stored as "document" whatever they are
+            kind_rule = KIND_FILTERS.get((kind or "").lower())
+            if kind_rule:
+                query["$or"] = [{"file_type": kind_rule[0]}, {"file_name": {"$regex": kind_rule[1], "$options": "i"}}]
         # For root path, get files with path="/" and folders with path="/"
         elif path in ["/", "Home", "/Home"]:
             # Get root-level files and folders (support both /Home and /)

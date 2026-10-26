@@ -152,7 +152,9 @@ class VideoViewModel(private val container: AppContainer) : ViewModel() {
 
     // ── Opening ────────────────────────────────────────────────────────────────
     fun playAt(index: Int) {
-        if (index in _state.value.queue.indices) open(index)
+        if (index !in _state.value.queue.indices) return
+        saveProgress()
+        open(index)
     }
 
     fun next() = playAt(_state.value.index + 1)
@@ -169,7 +171,7 @@ class VideoViewModel(private val container: AppContainer) : ViewModel() {
                 videoWidth = 0, videoHeight = 0, ended = false,
             )
         }
-        load(0)
+        load(container.watchHistory.resumeAt(_state.value.item?.id.orEmpty()))
         // The video's height trims the quality list; not needed to start playing
         val item = _state.value.item ?: return
         viewModelScope.launch {
@@ -228,7 +230,10 @@ class VideoViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun pause() = player.pause()
+    fun pause() {
+        player.pause()
+        saveProgress()
+    }
 
     fun seekTo(ms: Long) {
         val target = ms.coerceIn(0, _state.value.durationMs.takeIf { it > 0 } ?: Long.MAX_VALUE)
@@ -287,9 +292,19 @@ class VideoViewModel(private val container: AppContainer) : ViewModel() {
     // ── State ──────────────────────────────────────────────────────────────────
     private fun shownPosition(): Long = PlaybackPlan.shownPosition(source, player.currentPosition)
 
+    private var ticks = 0
+
     private fun tick() {
         val duration = if (source?.converted == true) info?.durationMs ?: 0 else player.duration.takeIf { it > 0 } ?: 0
         _state.update { it.copy(positionMs = shownPosition(), durationMs = duration) }
+        if (player.isPlaying && ++ticks % 10 == 0) saveProgress()
+    }
+
+    /** Saves where this video is, for Continue watching. */
+    private fun saveProgress() {
+        val s = _state.value
+        val item = s.item ?: return
+        if (s.durationMs > 0) container.watchHistory.save(item, s.positionMs, s.durationMs)
     }
 
     private fun publishTracks(tracks: Tracks) {
@@ -322,6 +337,7 @@ class VideoViewModel(private val container: AppContainer) : ViewModel() {
             ?: fallback
 
     override fun onCleared() {
+        saveProgress()
         player.removeListener(listener)
         player.release()
     }

@@ -106,6 +106,15 @@ class TeleStoreApiTest {
     }
 
     @Test
+    fun `a kind filter is sent with path all`() = runTest {
+        server.enqueue(json("""{"files":[]}"""))
+        api.listFiles(path = "all", kind = FileKind.VIDEO)
+        val url = server.takeRequest().requestUrl!!
+        assertEquals("all", url.queryParameter("path"))
+        assertEquals("video", url.queryParameter("kind"))
+    }
+
+    @Test
     fun `no search text means no q`() = runTest {
         server.enqueue(json("""{"files":[]}"""))
         api.listFiles(query = "   ")
