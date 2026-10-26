@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
@@ -58,6 +59,7 @@ fun ItemActionSheet(
     /** Saves the file (or the folder as ZIP) to Downloads/TeleStore on the phone. */
     onDownload: ((FileItem) -> Unit)? = null,
     onMoveToVault: ((FileItem) -> Unit)? = null,
+    onCopyToDrive: ((FileItem) -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -194,6 +196,13 @@ fun ItemActionSheet(
                         label = if (item.starred) "Unstar" else "Star",
                         onClick = { onDismiss(); onToggleStar?.invoke(item) },
                     )
+                    if (onCopyToDrive != null) {
+                        ActionRow(
+                            icon = Icons.Default.Cloud,
+                            label = "Copy to Google Drive",
+                            onClick = { onDismiss(); onCopyToDrive(item) },
+                        )
+                    }
                     if (onMoveToVault != null) {
                         ActionRow(
                             icon = Icons.Default.Lock,

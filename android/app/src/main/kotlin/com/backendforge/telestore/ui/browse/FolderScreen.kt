@@ -100,6 +100,7 @@ fun FolderScreen(
     onUpload: ((folderPath: String) -> Unit)? = null,
     onDownload: ((FileItem) -> Unit)? = null,
     offlineIds: Set<String> = emptySet(),
+    onCopyToDrive: ((FileItem) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -523,6 +524,7 @@ fun FolderScreen(
             onDeleteForever = { deleteForeverItems = listOf(it) },
             onDownload = onDownload,
             onMoveToVault = { vm.moveToVault(it) },
+            onCopyToDrive = onCopyToDrive,
             onDismiss = { actionItem = null },
         )
     }
