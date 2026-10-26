@@ -48,6 +48,31 @@ object FolderPaths {
         return result
     }
 
+    /** What to do with the screen under the current one while going back to a breadcrumb. */
+    enum class CrumbStep {
+        /** It is the breadcrumb's folder: go back to it and stop. */
+        POP_AND_STOP,
+        /** It is a folder inside the breadcrumb's folder: go back to it and look again. */
+        POP_AND_CONTINUE,
+        /** The breadcrumb's folder isn't in this history (opened from Starred or Search): open it. */
+        OPEN,
+    }
+
+    /**
+     * Breadcrumbs follow the folder's path, but the history may not (a folder opened from Starred
+     * or from Search has no parent screens). So go back only through this tab's folders that lie
+     * inside [target], stopping at [target]; anything else means opening [target] fresh.
+     *
+     * [previousPath] is the folder of the screen underneath (null when it isn't a folder of the
+     * same tab, or when there is none).
+     */
+    fun crumbStep(previousPath: String?, target: String): CrumbStep = when {
+        previousPath == null -> CrumbStep.OPEN
+        previousPath.trimEnd('/') == target.trimEnd('/') -> CrumbStep.POP_AND_STOP
+        isInside(previousPath, target) -> CrumbStep.POP_AND_CONTINUE
+        else -> CrumbStep.OPEN
+    }
+
     /**
      * Returns true if [path] is inside [folderPath] or is [folderPath] itself.
      * Used to prevent moving a folder into itself or its own subfolder.

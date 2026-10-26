@@ -30,6 +30,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.navigation
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.backendforge.telestore.core.FolderPaths
 import com.backendforge.telestore.core.TeleStoreApi
 import com.backendforge.telestore.data.AppContainer
 import com.backendforge.telestore.data.Session
@@ -75,11 +76,24 @@ fun MainScreen(
         navController.navigate("${prefix}_folder?path=$encoded")
     }
 
-    fun navigateToCrumb(prefix: String, targetPath: String, stepsToPop: Int) {
-        if (stepsToPop > 0) {
-            repeat(stepsToPop) { navController.popBackStack() }
-        } else {
-            navigateToFolder(prefix, targetPath)
+    // Go back through this tab's folders inside the crumb's folder, or open it when the history
+    // doesn't lead there (a folder opened from Starred or Search). See FolderPaths.crumbStep.
+    fun navigateToCrumb(prefix: String, targetPath: String) {
+        while (true) {
+            val previous = navController.previousBackStackEntry
+            val sameTabFolder = previous?.destination?.route?.startsWith("${prefix}_folder") == true
+            val previousPath = if (sameTabFolder) previous?.arguments?.getString("path") else null
+            when (FolderPaths.crumbStep(previousPath, targetPath)) {
+                FolderPaths.CrumbStep.POP_AND_STOP -> {
+                    navController.popBackStack()
+                    return
+                }
+                FolderPaths.CrumbStep.POP_AND_CONTINUE -> navController.popBackStack()
+                FolderPaths.CrumbStep.OPEN -> {
+                    navigateToFolder(prefix, targetPath)
+                    return
+                }
+            }
         }
     }
 
@@ -152,7 +166,7 @@ fun MainScreen(
                         vm = vm,
                         api = container.api(),
                         onNavigateFolder = { navigateToFolder("home", it) },
-                        onNavigateCrumb = { targetPath, stepsToPop -> navigateToCrumb("home", targetPath, stepsToPop) },
+                        onNavigateCrumb = { navigateToCrumb("home", it) },
                         onOpenSearch = { navController.navigate("search") },
                     )
                 }
@@ -179,7 +193,7 @@ fun MainScreen(
                         vm = vm,
                         api = container.api(),
                         onNavigateFolder = { navigateToFolder("starred", it) },
-                        onNavigateCrumb = { targetPath, stepsToPop -> navigateToCrumb("starred", targetPath, stepsToPop) },
+                        onNavigateCrumb = { navigateToCrumb("starred", it) },
                         onOpenSearch = { navController.navigate("search") },
                     )
                 }
@@ -206,7 +220,7 @@ fun MainScreen(
                         vm = vm,
                         api = container.api(),
                         onNavigateFolder = { navigateToFolder("recent", it) },
-                        onNavigateCrumb = { targetPath, stepsToPop -> navigateToCrumb("recent", targetPath, stepsToPop) },
+                        onNavigateCrumb = { navigateToCrumb("recent", it) },
                         onOpenSearch = { navController.navigate("search") },
                     )
                 }
@@ -246,7 +260,7 @@ fun MainScreen(
                         vm = vm,
                         api = container.api(),
                         onNavigateFolder = { navigateToFolder("more", it) },
-                        onNavigateCrumb = { targetPath, stepsToPop -> navigateToCrumb("more", targetPath, stepsToPop) },
+                        onNavigateCrumb = { navigateToCrumb("more", it) },
                         onOpenSearch = { navController.navigate("search") },
                     )
                 }

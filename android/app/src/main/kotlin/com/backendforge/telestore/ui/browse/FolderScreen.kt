@@ -89,7 +89,8 @@ fun FolderScreen(
     vm: FolderViewModel,
     api: TeleStoreApi,
     onNavigateFolder: (String) -> Unit,
-    onNavigateCrumb: ((targetPath: String, stepsToPop: Int) -> Unit)? = null,
+    /** A breadcrumb was tapped; null opens the folder like any other folder. */
+    onNavigateCrumb: ((targetPath: String) -> Unit)? = null,
     onOpenSearch: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -308,12 +309,7 @@ fun FolderScreen(
                             SuggestionChip(
                                 onClick = {
                                     if (!isLast) {
-                                        val stepsToPop = crumbs.lastIndex - index
-                                        if (onNavigateCrumb != null) {
-                                            onNavigateCrumb(path, stepsToPop)
-                                        } else {
-                                            onNavigateFolder(path)
-                                        }
+                                        if (onNavigateCrumb != null) onNavigateCrumb(path) else onNavigateFolder(path)
                                     }
                                 },
                                 label = { Text(label) },
