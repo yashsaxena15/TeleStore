@@ -1,6 +1,10 @@
 package com.backendforge.telestore.ui
 
 import android.net.Uri
+import com.backendforge.telestore.ui.photos.AlbumsScreen
+import com.backendforge.telestore.ui.photos.BackupScreen
+import com.backendforge.telestore.ui.photos.PhotosScreen
+import com.backendforge.telestore.ui.photos.PhotosViewModel
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PhotoLibrary
 import com.backendforge.telestore.ui.home.HomeScreen
@@ -410,8 +414,36 @@ fun MainScreen(
 
                 navigation(startDestination = "photos_root", route = "photos_graph") {
                     composable("photos_root") {
-                        val vm: KindViewModel = viewModel(key = "photos-${session.token}") { KindViewModel(container, FileKind.PHOTO) }
-                        KindScreen(vm, container, onBack = null, onOpenFile = ::openFile)
+                        val vm: PhotosViewModel = viewModel(key = "photos-${session.token}") { PhotosViewModel(container) }
+                        PhotosScreen(
+                            vm = vm,
+                            container = container,
+                            onOpenFile = ::openFile,
+                            onAlbums = { navController.navigate("photos_albums") },
+                            onBackup = { navController.navigate("photos_backup") },
+                        )
+                    }
+                    composable("photos_backup") { BackupScreen(container, onBack = { navController.popBackStack() }) }
+                    composable("photos_albums") {
+                        AlbumsScreen(container, onBack = { navController.popBackStack() }, onOpenFolder = { navigateToFolder("photos", it) })
+                    }
+                    composable(
+                        route = "photos_folder?path={path}",
+                        arguments = listOf(navArgument("path") { type = NavType.StringType; defaultValue = TeleStoreApi.HOME }),
+                    ) { backStackEntry ->
+                        val path = backStackEntry.arguments?.getString("path") ?: TeleStoreApi.HOME
+                        val vm: FolderViewModel = viewModel(key = "photos-$path-${session.token}") { FolderViewModel(container, initialPath = path) }
+                        FolderScreen(
+                            vm = vm,
+                            api = container.api(),
+                            onNavigateFolder = { navigateToFolder("photos", it) },
+                            onNavigateCrumb = { navigateToCrumb("photos", it) },
+                            onOpenSearch = { navController.navigate("search") },
+                            onOpenFile = ::openFile,
+                            onUpload = ::upload,
+                            onDownload = ::download,
+                            offlineIds = offlineIds,
+                        )
                     }
                 }
 
