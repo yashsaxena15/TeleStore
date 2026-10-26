@@ -75,6 +75,7 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     implementation(libs.androidx.work.runtime)
+    implementation(libs.androidx.palette)
 
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)

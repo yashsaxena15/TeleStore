@@ -5,6 +5,7 @@ import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.backendforge.telestore.core.ServerAddress
 import com.backendforge.telestore.core.TeleStoreApi
+import com.backendforge.telestore.core.LyricsFinder
 import com.backendforge.telestore.core.UpdateChecker
 import com.backendforge.telestore.player.MusicController
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +25,10 @@ class AppContainer(val context: Context) {
     val watchHistory = WatchHistory(context.applicationContext)
     /** Looks for new APKs on GitHub, with its own client: the sign-in token must never go there. */
     val updates = UpdateChecker(TeleStoreApi.defaultClient())
+
+    /** Lyrics for the song playing; LRCLIB gets its own client too (no token). */
+    private val webClient = TeleStoreApi.defaultClient()
+    fun lyrics(): LyricsFinder = LyricsFinder(api(), webClient)
     val transfers = TransferManager(context.applicationContext)
 
     /** Files shared into TeleStore from other apps, waiting for the user to pick a folder. */

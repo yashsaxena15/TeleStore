@@ -40,6 +40,11 @@ data class MusicState(
     val shuffle: Boolean = false,
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
     val error: String? = null,
+    /** The file playing now (for star, download and lyrics). */
+    val item: FileItem? = null,
+    val speed: Float = 1f,
+    /** "15 min", "End of song", or null. */
+    val sleepLabel: String? = null,
 )
 
 /**
@@ -51,12 +56,24 @@ class MusicController(private val context: Context) {
     private var future: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
     private var ticker: Job? = null
+    private var items: List<FileItem> = emptyList()
+    private var sleepJob: Job? = null
+    private var sleepAtEnd = false
 
     private val _state = MutableStateFlow(MusicState())
     val state: StateFlow<MusicState> = _state.asStateFlow()
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) = publish()
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            // "Sleep at the end of this song": the next one doesn't start
+            if (sleepAtEnd && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                sleepAtEnd = false
+                controller?.pause()
+                _state.value = _state.value.copy(sleepLabel = null)
+            }
+        }
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
             _state.value = _state.value.copy(error = "Couldn't play this song (${error.errorCodeName}).")
         }
@@ -86,6 +103,7 @@ class MusicController(private val context: Context) {
 
     /** Plays [items] (songs of one folder) starting at [index]. */
     fun play(api: TeleStoreApi, items: List<FileItem>, index: Int, localCopy: (FileItem) -> Uri? = { null }) {
+        this.items = items
         val mediaItems = items.map { item ->
             val uri = localCopy(item) ?: Uri.parse(api.media.file(item).toString())
             val folder = item.path.trimEnd('/').substringAfterLast('/').ifEmpty { "TeleStore" }
@@ -124,6 +142,31 @@ class MusicController(private val context: Context) {
         }
     }
 
+    fun setSpeed(speed: Float) = withController {
+        it.setPlaybackSpeed(speed)
+        _state.value = _state.value.copy(speed = speed)
+    }
+
+    /** [minutes] 0 cancels, -1 stops at the end of this song. */
+    fun setSleepTimer(minutes: Int) {
+        sleepJob?.cancel()
+        sleepAtEnd = minutes == -1
+        _state.value = _state.value.copy(sleepLabel = if (minutes > 0) "$minutes min" else if (minutes == -1) "End of song" else null)
+        if (minutes > 0) {
+            sleepJob = scope.launch {
+                delay(minutes * 60_000L)
+                controller?.pause()
+                _state.value = _state.value.copy(sleepLabel = null)
+            }
+        }
+    }
+
+    /** The star changed on the server: keep the local copy in step. */
+    fun updateItem(updated: FileItem) {
+        items = items.map { if (it.id == updated.id) updated else it }
+        publish()
+    }
+
     /** Stops and clears the queue (sign-out, or the user closes the mini player). */
     fun stop() {
         controller?.run {
@@ -153,6 +196,7 @@ class MusicController(private val context: Context) {
             index = c.currentMediaItemIndex,
             shuffle = c.shuffleModeEnabled,
             repeatMode = c.repeatMode,
+            item = c.currentMediaItem?.mediaId?.let { id -> items.firstOrNull { it.id == id } },
         )
         // Keep the progress bar moving only while something plays
         if (c.isPlaying && ticker?.isActive != true) {

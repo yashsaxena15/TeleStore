@@ -26,6 +26,11 @@ class AppSettings(context: Context) {
         get() = prefs.getBoolean(KEY_BG_PLAY, true)
         set(value) = prefs.edit().putBoolean(KEY_BG_PLAY, value).apply()
 
+    /** Look up lyrics on LRCLIB when the song has none (sends only title, artist and length). */
+    var onlineLyrics: Boolean
+        get() = prefs.getBoolean(KEY_ONLINE_LYRICS, true)
+        set(value) = prefs.edit().putBoolean(KEY_ONLINE_LYRICS, value).apply()
+
     /** When the app last looked for an update (it checks at most once a day by itself). */
     var lastUpdateCheck: Long
         get() = prefs.getLong(KEY_UPDATE_CHECK, 0)
@@ -35,5 +40,6 @@ class AppSettings(context: Context) {
         const val KEY_THEME = "theme"
         const val KEY_UPDATE_CHECK = "last_update_check"
         const val KEY_BG_PLAY = "video_background_play"
+        const val KEY_ONLINE_LYRICS = "online_lyrics"
     }
 }
