@@ -522,6 +522,7 @@ fun FolderScreen(
             onRestore = { vm.restoreItems(listOf(it)) },
             onDeleteForever = { deleteForeverItems = listOf(it) },
             onDownload = onDownload,
+            onMoveToVault = { vm.moveToVault(it) },
             onDismiss = { actionItem = null },
         )
     }

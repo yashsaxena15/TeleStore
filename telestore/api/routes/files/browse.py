@@ -13,6 +13,11 @@ from pyrogram import Client
 
 from telestore.api.routes.files.common import logger, router
 
+def is_vault_path(path: str) -> bool:
+    clean = (path or "").strip().lower().lstrip("/")
+    return clean == "vault" or clean.startswith("vault/")
+
+
 @router.get("")
 @router.get("/")
 async def get_all_files_route(
@@ -31,6 +36,12 @@ async def get_all_files_route(
         logger.info(f"Fetching files for path {path} and user {user} (page={page}, page_size={page_size})")
         # Use the user's Telegram ID as the user identifier
         user_id = str(user.telegram_user_id) if user.telegram_user_id else user.username
+
+        # The Private Vault's contents (names, thumbnails) only while it is unlocked with the PIN
+        if is_vault_path(path):
+            from telestore.api.routes.vault import is_vault_unlocked
+            if not is_vault_unlocked(request):
+                raise HTTPException(status_code=403, detail="Vault is locked. Please unlock Vault first.")
 
         # Fast non-blocking catchup check if user is accessing Telegram Inbox
         if path in ["inbox", "/inbox", "Telegram Inbox", "/Telegram Inbox", "/Home/Telegram Inbox"]:
@@ -106,6 +117,8 @@ async def get_all_files_route(
             }
 
         return {"files": files_list}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching files for path {path}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

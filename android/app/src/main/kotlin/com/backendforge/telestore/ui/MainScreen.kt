@@ -1,6 +1,8 @@
 package com.backendforge.telestore.ui
 
 import android.net.Uri
+import com.backendforge.telestore.ui.vault.VaultScreen
+import com.backendforge.telestore.ui.vault.VaultViewModel
 import com.backendforge.telestore.ui.links.AddLinkScreen
 import com.backendforge.telestore.ui.links.AddLinkViewModel
 import com.backendforge.telestore.ui.photos.AlbumsScreen
@@ -97,6 +99,7 @@ import com.backendforge.telestore.ui.transfers.TransfersScreen
 private const val ROUTE_VIDEO = "video"
 private const val ROUTE_PHOTOS = "photos"
 private const val ROUTE_NOW_PLAYING = "now_playing"
+private const val ROUTE_VAULT = "vault"
 
 private enum class MainTab(val title: String, val icon: ImageVector, val graphRoute: String) {
     HOME("Home", Icons.Default.Home, "home_graph"),
@@ -370,11 +373,12 @@ fun MainScreen(
                             onAccount = { navigateToTab(MainTab.MORE) },
                             onKind = { navController.navigate("home_kind/${it.name}") },
                             onShortcut = { shortcut ->
-                                navigateToFolder("home", when (shortcut) {
-                                    HomeShortcut.STARRED -> "starred"
-                                    HomeShortcut.RECENT -> "all"
-                                    HomeShortcut.TRASH -> "trash"
-                                })
+                                when (shortcut) {
+                                    HomeShortcut.STARRED -> navigateToFolder("home", "starred")
+                                    HomeShortcut.RECENT -> navigateToFolder("home", "all")
+                                    HomeShortcut.TRASH -> navigateToFolder("home", "trash")
+                                    HomeShortcut.VAULT -> navController.navigate(ROUTE_VAULT)
+                                }
                             },
                             onOpenFolder = { navigateToFolder("home", it) },
                             onOpenFile = ::openFile,
@@ -506,6 +510,7 @@ fun MainScreen(
                             onNavigateInbox = { navigateToFolder("more", "inbox") },
                             onNavigateStarred = { navigateToFolder("more", "starred") },
                             onNavigateRecent = { navigateToFolder("more", "all") },
+                            onNavigateVault = { navController.navigate(ROUTE_VAULT) },
                         )
                     }
 
@@ -562,6 +567,11 @@ fun MainScreen(
                         onBack = { navController.popBackStack() },
                         offlineCopy = { container.transfers.store.offlineCopy(context, it.id) },
                     )
+                }
+
+                composable(ROUTE_VAULT) {
+                    val vm: VaultViewModel = viewModel(key = "vault-${session.token}") { VaultViewModel(container) }
+                    VaultScreen(vm, container, onBack = { navController.popBackStack() }, onOpenFile = ::openFile, onDownload = ::download)
                 }
 
                 composable(ROUTE_NOW_PLAYING) {

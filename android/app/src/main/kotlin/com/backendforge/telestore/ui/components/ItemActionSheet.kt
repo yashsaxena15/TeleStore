@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarOutline
@@ -56,6 +57,7 @@ fun ItemActionSheet(
     onDeleteForever: ((FileItem) -> Unit)? = null,
     /** Saves the file (or the folder as ZIP) to Downloads/TeleStore on the phone. */
     onDownload: ((FileItem) -> Unit)? = null,
+    onMoveToVault: ((FileItem) -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -192,6 +194,13 @@ fun ItemActionSheet(
                         label = if (item.starred) "Unstar" else "Star",
                         onClick = { onDismiss(); onToggleStar?.invoke(item) },
                     )
+                    if (onMoveToVault != null) {
+                        ActionRow(
+                            icon = Icons.Default.Lock,
+                            label = "Move to Private Vault",
+                            onClick = { onDismiss(); onMoveToVault(item) },
+                        )
+                    }
                     ActionRow(
                         icon = Icons.Default.Delete,
                         label = "Move to Trash",
