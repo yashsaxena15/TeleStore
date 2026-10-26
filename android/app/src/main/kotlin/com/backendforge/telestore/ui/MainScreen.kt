@@ -27,6 +27,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.navigation
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.backendforge.telestore.core.TeleStoreApi
@@ -39,12 +40,12 @@ import com.backendforge.telestore.ui.search.SearchScreen
 import com.backendforge.telestore.ui.search.SearchViewModel
 import com.backendforge.telestore.ui.transfers.TransfersPlaceholderScreen
 
-private enum class MainTab(val title: String, val icon: ImageVector) {
-    HOME("Home", Icons.Default.Home),
-    STARRED("Starred", Icons.Default.Star),
-    RECENT("Recent", Icons.Default.Schedule),
-    TRANSFERS("Transfers", Icons.Default.SwapVert),
-    MORE("More", Icons.Default.MoreHoriz),
+private enum class MainTab(val title: String, val icon: ImageVector, val graphRoute: String) {
+    HOME("Home", Icons.Default.Home, "home_graph"),
+    STARRED("Starred", Icons.Default.Star, "starred_graph"),
+    RECENT("Recent", Icons.Default.Schedule, "recent_graph"),
+    TRANSFERS("Transfers", Icons.Default.SwapVert, "transfers"),
+    MORE("More", Icons.Default.MoreHoriz, "more_graph"),
 }
 
 @Composable
@@ -59,29 +60,36 @@ fun MainScreen(
     val currentPathArg = navBackStackEntry?.arguments?.getString("path")
 
     val selectedTab = when {
-        currentRoute.startsWith("folder") -> when (currentPathArg) {
-            "starred" -> MainTab.STARRED
-            "all" -> MainTab.RECENT
-            "trash", "inbox" -> MainTab.MORE
-            else -> MainTab.HOME
-        }
+        currentRoute.startsWith("home_") -> MainTab.HOME
+        currentRoute.startsWith("starred_") -> MainTab.STARRED
+        currentRoute.startsWith("recent_") -> MainTab.RECENT
         currentRoute == "transfers" -> MainTab.TRANSFERS
-        currentRoute == "more" -> MainTab.MORE
+        currentRoute.startsWith("more_") -> MainTab.MORE
         else -> MainTab.HOME
     }
 
     val isSearch = currentRoute == "search"
 
-    fun navigateToFolder(path: String) {
+    fun navigateToFolder(prefix: String, path: String) {
         val encoded = Uri.encode(path)
-        val route = "folder?path=$encoded"
-        if (!navController.popBackStack(route, inclusive = false)) {
-            navController.navigate(route)
-        }
+        navController.navigate("${prefix}_folder?path=$encoded")
     }
 
-    fun navigateToTab(route: String) {
-        navController.navigate(route) {
+    fun navigateToCrumb(prefix: String, targetPath: String, stepsToPop: Int) {
+        if (stepsToPop > 0) {
+            val backStack = navController.currentBackStack.value
+            val canPop = backStack.size > stepsToPop &&
+                backStack.takeLast(stepsToPop + 1).firstOrNull()?.arguments?.getString("path") == targetPath
+            if (canPop) {
+                repeat(stepsToPop) { navController.popBackStack() }
+                return
+            }
+        }
+        navigateToFolder(prefix, targetPath)
+    }
+
+    fun navigateToTab(tab: MainTab) {
+        navController.navigate(tab.graphRoute) {
             popUpTo(navController.graph.findStartDestination().id) {
                 saveState = true
             }
@@ -93,8 +101,11 @@ fun MainScreen(
     // Back handling: leaving on root tabs
     val activity = LocalContext.current as? ComponentActivity
     val isAtTabRoot = when {
-        currentRoute.startsWith("folder") -> currentPathArg in setOf(TeleStoreApi.HOME, "starred", "all")
-        currentRoute in setOf("transfers", "more") -> true
+        currentRoute.startsWith("home_folder") -> currentPathArg == TeleStoreApi.HOME
+        currentRoute.startsWith("starred_folder") -> currentPathArg == "starred"
+        currentRoute.startsWith("recent_folder") -> currentPathArg == "all"
+        currentRoute == "transfers" -> true
+        currentRoute == "more_root" -> true
         else -> false
     }
 
@@ -111,15 +122,7 @@ fun MainScreen(
                         val isSelected = selectedTab == tab
                         NavigationBarItem(
                             selected = isSelected,
-                            onClick = {
-                                when (tab) {
-                                    MainTab.HOME -> navigateToTab("folder?path=${Uri.encode(TeleStoreApi.HOME)}")
-                                    MainTab.STARRED -> navigateToTab("folder?path=starred")
-                                    MainTab.RECENT -> navigateToTab("folder?path=all")
-                                    MainTab.TRANSFERS -> navigateToTab("transfers")
-                                    MainTab.MORE -> navigateToTab("more")
-                                }
-                            },
+                            onClick = { navigateToTab(tab) },
                             icon = { Icon(tab.icon, contentDescription = tab.title) },
                             label = { Text(tab.title) },
                         )
@@ -130,41 +133,128 @@ fun MainScreen(
     ) { padding ->
         NavHost(
             navController = navController,
-            startDestination = "folder?path=${Uri.encode(TeleStoreApi.HOME)}",
+            startDestination = "home_graph",
             modifier = Modifier.padding(padding),
         ) {
-            composable(
-                route = "folder?path={path}",
-                arguments = listOf(
-                    navArgument("path") {
-                        type = NavType.StringType
-                        defaultValue = TeleStoreApi.HOME
+            navigation(
+                startDestination = "home_folder?path=${Uri.encode(TeleStoreApi.HOME)}",
+                route = "home_graph",
+            ) {
+                composable(
+                    route = "home_folder?path={path}",
+                    arguments = listOf(
+                        navArgument("path") {
+                            type = NavType.StringType
+                            defaultValue = TeleStoreApi.HOME
+                        }
+                    ),
+                ) { backStackEntry ->
+                    val path = backStackEntry.arguments?.getString("path") ?: TeleStoreApi.HOME
+                    val vm: FolderViewModel = viewModel(key = "$path-${session.token}") {
+                        FolderViewModel(container, initialPath = path)
                     }
-                ),
-            ) { backStackEntry ->
-                val path = backStackEntry.arguments?.getString("path") ?: TeleStoreApi.HOME
-                val vm: FolderViewModel = viewModel(key = "$path-${session.token}") {
-                    FolderViewModel(container, initialPath = path)
+                    FolderScreen(
+                        vm = vm,
+                        api = container.api(),
+                        onNavigateFolder = { navigateToFolder("home", it) },
+                        onNavigateCrumb = { targetPath, stepsToPop -> navigateToCrumb("home", targetPath, stepsToPop) },
+                        onOpenSearch = { navController.navigate("search") },
+                    )
                 }
-                FolderScreen(
-                    vm = vm,
-                    api = container.api(),
-                    onNavigateFolder = { navigateToFolder(it) },
-                    onOpenSearch = { navController.navigate("search") },
-                )
+            }
+
+            navigation(
+                startDestination = "starred_folder?path=starred",
+                route = "starred_graph",
+            ) {
+                composable(
+                    route = "starred_folder?path={path}",
+                    arguments = listOf(
+                        navArgument("path") {
+                            type = NavType.StringType
+                            defaultValue = "starred"
+                        }
+                    ),
+                ) { backStackEntry ->
+                    val path = backStackEntry.arguments?.getString("path") ?: "starred"
+                    val vm: FolderViewModel = viewModel(key = "$path-${session.token}") {
+                        FolderViewModel(container, initialPath = path)
+                    }
+                    FolderScreen(
+                        vm = vm,
+                        api = container.api(),
+                        onNavigateFolder = { navigateToFolder("starred", it) },
+                        onNavigateCrumb = { targetPath, stepsToPop -> navigateToCrumb("starred", targetPath, stepsToPop) },
+                        onOpenSearch = { navController.navigate("search") },
+                    )
+                }
+            }
+
+            navigation(
+                startDestination = "recent_folder?path=all",
+                route = "recent_graph",
+            ) {
+                composable(
+                    route = "recent_folder?path={path}",
+                    arguments = listOf(
+                        navArgument("path") {
+                            type = NavType.StringType
+                            defaultValue = "all"
+                        }
+                    ),
+                ) { backStackEntry ->
+                    val path = backStackEntry.arguments?.getString("path") ?: "all"
+                    val vm: FolderViewModel = viewModel(key = "$path-${session.token}") {
+                        FolderViewModel(container, initialPath = path)
+                    }
+                    FolderScreen(
+                        vm = vm,
+                        api = container.api(),
+                        onNavigateFolder = { navigateToFolder("recent", it) },
+                        onNavigateCrumb = { targetPath, stepsToPop -> navigateToCrumb("recent", targetPath, stepsToPop) },
+                        onOpenSearch = { navController.navigate("search") },
+                    )
+                }
             }
 
             composable("transfers") {
                 TransfersPlaceholderScreen()
             }
 
-            composable("more") {
-                MoreScreen(
-                    container = container,
-                    session = session,
-                    onNavigateTrash = { navigateToFolder("trash") },
-                    onNavigateInbox = { navigateToFolder("inbox") },
-                )
+            navigation(
+                startDestination = "more_root",
+                route = "more_graph",
+            ) {
+                composable("more_root") {
+                    MoreScreen(
+                        container = container,
+                        session = session,
+                        onNavigateTrash = { navigateToFolder("more", "trash") },
+                        onNavigateInbox = { navigateToFolder("more", "inbox") },
+                    )
+                }
+
+                composable(
+                    route = "more_folder?path={path}",
+                    arguments = listOf(
+                        navArgument("path") {
+                            type = NavType.StringType
+                            defaultValue = "trash"
+                        }
+                    ),
+                ) { backStackEntry ->
+                    val path = backStackEntry.arguments?.getString("path") ?: "trash"
+                    val vm: FolderViewModel = viewModel(key = "$path-${session.token}") {
+                        FolderViewModel(container, initialPath = path)
+                    }
+                    FolderScreen(
+                        vm = vm,
+                        api = container.api(),
+                        onNavigateFolder = { navigateToFolder("more", it) },
+                        onNavigateCrumb = { targetPath, stepsToPop -> navigateToCrumb("more", targetPath, stepsToPop) },
+                        onOpenSearch = { navController.navigate("search") },
+                    )
+                }
             }
 
             composable("search") {
@@ -174,7 +264,7 @@ fun MainScreen(
                 SearchScreen(
                     vm = vm,
                     api = container.api(),
-                    onNavigateFolder = { navigateToFolder(it) },
+                    onNavigateFolder = { navigateToFolder("home", it) },
                     onBack = { navController.popBackStack() },
                 )
             }

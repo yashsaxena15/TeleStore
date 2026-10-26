@@ -65,28 +65,23 @@ fun FolderPickerSheet(
     var loading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
+    var reloadKey by remember { mutableStateOf(0) }
 
     val scope = rememberCoroutineScope()
 
-    fun loadFolders(path: String) {
-        scope.launch {
-            loading = true
-            errorMessage = null
-            try {
-                val page = api.listFiles(path = path, pageSize = 200)
-                folders = page.files.filter { it.isFolder }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                errorMessage = (e as? ApiException)?.message ?: "Failed to load folders: ${e.message}"
-            } finally {
-                loading = false
-            }
+    LaunchedEffect(currentPath, reloadKey) {
+        loading = true
+        errorMessage = null
+        try {
+            val page = api.listFiles(path = currentPath, pageSize = 200)
+            folders = page.files.filter { it.isFolder }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            errorMessage = (e as? ApiException)?.message ?: "Failed to load folders: ${e.message}"
+        } finally {
+            loading = false
         }
-    }
-
-    LaunchedEffect(currentPath) {
-        loadFolders(currentPath)
     }
 
     // Check if moving any folder into itself or a subfolder
@@ -271,7 +266,7 @@ fun FolderPickerSheet(
                 scope.launch {
                     try {
                         api.createFolder(name = name, parentPath = currentPath)
-                        loadFolders(currentPath)
+                        reloadKey++
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {

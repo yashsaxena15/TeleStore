@@ -1,5 +1,6 @@
 package com.backendforge.telestore.ui.browse
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +37,7 @@ import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DividerDefaults
@@ -87,11 +89,16 @@ fun FolderScreen(
     vm: FolderViewModel,
     api: TeleStoreApi,
     onNavigateFolder: (String) -> Unit,
+    onNavigateCrumb: ((targetPath: String, stepsToPop: Int) -> Unit)? = null,
     onOpenSearch: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+
+    BackHandler(enabled = state.isSelectionMode) {
+        vm.clearSelection()
+    }
 
     var showSortSheet by remember { mutableStateOf(false) }
     var actionItem by remember { mutableStateOf<FileItem?>(null) }
@@ -213,6 +220,7 @@ fun FolderScreen(
                             enabled = selected.isNotEmpty(),
                         )
                     } else if (state.isInbox) {
+                        val allStarred = selected.isNotEmpty() && selected.all { it.starred }
                         NavigationBarItem(
                             selected = false,
                             onClick = { folderPickerTarget = selected to FolderPickerMode.MOVE },
@@ -222,9 +230,14 @@ fun FolderScreen(
                         )
                         NavigationBarItem(
                             selected = false,
-                            onClick = { vm.starItems(selected, true) },
-                            icon = { Icon(Icons.Default.Star, contentDescription = null) },
-                            label = { Text("Star") },
+                            onClick = { vm.starItems(selected, !allStarred) },
+                            icon = {
+                                Icon(
+                                    if (allStarred) Icons.Default.StarOutline else Icons.Default.Star,
+                                    contentDescription = null
+                                )
+                            },
+                            label = { Text(if (allStarred) "Unstar" else "Star") },
                             enabled = selected.isNotEmpty(),
                         )
                         NavigationBarItem(
@@ -235,6 +248,7 @@ fun FolderScreen(
                             enabled = selected.isNotEmpty(),
                         )
                     } else {
+                        val allStarred = selected.isNotEmpty() && selected.all { it.starred }
                         NavigationBarItem(
                             selected = false,
                             onClick = { folderPickerTarget = selected to FolderPickerMode.MOVE },
@@ -251,9 +265,14 @@ fun FolderScreen(
                         )
                         NavigationBarItem(
                             selected = false,
-                            onClick = { vm.starItems(selected, true) },
-                            icon = { Icon(Icons.Default.Star, contentDescription = null) },
-                            label = { Text("Star") },
+                            onClick = { vm.starItems(selected, !allStarred) },
+                            icon = {
+                                Icon(
+                                    if (allStarred) Icons.Default.StarOutline else Icons.Default.Star,
+                                    contentDescription = null
+                                )
+                            },
+                            label = { Text(if (allStarred) "Unstar" else "Star") },
                             enabled = selected.isNotEmpty(),
                         )
                         NavigationBarItem(
@@ -287,7 +306,16 @@ fun FolderScreen(
                         crumbs.forEachIndexed { index, (label, path) ->
                             val isLast = index == crumbs.lastIndex
                             SuggestionChip(
-                                onClick = { if (!isLast) onNavigateFolder(path) },
+                                onClick = {
+                                    if (!isLast) {
+                                        val stepsToPop = crumbs.lastIndex - index
+                                        if (onNavigateCrumb != null) {
+                                            onNavigateCrumb(path, stepsToPop)
+                                        } else {
+                                            onNavigateFolder(path)
+                                        }
+                                    }
+                                },
                                 label = { Text(label) },
                                 enabled = !isLast,
                             )
@@ -363,7 +391,9 @@ fun FolderScreen(
                                         isSelected = item.id in state.selectedIds,
                                         onToggleSelect = { vm.toggleSelection(item) },
                                         onClick = {
-                                            if (item.isFolder) {
+                                            if (state.isTrash) {
+                                                infoItem = item
+                                            } else if (item.isFolder) {
                                                 onNavigateFolder(FolderPaths.childPath(item))
                                             } else {
                                                 infoItem = item
@@ -409,7 +439,9 @@ fun FolderScreen(
                                         isSelected = item.id in state.selectedIds,
                                         onToggleSelect = { vm.toggleSelection(item) },
                                         onClick = {
-                                            if (item.isFolder) {
+                                            if (state.isTrash) {
+                                                infoItem = item
+                                            } else if (item.isFolder) {
                                                 onNavigateFolder(FolderPaths.childPath(item))
                                             } else {
                                                 infoItem = item

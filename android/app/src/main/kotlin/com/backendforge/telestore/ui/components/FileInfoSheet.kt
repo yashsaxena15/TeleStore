@@ -85,6 +85,9 @@ fun FileInfoSheet(
             InfoRow(label = "Starred", value = if (item.starred) "Yes" else "No")
 
             if (item.trashed) {
+                if (item.isFolder) {
+                    InfoRow(label = "Status", value = "Restore it to open it")
+                }
                 val trashedDate = DateFormatter.formatFull(item.trashedAt)
                 if (trashedDate.isNotEmpty()) {
                     InfoRow(label = "Deleted on", value = trashedDate)

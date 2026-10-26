@@ -80,7 +80,18 @@
   - Shows "Uploads and downloads arrive in Phase 4".
 
 ## Deviations from Prompt
-- None. All requirements and contracts from the prompt were strictly implemented.
+- The root repository `.gitignore` contained a `test/` rule that unintentionally matched and excluded `android/core/src/test` and `android/app/src/test`. Added unignore rules in `android/.gitignore` (`!test/`, `!core/src/test/**`, `!app/src/test/**`) so Android tests are tracked in git and executed in CI.
+- `android/docs/PHASE_2_PROMPT.md` was committed to preserve requirements and specifications in the repository.
+
+## Review Fixes
+1. **Opening a folder in Trash**: In `FolderScreen.kt`, tapping any item in Trash (folder or file) in either List or Grid view opens `FileInfoSheet` instead of attempting navigation to `/files?path=...`. In `FileInfoSheet.kt`, trashed folders display `Status: Restore it to open it`.
+2. **Back handling in selection mode**: Added `BackHandler(enabled = state.isSelectionMode) { vm.clearSelection() }` in `FolderScreen.kt`. It takes precedence over `MainScreen`'s root back handler, ending selection mode without leaving the folder or closing the app.
+3. **Stale replies and race conditions**:
+   - In `FolderViewModel.kt`: Added `private var loadJob: Job?`. A page-1 load (`refresh`, `setSort`, `setPath`, `init`) cancels `loadJob` before starting. `loadMore()` does nothing while `loadJob?.isActive == true`. When responses arrive, they are applied only if `path`, `sortBy`, and `ascending` still equal the values requested.
+   - In `FolderPickerSheet.kt`: Moved folder loading into `LaunchedEffect(currentPath, reloadKey)` directly without `scope.launch`, ensuring the coroutine is cancelled automatically when the user changes folders quickly.
+4. **Bulk Star / Unstar**: In `FolderScreen.kt`, the selection bar checks `val allStarred = selected.isNotEmpty() && selected.all { it.starred }`. If all selected items are starred, the button displays "Unstar" with `StarOutline` and calls `starItems(selected, false)`. Otherwise, it displays "Star" with a filled star and calls `starItems(selected, true)`.
+5. **Tab backstack persistence**: In `MainScreen.kt`, wrapped each tab in its own nested navigation graph (`home_graph`, `starred_graph`, `recent_graph`, `transfers`, `more_graph`). Navigating tabs with `saveState = true; restoreState = true` preserves each tab's independent backstack and scroll position.
+6. **Breadcrumb navigation**: In `MainScreen.kt`, `navigateToCrumb` checks if the target path exists `stepsToPop` levels down in the current backstack. If so, it pops `stepsToPop` times via `repeat(stepsToPop) { navController.popBackStack() }`, cleanly landing on the crumb folder with the remaining backstack preserved beneath it.
 
 ## Left Unfinished
-- Nothing. All Phase 2 Browse requirements are complete.
+- Nothing. All Phase 2 Browse requirements and review items are complete and verified.

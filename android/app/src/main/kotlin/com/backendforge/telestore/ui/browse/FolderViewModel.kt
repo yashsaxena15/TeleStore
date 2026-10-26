@@ -10,6 +10,7 @@ import com.backendforge.telestore.core.SortBy
 import com.backendforge.telestore.data.AppContainer
 import com.backendforge.telestore.ui.components.BrowserPreferences
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -51,6 +52,8 @@ class FolderViewModel(
     private val api get() = container.api()
     private val prefs = BrowserPreferences(container.context)
 
+    private var loadJob: Job? = null
+
     private val _state = MutableStateFlow(
         FolderState(
             path = initialPath,
@@ -63,7 +66,7 @@ class FolderViewModel(
     val state: StateFlow<FolderState> = _state.asStateFlow()
 
     init {
-        loadPage(page = 1, isRefresh = false)
+        loadInitialPage(isRefresh = false)
     }
 
     private fun resolveTitle(path: String): String {
@@ -92,60 +95,107 @@ class FolderViewModel(
                 error = null,
             )
         }
-        loadPage(page = 1, isRefresh = false)
+        loadInitialPage(isRefresh = false)
     }
 
     fun refresh() {
-        loadPage(page = 1, isRefresh = true)
+        loadInitialPage(isRefresh = true)
     }
 
     fun loadMore() {
         val current = _state.value
-        if (current.loading || current.loadingMore || !current.hasNext) return
-        loadPage(page = current.page + 1, isRefresh = false, isMore = true)
+        if (loadJob?.isActive == true || current.loading || current.loadingMore || !current.hasNext) return
+        loadMorePage(page = current.page + 1)
     }
 
-    private fun loadPage(page: Int, isRefresh: Boolean = false, isMore: Boolean = false) {
-        viewModelScope.launch {
+    private fun loadInitialPage(isRefresh: Boolean) {
+        loadJob?.cancel()
+        val requestPath = _state.value.path
+        val requestSortBy = _state.value.sortBy
+        val requestAscending = _state.value.ascending
+
+        loadJob = viewModelScope.launch {
             _state.update {
-                when {
-                    isRefresh -> it.copy(refreshing = true, error = null)
-                    isMore -> it.copy(loadingMore = true)
-                    else -> it.copy(loading = true, error = null)
-                }
+                if (isRefresh) it.copy(refreshing = true, error = null)
+                else it.copy(loading = true, error = null)
             }
             try {
-                val current = _state.value
                 val res = api.listFiles(
-                    path = current.path,
-                    page = page,
+                    path = requestPath,
+                    page = 1,
                     pageSize = 50,
-                    sortBy = current.sortBy,
-                    ascending = current.ascending,
+                    sortBy = requestSortBy,
+                    ascending = requestAscending,
                 )
-                _state.update {
-                    val combined = if (isMore) it.items + res.files else res.files
-                    it.copy(
-                        items = combined,
-                        page = page,
-                        hasNext = res.pagination?.hasNext ?: false,
-                        loading = false,
-                        refreshing = false,
-                        loadingMore = false,
-                        error = null,
-                    )
+                _state.update { current ->
+                    if (current.path == requestPath && current.sortBy == requestSortBy && current.ascending == requestAscending) {
+                        current.copy(
+                            items = res.files,
+                            page = 1,
+                            hasNext = res.pagination?.hasNext ?: false,
+                            loading = false,
+                            refreshing = false,
+                            error = null,
+                        )
+                    } else {
+                        current.copy(loading = false, refreshing = false)
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 val message = (e as? ApiException)?.message ?: "Something went wrong: ${e.message}"
-                _state.update {
-                    it.copy(
-                        loading = false,
-                        refreshing = false,
+                _state.update { current ->
+                    if (current.path == requestPath && current.sortBy == requestSortBy && current.ascending == requestAscending) {
+                        current.copy(
+                            loading = false,
+                            refreshing = false,
+                            error = if (current.items.isEmpty()) message else null,
+                            snackbarMessage = if (current.items.isNotEmpty()) message else null,
+                        )
+                    } else {
+                        current.copy(loading = false, refreshing = false)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun loadMorePage(page: Int) {
+        val requestPath = _state.value.path
+        val requestSortBy = _state.value.sortBy
+        val requestAscending = _state.value.ascending
+
+        viewModelScope.launch {
+            _state.update { it.copy(loadingMore = true) }
+            try {
+                val res = api.listFiles(
+                    path = requestPath,
+                    page = page,
+                    pageSize = 50,
+                    sortBy = requestSortBy,
+                    ascending = requestAscending,
+                )
+                _state.update { current ->
+                    if (current.path == requestPath && current.sortBy == requestSortBy && current.ascending == requestAscending) {
+                        current.copy(
+                            items = current.items + res.files,
+                            page = page,
+                            hasNext = res.pagination?.hasNext ?: false,
+                            loadingMore = false,
+                        )
+                    } else {
+                        current.copy(loadingMore = false)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val message = (e as? ApiException)?.message ?: "Something went wrong: ${e.message}"
+                _state.update { current ->
+                    current.copy(
                         loadingMore = false,
-                        error = if (page == 1 && it.items.isEmpty()) message else null,
-                        snackbarMessage = if (it.items.isNotEmpty()) message else null,
+                        snackbarMessage = message,
                     )
                 }
             }
@@ -156,7 +206,7 @@ class FolderViewModel(
         prefs.sortBy = sortBy
         prefs.ascending = ascending
         _state.update { it.copy(sortBy = sortBy, ascending = ascending) }
-        loadPage(page = 1, isRefresh = false)
+        loadInitialPage(isRefresh = false)
     }
 
     fun setViewMode(isGrid: Boolean) {
