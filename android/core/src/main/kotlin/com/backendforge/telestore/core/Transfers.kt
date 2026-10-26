@@ -129,6 +129,8 @@ class ChunkedUploader(
     private val onSaving: () -> Unit = {},
     private val retryDelayMs: (attempt: Int) -> Long = { attempt -> 2_000L * attempt },
     private val pollMs: Long = 2_000,
+    /** When a photo or video was taken (ISO, UTC), so the server's timeline can use it. */
+    private val takenAt: String? = null,
 ) {
     suspend fun upload(resumeId: String? = null): FileItem? {
         require(size > 0) { "Empty files can't be uploaded." }
@@ -140,7 +142,7 @@ class ChunkedUploader(
                 "processing" -> return waitUntilSaved(resumeId)
             }
         }
-        val session = api.uploadInit(name, size, folder, resumeId)
+        val session = api.uploadInit(name, size, folder, resumeId, takenAt)
         onSession(session.uploadId)
         val chunk = session.chunkSize
         val sent = AtomicLong(session.received.sumOf { lengthOf(it, chunk) })

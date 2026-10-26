@@ -5,6 +5,7 @@ import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.backendforge.telestore.core.ServerAddress
 import com.backendforge.telestore.core.TeleStoreApi
+import com.backendforge.telestore.backup.BackupStore
 import com.backendforge.telestore.core.LyricsFinder
 import com.backendforge.telestore.core.UpdateChecker
 import com.backendforge.telestore.player.MusicController
@@ -30,6 +31,7 @@ class AppContainer(val context: Context) {
     private val webClient = TeleStoreApi.defaultClient()
     fun lyrics(): LyricsFinder = LyricsFinder(api(), webClient)
     val transfers = TransferManager(context.applicationContext)
+    val backup = BackupStore(context.applicationContext)
 
     /** Files shared into TeleStore from other apps, waiting for the user to pick a folder. */
     val pendingShare = MutableStateFlow<List<PickedFile>>(emptyList())

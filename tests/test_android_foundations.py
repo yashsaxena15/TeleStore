@@ -200,3 +200,29 @@ class TestKindListing:
             assert listing.call_args.kwargs["kind"] == "photo"
         finally:
             app.dependency_overrides.clear()
+
+
+class TestPhotosTimeline:
+    def test_taken_at_is_normalised(self):
+        from telestore.api.routes.files.chunked_upload import _taken_at
+        assert _taken_at("2026-10-24T18:30:05.123+05:30") == "2026-10-24T13:00:05"
+        assert _taken_at("2026-10-24T13:00:05Z") == "2026-10-24T13:00:05"
+        assert _taken_at("2026-10-24T13:00:05") == "2026-10-24T13:00:05"
+        assert _taken_at("yesterday") is None
+        assert _taken_at(None) is None
+
+    def test_media_kind_is_photos_and_videos(self):
+        repo = Files.__new__(Files)
+        with patch.object(Files, "find", return_value=[]) as find:
+            repo.get_files_by_path(path="all", owner_id="42", kind="media")
+        rules = find.call_args.args[0]["$or"]
+        assert rules[0] == {"file_type": {"$in": ["photo", "video"]}}
+        assert len(rules) == 3
+
+    def test_sort_by_taken_falls_back_to_upload_date(self):
+        repo = Files.__new__(Files)
+        with patch.object(Files, "count_documents", return_value=0), patch.object(Files, "aggregate", return_value=[]) as agg:
+            repo.get_files_by_path(path="all", owner_id="42", kind="media", page=1, page_size=10, sort_by="taken", sort_order="desc", folders_first=False)
+        pipeline = agg.call_args.args[0]
+        assert {"$addFields": {"sort_date": {"$ifNull": ["$taken_at", "$modified_date"]}}} in pipeline
+        assert {"$sort": {"sort_date": -1}} in pipeline

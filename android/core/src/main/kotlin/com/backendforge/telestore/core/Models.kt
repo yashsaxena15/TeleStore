@@ -50,7 +50,11 @@ data class FileItem(
     @SerialName("original_path") val originalPath: String? = null,
     @SerialName("is_split") val isSplit: Boolean = false,
     @SerialName("is_vault") val isVault: Boolean = false,
+    /** When a photo or video was taken (sent by the phone backup); null for other uploads. */
+    @SerialName("taken_at") val takenAt: String? = null,
 ) {
+    /** The date for timelines: when it was taken, else when it was uploaded. */
+    val timelineDate: String? get() = takenAt ?: modified
     val isFolder: Boolean get() = type == "folder"
     val kind: FileKind get() = FileKinds.of(this)
 }
@@ -77,4 +81,4 @@ data class MessageReply(val message: String? = null)
 @Serializable
 data class StarReply(val starred: Boolean = false)
 
-enum class SortBy(val wire: String) { NAME("name"), DATE("date"), SIZE("size") }
+enum class SortBy(val wire: String) { NAME("name"), DATE("date"), SIZE("size"), TAKEN("taken") }

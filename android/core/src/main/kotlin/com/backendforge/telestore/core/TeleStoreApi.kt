@@ -87,6 +87,8 @@ class TeleStoreApi(
         query: String? = null,
         /** With path "all": only this kind (video, photo, audio or document). */
         kind: FileKind? = null,
+        /** With path "all": photos and videos together (the Photos timeline). */
+        mediaOnly: Boolean = false,
     ): FilePage = get(
         url("files").newBuilder()
             .addQueryParameter("path", path)
@@ -95,7 +97,7 @@ class TeleStoreApi(
             .addQueryParameter("sort_by", sortBy.wire)
             .addQueryParameter("sort_order", if (ascending) "asc" else "desc")
             .apply { query?.trim()?.takeIf { it.isNotEmpty() }?.let { addQueryParameter("q", it) } }
-            .apply { kind?.wire?.let { addQueryParameter("kind", it) } }
+            .apply { (if (mediaOnly) "media" else kind?.wire)?.let { addQueryParameter("kind", it) } }
             .build()
     )
 
@@ -109,13 +111,18 @@ class TeleStoreApi(
 
     // ── Uploads (the website's chunked protocol) ────────────────────────────────
     /** Starts an upload, or continues [resumeId] when the server still has it. */
-    suspend fun uploadInit(name: String, size: Long, folder: String, resumeId: String? = null): UploadSession =
+    suspend fun uploadInit(name: String, size: Long, folder: String, resumeId: String? = null, takenAt: String? = null): UploadSession =
         post(url("files/upload/init"), buildJsonObject {
             put("filename", name)
             put("filesize", size)
             put("path", folder)
             resumeId?.let { put("resume_upload_id", it) }
+            takenAt?.let { put("taken_at", it) }
         })
+
+    /** Makes every folder along [fullPath] (e.g. "/Home/Phone Backup/Camera"); fine if they exist. */
+    suspend fun createFolderPath(fullPath: String): MessageReply =
+        post(url("folders/create-path"), buildJsonObject { put("fullPath", fullPath) })
 
     /** One chunk as the raw body; a chunk sent twice is simply written again in place. */
     suspend fun uploadChunk(uploadId: String, index: Int, bytes: ByteArray, length: Int = bytes.size) {

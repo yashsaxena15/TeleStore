@@ -41,6 +41,7 @@ class FileData:
     trashed_at: str = None
     original_path: str = None
     is_vault: bool = False
+    taken_at: str = None  # when a photo/video was taken (from the phone's backup), ISO UTC
     
 class Files(Collection):
     def __init__(self,collection: Collection) -> None:
@@ -318,7 +319,14 @@ class Files(Collection):
             # One kind only (the app's Videos / Photos / Music / Documents): by stored type or extension,
             # since some uploads (e.g. over WebDAV) are stored as "document" whatever they are
             kind_rule = KIND_FILTERS.get((kind or "").lower())
-            if kind_rule and kind_rule[0] == "document":
+            if (kind or "").lower() == "media":
+                # Photos and videos together (the app's Photos timeline)
+                query["$or"] = [
+                    {"file_type": {"$in": ["photo", "video"]}},
+                    {"file_name": {"$regex": KIND_FILTERS["photo"][1], "$options": "i"}},
+                    {"file_name": {"$regex": KIND_FILTERS["video"][1], "$options": "i"}},
+                ]
+            elif kind_rule and kind_rule[0] == "document":
                 # "document" is also what everything unrecognised is stored as (apk, zip…), so
                 # documents are matched by extension only
                 query["file_name"] = {"$regex": kind_rule[1], "$options": "i"}
@@ -363,7 +371,8 @@ class Files(Collection):
                 trashed=bool(file_dict.get("trashed", False)),
                 trashed_at=file_dict.get("trashed_at"),
                 original_path=file_dict.get("original_path"),
-                is_vault=bool(file_dict.get("is_vault", False))
+                is_vault=bool(file_dict.get("is_vault", False)),
+                taken_at=file_dict.get("taken_at"),
             )
 
         if page is not None or page_size is not None:
@@ -385,6 +394,10 @@ class Files(Collection):
             total_items = self.count_documents(query)
 
             pipeline = [{"$match": query}]
+            if sort_by == "taken":
+                # When it was taken, else when it was uploaded
+                pipeline.append({"$addFields": {"sort_date": {"$ifNull": ["$taken_at", "$modified_date"]}}})
+                target_field = "sort_date"
             if folders_first:
                 pipeline.append({
                     "$addFields": {
