@@ -1,4 +1,4 @@
-package com.backendforge.telestore.ui.home
+package com.backendforge.telestore.ui.components
 
 import java.util.Locale
 
