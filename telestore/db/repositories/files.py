@@ -318,7 +318,11 @@ class Files(Collection):
             # One kind only (the app's Videos / Photos / Music / Documents): by stored type or extension,
             # since some uploads (e.g. over WebDAV) are stored as "document" whatever they are
             kind_rule = KIND_FILTERS.get((kind or "").lower())
-            if kind_rule:
+            if kind_rule and kind_rule[0] == "document":
+                # "document" is also what everything unrecognised is stored as (apk, zip…), so
+                # documents are matched by extension only
+                query["file_name"] = {"$regex": kind_rule[1], "$options": "i"}
+            elif kind_rule:
                 query["$or"] = [{"file_type": kind_rule[0]}, {"file_name": {"$regex": kind_rule[1], "$options": "i"}}]
         # For root path, get files with path="/" and folders with path="/"
         elif path in ["/", "Home", "/Home"]:

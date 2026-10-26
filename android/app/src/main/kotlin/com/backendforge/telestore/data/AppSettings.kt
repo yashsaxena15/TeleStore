@@ -21,6 +21,11 @@ class AppSettings(context: Context) {
         _theme.value = mode
     }
 
+    /** Videos keep playing (sound only) when the app is left or the screen turns off. */
+    var videoBackgroundPlay: Boolean
+        get() = prefs.getBoolean(KEY_BG_PLAY, true)
+        set(value) = prefs.edit().putBoolean(KEY_BG_PLAY, value).apply()
+
     /** When the app last looked for an update (it checks at most once a day by itself). */
     var lastUpdateCheck: Long
         get() = prefs.getLong(KEY_UPDATE_CHECK, 0)
@@ -29,5 +34,6 @@ class AppSettings(context: Context) {
     private companion object {
         const val KEY_THEME = "theme"
         const val KEY_UPDATE_CHECK = "last_update_check"
+        const val KEY_BG_PLAY = "video_background_play"
     }
 }
