@@ -6,6 +6,7 @@ import com.backendforge.telestore.core.ApiException
 import com.backendforge.telestore.core.FileItem
 import com.backendforge.telestore.core.TeleStoreApi
 import com.backendforge.telestore.data.AppContainer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -51,8 +52,11 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
             try {
                 val page = container.api().listFiles(path = path, pageSize = 200)
                 _state.update { if (it.apiPath == path) it.copy(items = page.files, loading = false) else it }
-            } catch (e: ApiException) {
-                _state.update { it.copy(loading = false, error = e.message) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val message = (e as? ApiException)?.message ?: "Couldn't load this folder: ${e.message ?: e.javaClass.simpleName}"
+                _state.update { it.copy(loading = false, error = message) }
             }
         }
     }

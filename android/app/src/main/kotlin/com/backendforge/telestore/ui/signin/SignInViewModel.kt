@@ -8,6 +8,7 @@ import com.backendforge.telestore.core.ServerAddress
 import com.backendforge.telestore.core.TeleStoreApi
 import com.backendforge.telestore.data.AppContainer
 import com.backendforge.telestore.data.Session
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,8 +60,11 @@ class SignInViewModel(private val container: AppContainer) : ViewModel() {
             try {
                 val res = call(api)
                 container.session.signedIn(Session(api.baseUrl.toString().trimEnd('/'), res.account, res.authToken))
-            } catch (e: ApiException) {
-                showError(e.message ?: "Sign-in failed.")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Anything unexpected is shown, never a crash
+                showError((e as? ApiException)?.message ?: "Sign-in failed: ${e.message ?: e.javaClass.simpleName}")
             }
         }
     }
