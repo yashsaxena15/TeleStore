@@ -53,6 +53,9 @@ class TeleStoreApi(
 
     val media = MediaUrls(baseUrl, token)
 
+    /** For the few requests the server takes minutes to answer (updating yt-dlp). */
+    private val slowHttp: OkHttpClient by lazy { http.newBuilder().readTimeout(6, TimeUnit.MINUTES).build() }
+
     // ── Sign-in ─────────────────────────────────────────────────────────────────
     /** The Google client ID for "Continue with Google", or null when the server hasn't set it up. */
     suspend fun googleConfig(): GoogleConfig = get(url("auth/google/config"))
@@ -209,6 +212,108 @@ class TeleStoreApi(
             put("version", version.take(40))
             put("device", device.take(120))
         })
+
+    // ── Settings ────────────────────────────────────────────────────────────────
+    suspend fun profile(): UserProfile = get(url("user/profile"))
+    suspend fun isOwner(): Boolean = get<OwnerReply>(url("user/is-owner")).isOwner
+
+    /** [user]: an id from the user list, or the signed-in username for your own password. Empty [current] when you have none yet. */
+    suspend fun changePassword(user: String, current: String, new: String): MessageReply =
+        put(url("user").newBuilder().addPathSegment(user).addPathSegment("password").build(), buildJsonObject {
+            put("current_password", current)
+            put("new_password", new)
+        })
+
+    /** A code and a link that opens the bot in Telegram; sending it links this account's Telegram. */
+    suspend fun telegramVerification(): TelegramVerification =
+        post(url("telegram/generate-verification"), buildJsonObject { put("user_id", "None") })
+
+    suspend fun indexChat(): IndexChat = get(url("user/index-chat"))
+    suspend fun setIndexChat(chatId: Long): IndexChat = put(url("user/index-chat"), buildJsonObject { put("index_chat_id", chatId) })
+
+    /** Forgot password: a 6-digit code goes to the account's email. */
+    suspend fun forgotPassword(username: String): MessageReply =
+        post(url("auth/forgot-password/request"), buildJsonObject { put("username", username.trim()) })
+
+    suspend fun resetPassword(username: String, code: String, new: String): MessageReply =
+        post(url("auth/forgot-password/reset"), buildJsonObject {
+            put("username", username.trim())
+            put("code", code.trim())
+            put("new_password", new)
+        })
+
+    suspend fun vaultRecoveryCode(email: String, pin: String): MessageReply =
+        post(url("vault/recovery-email/request-otp"), buildJsonObject {
+            put("email", email.trim())
+            put("pin", pin)
+        })
+
+    suspend fun vaultRecoveryConfirm(email: String, pin: String, code: String): MessageReply =
+        post(url("vault/recovery-email/confirm"), buildJsonObject {
+            put("email", email.trim())
+            put("pin", pin)
+            put("otp_code", code.trim())
+        })
+
+    // Users (owner)
+    suspend fun users(): ManagedUsers = get(url("user"))
+
+    /** A password account ([username] and [password]) or a Google one (email only). */
+    suspend fun addUser(email: String, canUpload: Boolean, username: String? = null, password: String? = null): ManagedUser =
+        post(url("user"), buildJsonObject {
+            username?.let { put("username", it.trim()) }
+            password?.let { put("password", it) }
+            put("email", email.trim())
+            put("can_upload", canUpload)
+        })
+
+    suspend fun updateUser(id: String, email: String? = null, active: Boolean? = null, canUpload: Boolean? = null): ManagedUser =
+        put(url("user").newBuilder().addPathSegment(id).build(), buildJsonObject {
+            email?.let { put("email", it.trim()) }
+            active?.let { put("active", it) }
+            canUpload?.let { put("can_upload", it) }
+        })
+
+    suspend fun removeUser(id: String) = delete(url("user").newBuilder().addPathSegment(id).build())
+
+    // Video downloads (yt-dlp; changing them is for the owner)
+    suspend fun mediaSettings(): MediaSettings = get(url("transfers/remote/media/settings"))
+
+    suspend fun uploadCookies(name: String, bytes: ByteArray): MediaSettings =
+        call(
+            Request.Builder().url(url("transfers/remote/media/cookies")).post(
+                MultipartBody.Builder().setType(MultipartBody.FORM)
+                    .addFormDataPart("file", name, bytes.toRequestBody("text/plain".toMediaType()))
+                    .build(),
+            ).build(),
+        )
+
+    suspend fun removeCookies(): MediaSettings = call(Request.Builder().url(url("transfers/remote/media/cookies")).delete().build())
+
+    /** Installs the newest yt-dlp on the server; takes up to a few minutes. */
+    suspend fun updateDownloader(): MediaSettings =
+        call(Request.Builder().url(url("transfers/remote/media/update")).post(EMPTY_JSON).build(), slowHttp)
+    suspend fun useBuiltinDownloader(): MediaSettings = post(url("transfers/remote/media/use-builtin"), buildJsonObject { })
+
+    suspend fun mediaSyncs(): MediaSyncs = get(url("transfers/remote/media/syncs"))
+    suspend fun setSyncEnabled(id: String, enabled: Boolean): MediaSync =
+        post(syncUrl(id), buildJsonObject { put("enabled", enabled) })
+    suspend fun checkSync(id: String): SyncCheck = post(syncUrl(id).newBuilder().addPathSegment("check").build(), buildJsonObject { })
+    suspend fun removeSync(id: String) = delete(syncUrl(id))
+    private fun syncUrl(id: String) = url("transfers/remote/media/syncs").newBuilder().addPathSegment(id).build()
+
+    // Instagram (the owner's account, used for every import)
+    suspend fun instagramSession(): InstagramSession = get(url("transfers/remote/instagram/session"))
+    suspend fun instagramLogin(username: String, password: String): InstagramSession =
+        post(url("transfers/remote/instagram/session/login"), buildJsonObject {
+            put("username", username.trim())
+            put("password", password)
+        })
+    suspend fun instagramCode(code: String): InstagramSession =
+        post(url("transfers/remote/instagram/session/2fa"), buildJsonObject { put("code", code.trim()) })
+    suspend fun instagramBrowserSession(sessionId: String): InstagramSession =
+        post(url("transfers/remote/instagram/session/browser"), buildJsonObject { put("sessionid", sessionId.trim()) })
+    suspend fun instagramLogout(): InstagramSession = call(Request.Builder().url(url("transfers/remote/instagram/session")).delete().build())
 
     // ── Account ─────────────────────────────────────────────────────────────────
     /** How much the account stores, out of its quota. */
@@ -369,10 +474,17 @@ class TeleStoreApi(
     private suspend inline fun <reified T> post(url: HttpUrl, body: JsonObject): T =
         call(Request.Builder().url(url).post(body.toString().toRequestBody(JSON)).build())
 
+    private suspend inline fun <reified T> put(url: HttpUrl, body: JsonObject): T =
+        call(Request.Builder().url(url).put(body.toString().toRequestBody(JSON)).build())
+
+    private suspend fun delete(url: HttpUrl) {
+        withContext(io) { execute(Request.Builder().url(url).delete().build()).close() }
+    }
+
     /** Sends the request and reads and decodes the reply, all on [io], never on the caller's thread. */
-    private suspend inline fun <reified T> call(request: Request): T = withContext(io) {
+    private suspend inline fun <reified T> call(request: Request, client: OkHttpClient = http): T = withContext(io) {
         val text = try {
-            execute(request).use { it.body?.string().orEmpty() }
+            execute(request, client).use { it.body?.string().orEmpty() }
         } catch (e: IOException) {
             throw NetworkException("The connection to ${baseUrl.host} was lost. Try again.", e)
         }
@@ -384,9 +496,9 @@ class TeleStoreApi(
     }
 
     /** Runs the request (blocking; call it on [io]); a refused request becomes an [ApiException]. */
-    private fun execute(request: Request): Response {
+    private fun execute(request: Request, client: OkHttpClient = http): Response {
         val response = try {
-            http.newCall(request).execute()
+            client.newCall(request).execute()
         } catch (e: IOException) {
             throw NetworkException("Couldn't reach ${baseUrl.host}. Check your connection.", e)
         }

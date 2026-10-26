@@ -69,6 +69,12 @@ class SignInViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** For "Forgot password?": the server typed above, or null when the address isn't valid. */
+    fun forgotPasswordApi(): TeleStoreApi? = currentApi()
+
+    /** After a reset: fill in the username, ready for the new password. */
+    fun passwordReset(username: String) = _state.update { it.copy(username = username, password = "", error = "Password changed. Sign in with the new one.") }
+
     private fun currentApi(): TeleStoreApi? = ServerAddress.normalize(_state.value.server)?.let { container.apiFor(it) }
 
     private fun loadGoogleConfig(debounceMs: Long = 0) {

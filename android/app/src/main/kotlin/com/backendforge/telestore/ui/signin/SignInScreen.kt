@@ -32,7 +32,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -54,6 +58,15 @@ fun SignInScreen(container: AppContainer) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var forgotOpen by rememberSaveable { mutableStateOf(false) }
+    if (forgotOpen) {
+        ForgotPasswordDialog(
+            api = vm.forgotPasswordApi(),
+            initialUsername = state.username,
+            onDismiss = { forgotOpen = false },
+            onDone = vm::passwordReset,
+        )
+    }
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding(), contentAlignment = Alignment.TopCenter) {
@@ -94,6 +107,7 @@ fun SignInScreen(container: AppContainer) {
                 )
 
                 state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                TextButton(onClick = { forgotOpen = true }, enabled = !state.busy) { Text("Forgot password?") }
 
                 Button(
                     onClick = vm::signIn, enabled = !state.busy,

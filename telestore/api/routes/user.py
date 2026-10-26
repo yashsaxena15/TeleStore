@@ -335,7 +335,6 @@ async def change_user_password(request: Request, user_id_param: str, password_re
         # Get current user data
         current_username = user.username if user else request.session.get("username")
         current_user_data = database.Users.getUser(current_username)
-        logger.info(f"Current user data: {current_user_data}")
         
         # Check if user is owner or trying to change their own password
         is_owner = False
@@ -355,7 +354,6 @@ async def change_user_password(request: Request, user_id_param: str, password_re
         
         # Get target user data
         target_user = database.Users.get_user_by_identifier(actual_user_id_param)
-        logger.info(f"Target user data: {target_user}")
         
         if not target_user:
             logger.warning(f"User not found for user_id_param: {actual_user_id_param}")
