@@ -95,6 +95,57 @@ class TeleStoreApi(
             .build()
     )
 
+    // ── Folder & File Actions ───────────────────────────────────────────────────
+    suspend fun createFolder(name: String, parentPath: String = HOME): MessageReply =
+        post(url("folders/create"), buildJsonObject {
+            put("folderName", name.trim())
+            put("currentPath", parentPath)
+        })
+
+    suspend fun rename(item: FileItem, newName: String): MessageReply =
+        post(url("files/rename"), buildJsonObject {
+            put("file_id", item.id)
+            put("new_name", newName.trim())
+        })
+
+    suspend fun move(item: FileItem, targetFolderPath: String): MessageReply =
+        post(url("files/move"), buildJsonObject {
+            put("file_id", item.id)
+            put("target_path", targetFolderPath)
+        })
+
+    suspend fun copy(item: FileItem, targetFolderPath: String): MessageReply =
+        post(url("files/copy"), buildJsonObject {
+            put("file_id", item.id)
+            put("target_path", targetFolderPath)
+        })
+
+    suspend fun setStarred(item: FileItem, starred: Boolean): Boolean {
+        val reply: StarReply = post(url("files/star"), buildJsonObject {
+            put("file_id", item.id)
+            put("starred", starred)
+        })
+        return reply.starred
+    }
+
+    suspend fun trash(item: FileItem): MessageReply =
+        post(url("files/trash"), buildJsonObject {
+            put("file_id", item.id)
+        })
+
+    suspend fun restore(item: FileItem): MessageReply =
+        post(url("files/restore"), buildJsonObject {
+            put("file_id", item.id)
+        })
+
+    suspend fun deleteForever(item: FileItem): MessageReply =
+        post(url("files/delete"), buildJsonObject {
+            put("file_id", item.id)
+        })
+
+    suspend fun emptyTrash(): MessageReply =
+        post(url("files/trash/empty"), buildJsonObject { })
+
     // ── Plumbing ────────────────────────────────────────────────────────────────
     fun url(path: String): HttpUrl = baseUrl.newBuilder().addPathSegments(path).build()
 

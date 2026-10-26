@@ -7,3 +7,11 @@ local.properties
 *.iml
 captures/
 .kotlin/
+
+# Unignore test sources that were matched by root .gitignore 'test/'
+!test/
+!core/src/test/
+!core/src/test/**
+!app/src/test/
+!app/src/test/**
+

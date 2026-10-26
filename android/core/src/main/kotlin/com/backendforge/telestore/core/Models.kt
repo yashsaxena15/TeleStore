@@ -71,4 +71,10 @@ data class FilePage(
     val pagination: Pagination? = null,
 )
 
+@Serializable
+data class MessageReply(val message: String? = null)
+
+@Serializable
+data class StarReply(val starred: Boolean = false)
+
 enum class SortBy(val wire: String) { NAME("name"), DATE("date"), SIZE("size") }
