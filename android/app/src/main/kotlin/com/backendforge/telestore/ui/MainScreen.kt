@@ -511,7 +511,7 @@ fun MainScreen(
                 }
 
                 composable(ROUTE_NOW_PLAYING) {
-                    NowPlayingScreen(musicState, music, onClose = { navController.popBackStack() })
+                    NowPlayingScreen(musicState, music, container, onClose = { navController.popBackStack() })
                 }
             }
         }
