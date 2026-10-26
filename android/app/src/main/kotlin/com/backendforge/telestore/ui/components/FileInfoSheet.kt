@@ -73,7 +73,8 @@ fun FileInfoSheet(
 
             InfoRow(label = "Kind", value = if (item.isFolder) "Folder" else item.kind.name.lowercase().replaceFirstChar { it.uppercase() })
             if (!item.isFolder) {
-                val byteCount = if (item.size > 0) " (${item.size} bytes)" else ""
+                val sizeBytes = item.size ?: 0L
+                val byteCount = if (sizeBytes > 0) " ($sizeBytes bytes)" else ""
                 InfoRow(label = "Size", value = "${formatBytes(item.size)}$byteCount")
             }
             InfoRow(label = "Location", value = item.path.ifEmpty { "/" })
