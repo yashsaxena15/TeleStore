@@ -47,8 +47,11 @@ import coil3.compose.SubcomposeAsyncImage
 import com.backendforge.telestore.core.FileItem
 import com.backendforge.telestore.core.TeleStoreApi
 import com.backendforge.telestore.ui.components.FileInfoSheet
+import com.backendforge.telestore.ui.components.pullDownOffset
+import com.backendforge.telestore.ui.components.pullDownToClose
+import com.backendforge.telestore.ui.components.rememberPullDownState
 
-/** Swipe through the folder's photos; pinch or double-tap to zoom, drag to look around. */
+/** Swipe through the folder's photos; pinch or double-tap to zoom, drag to look around, pull down to close. */
 @Composable
 fun PhotoViewerScreen(
     photos: List<FileItem>,
@@ -66,9 +69,14 @@ fun PhotoViewerScreen(
     var zoomed by remember { mutableStateOf(false) }
     var chrome by remember { mutableStateOf(true) }
     var info by remember { mutableStateOf<FileItem?>(null) }
+    val pull = rememberPullDownState(onBack)
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        HorizontalPager(state = pager, userScrollEnabled = !zoomed, beyondViewportPageCount = 1, modifier = Modifier.fillMaxSize()) { page ->
+    // The black fades as the photo is pulled down, showing it's about to close
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 1f - 0.6f * pull.progress)).pullDownToClose(pull, enabled = !zoomed)) {
+        HorizontalPager(
+            state = pager, userScrollEnabled = !zoomed, beyondViewportPageCount = 1,
+            modifier = Modifier.fillMaxSize().pullDownOffset(pull),
+        ) { page ->
             ZoomableImage(
                 url = remember(page) { offlineCopy(photos[page])?.toString() ?: api.media.file(photos[page]).toString() },
                 active = page == pager.currentPage,
@@ -76,7 +84,7 @@ fun PhotoViewerScreen(
                 onTap = { chrome = !chrome },
             )
         }
-        if (chrome) {
+        if (chrome && pull.offset == 0f) {
             val current = photos[pager.currentPage]
             Row(
                 Modifier.fillMaxWidth().background(Color(0x99000000)).statusBarsPadding().padding(4.dp),

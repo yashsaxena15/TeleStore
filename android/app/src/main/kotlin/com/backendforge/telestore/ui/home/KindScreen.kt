@@ -1,5 +1,6 @@
 package com.backendforge.telestore.ui.home
 
+import com.backendforge.telestore.ui.components.rememberHaptics
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -85,7 +86,7 @@ class KindViewModel(private val container: AppContainer, val kind: FileKind) : V
             try {
                 val page = container.api().listFiles(path = "all", page = s.page + 1, pageSize = 60, sortBy = SortBy.DATE, ascending = false, kind = kind)
                 _state.update {
-                    it.copy(items = it.items + page.files, page = s.page + 1, hasNext = page.pagination?.hasNext ?: false, loading = false)
+                    it.copy(items = (it.items + page.files).distinctBy { f -> f.id }, page = s.page + 1, hasNext = page.pagination?.hasNext ?: false, loading = false)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -113,6 +114,7 @@ fun KindScreen(
     onOpenFile: (FileItem, List<FileItem>) -> Boolean,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val haptics = rememberHaptics()
     val api = container.api()
     val photos = vm.kind == FileKind.PHOTO
     val offline = remember(state.items.size) { container.transfers.store.offlineIds() }
@@ -126,7 +128,7 @@ fun KindScreen(
             )
         },
     ) { padding ->
-        PullToRefreshBox(isRefreshing = state.loading && state.items.isEmpty(), onRefresh = vm::refresh, modifier = Modifier.fillMaxSize().padding(padding)) {
+        PullToRefreshBox(isRefreshing = state.loading && state.items.isEmpty(), onRefresh = { haptics.confirm(); vm.refresh() }, modifier = Modifier.fillMaxSize().padding(padding)) {
             when {
                 state.items.isEmpty() && !state.loading -> Text(
                     state.error ?: "No ${vm.kind.title().lowercase()} yet.",

@@ -5,6 +5,7 @@ import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import com.backendforge.telestore.backup.BackupWorker
+import com.backendforge.telestore.data.CrashReporter
 import com.backendforge.telestore.transfers.TransferNotifications
 import com.backendforge.telestore.data.AppContainer
 
@@ -14,6 +15,7 @@ class TeleStoreApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        CrashReporter.install(this)
         container = AppContainer(this)
         TransferNotifications.createChannel(this)
         // Keep the photo backup scheduled (after an update or a restart)

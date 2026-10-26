@@ -1,5 +1,6 @@
 package com.backendforge.telestore.ui.photos
 
+import com.backendforge.telestore.ui.components.rememberHaptics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -83,8 +84,9 @@ import kotlin.math.roundToInt
 
 /** A row of the timeline grid: a day heading or one photo. */
 private sealed interface Cell {
-    data class Header(val dayIndex: Int) : Cell
-    data class Photo(val item: FileItem, val dayIndex: Int) : Cell
+    /** Carries its own day: looking it up by position in the (changing) list of days crashed on refresh. */
+    data class Header(val dayIndex: Int, val day: com.backendforge.telestore.core.TimelineDay) : Cell
+    data class Photo(val item: FileItem, val dayIndex: Int, val date: java.time.LocalDate?) : Cell
 }
 
 @kotlin.OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -97,6 +99,7 @@ fun PhotosScreen(
     onBackup: () -> Unit,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val haptics = rememberHaptics()
     val backupSettings by container.backup.settings.collectAsStateWithLifecycle()
     val backup by container.backup.status.collectAsStateWithLifecycle()
     val api = container.api()
@@ -111,8 +114,8 @@ fun PhotosScreen(
     val cells = remember(state.days) {
         buildList {
             state.days.forEachIndexed { d, day ->
-                add(Cell.Header(d))
-                day.items.forEach { add(Cell.Photo(it, d)) }
+                add(Cell.Header(d, day))
+                day.items.forEach { add(Cell.Photo(it, d, day.date)) }
             }
         }
     }
@@ -126,7 +129,7 @@ fun PhotosScreen(
             } else {
                 Header(backupSettings.enabled, backup, onBackup)
             }
-            PullToRefreshBox(isRefreshing = state.loading && state.items.isEmpty(), onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
+            PullToRefreshBox(isRefreshing = state.loading && state.page == 0, onRefresh = { haptics.confirm(); vm.refresh() }, modifier = Modifier.fillMaxSize()) {
                 if (state.items.isEmpty() && !state.loading) {
                     EmptyPhotos(state.error, backupSettings.enabled, onBackup)
                 } else {
@@ -159,8 +162,8 @@ fun PhotosScreen(
                             }
                             cells.forEach { cell ->
                                 when (cell) {
-                                    is Cell.Header -> item(span = { GridItemSpan(maxLineSpan) }, key = "day-${cell.dayIndex}") {
-                                        val day = state.days[cell.dayIndex]
+                                    is Cell.Header -> item(span = { GridItemSpan(maxLineSpan) }, key = "day-${cell.dayIndex}-${cell.day.label}") {
+                                        val day = cell.day
                                         val all = day.items.all { it.id in state.selected }
                                         DayHeader(day.label, state.selecting, all) { vm.toggleDay(day) }
                                     }
@@ -185,8 +188,7 @@ fun PhotosScreen(
                             fraction = if (grid.layoutInfo.totalItemsCount > 0) grid.firstVisibleItemIndex.toFloat() / grid.layoutInfo.totalItemsCount else 0f,
                             label = { f ->
                                 val i = (f * cells.size).toInt().coerceIn(0, (cells.size - 1).coerceAtLeast(0))
-                                val day = when (val c = cells.getOrNull(i)) { is Cell.Header -> c.dayIndex; is Cell.Photo -> c.dayIndex; null -> 0 }
-                                Timeline.month(state.days.getOrNull(day)?.date)
+                                Timeline.month(when (val c = cells.getOrNull(i)) { is Cell.Header -> c.day.date; is Cell.Photo -> c.date; null -> null })
                             },
                             onScrub = { f -> scope.launch { grid.scrollToItem((f * grid.layoutInfo.totalItemsCount).toInt().coerceAtLeast(0)) } },
                             modifier = Modifier.align(Alignment.TopEnd),
@@ -271,7 +273,8 @@ private fun DayHeader(label: String, selecting: Boolean, allSelected: Boolean, o
 @kotlin.OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun PhotoCell(item: FileItem, api: com.backendforge.telestore.core.TeleStoreApi, selecting: Boolean, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
-    Box(Modifier.aspectRatio(1f).combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+    val haptics = rememberHaptics()
+    Box(Modifier.aspectRatio(1f).combinedClickable(onClick = onClick, onLongClick = { haptics.longPress(); onLongClick() })) {
         val inset = if (selected) Modifier.padding(10.dp).clip(RoundedCornerShape(10.dp)) else Modifier
         Box(Modifier.fillMaxSize().then(inset)) {
             FileThumbnail(item = item, api = api, modifier = Modifier.fillMaxSize(), shapeRadius = 0.dp, iconSize = 26.dp)

@@ -109,6 +109,14 @@ fun AppearanceSection(container: AppContainer) {
                 FilterChip(selected = theme == mode, onClick = { container.settings.setTheme(mode) }, label = { Text(mode.label) })
             }
         }
+        var haptics by remember { mutableStateOf(container.settings.haptics) }
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text("Vibration feedback", style = MaterialTheme.typography.bodyLarge)
+                Text("On long-press, swipes and PIN keys", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            androidx.compose.material3.Switch(checked = haptics, onCheckedChange = { haptics = it; container.settings.haptics = it })
+        }
     }
 }
 

@@ -37,6 +37,8 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
     private val _state = MutableStateFlow(PhotosState())
     val state: StateFlow<PhotosState> = _state.asStateFlow()
     private var job: Job? = null
+    /** Bumped by refresh: a reply for an older load is dropped. */
+    private var generation = 0
 
     init {
         loadMore()
@@ -44,21 +46,26 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { container.transfers.store.uploaded.collect { refresh() } }
     }
 
+    /** Reloads from the newest; what's on screen stays until the new list arrives. */
     fun refresh() {
         job?.cancel()
-        _state.update { PhotosState(columns = it.columns) }
+        generation++
+        _state.update { it.copy(page = 0, hasNext = true, loading = false, selected = emptySet()) }
         loadMore()
     }
 
     fun loadMore() {
         val s = _state.value
         if (s.loading || !s.hasNext) return
+        val gen = generation
         _state.update { it.copy(loading = true, error = null) }
         job = viewModelScope.launch {
             try {
                 val page = container.api().listFiles(path = "all", page = s.page + 1, pageSize = 200, sortBy = SortBy.TAKEN, ascending = false, mediaOnly = true)
+                if (gen != generation) return@launch
                 _state.update {
-                    val items = it.items + page.files
+                    // Page 1 replaces the list (a refresh); later pages add to it, never twice the same photo
+                    val items = (if (s.page == 0) page.files else it.items + page.files).distinctBy { f -> f.id }
                     it.copy(
                         items = items, days = Timeline.days(items),
                         memories = if (s.page == 0) Timeline.memories(items) else it.memories,
@@ -68,7 +75,7 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.update { it.copy(loading = false, error = (e as? ApiException)?.message ?: "Couldn't load your photos.") }
+                if (gen == generation) _state.update { it.copy(loading = false, error = (e as? ApiException)?.message ?: "Couldn't load your photos.") }
             }
         }
     }

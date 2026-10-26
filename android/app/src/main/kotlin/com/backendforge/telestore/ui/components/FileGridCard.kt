@@ -49,6 +49,7 @@ fun FileGridCard(
     onOpenActions: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val haptics = rememberHaptics()
     Card(
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -57,7 +58,7 @@ fun FileGridCard(
             .clip(RoundedCornerShape(12.dp))
             .combinedClickable(
                 onClick = { if (isSelectionMode) onToggleSelect() else onClick() },
-                onLongClick = onLongClick,
+                onLongClick = { haptics.longPress(); onLongClick() },
             ),
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {

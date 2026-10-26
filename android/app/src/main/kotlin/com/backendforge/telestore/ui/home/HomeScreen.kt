@@ -1,5 +1,6 @@
 package com.backendforge.telestore.ui.home
 
+import com.backendforge.telestore.ui.components.rememberHaptics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -92,6 +93,7 @@ fun HomeScreen(
     onAddLink: () -> Unit = {},
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val haptics = rememberHaptics()
     val history by container.watchHistory.entries.collectAsStateWithLifecycle()
     val watching = remember(history) { container.watchHistory.continueWatching().take(10) }
     val api = container.api()
@@ -112,7 +114,7 @@ fun HomeScreen(
             }
         },
     ) { padding ->
-        PullToRefreshBox(isRefreshing = state.loading, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize().padding(padding)) {
+        PullToRefreshBox(isRefreshing = state.loading, onRefresh = { haptics.confirm(); vm.refresh() }, modifier = Modifier.fillMaxSize().padding(padding)) {
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(160.dp),
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp),

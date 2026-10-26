@@ -1,5 +1,6 @@
 package com.backendforge.telestore.ui.vault
 
+import com.backendforge.telestore.ui.components.rememberHaptics
 import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -372,9 +373,16 @@ private fun Form(title: String, text: String, error: String?, busy: Boolean, con
 @Composable
 private fun PinPad(title: String, error: String?, busy: Boolean, onPin: (String) -> Unit, extra: @Composable () -> Unit = {}) {
     var pin by remember(title) { mutableStateOf("") }
-    LaunchedEffect(error) { if (error != null) pin = "" }
+    val haptics = rememberHaptics()
+    LaunchedEffect(error) {
+        if (error != null) {
+            haptics.reject()
+            pin = ""
+        }
+    }
     fun press(d: String) {
         if (busy || pin.length >= 4) return
+        haptics.click()
         pin += d
         if (VaultPin.isValid(pin)) onPin(pin)
     }
@@ -395,7 +403,7 @@ private fun PinPad(title: String, error: String?, busy: Boolean, onPin: (String)
                 row.forEach { key ->
                     when (key) {
                         "" -> Spacer(Modifier.size(72.dp))
-                        "<" -> IconButton(onClick = { pin = pin.dropLast(1) }, modifier = Modifier.size(72.dp)) {
+                        "<" -> IconButton(onClick = { haptics.click(); pin = pin.dropLast(1) }, modifier = Modifier.size(72.dp)) {
                             Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = "Delete")
                         }
                         else -> FilledTonalButton(onClick = { press(key) }, shape = CircleShape, modifier = Modifier.size(72.dp)) {

@@ -1,6 +1,7 @@
 # telestore/api/routes/system.py
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 from telestore.security.credentials import require_auth, User
 from d4rk.Logs import setup_logger
 import subprocess
@@ -130,3 +131,16 @@ async def github_webhook(request: Request):
     else:
         logger.info(f"Unhandled GitHub event type: {event_type}")
         return {"status": "ignored", "message": f"Event type {event_type} not handled"}
+
+
+class AppCrashReport(BaseModel):
+    report: str = Field(..., max_length=20000)
+    version: str = Field("", max_length=40)
+    device: str = Field("", max_length=120)
+
+
+@router.post("/app-crash")
+async def report_app_crash(body: AppCrashReport, user: User = Depends(require_auth)):
+    """The Android app sends what made it close unexpectedly (on its next start), so it can be fixed."""
+    logger.warning(f"[APP_CRASH] user={user.username} version={body.version} device={body.device}\n{body.report}")
+    return {"received": True}
