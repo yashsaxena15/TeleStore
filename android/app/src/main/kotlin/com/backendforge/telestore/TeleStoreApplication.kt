@@ -4,6 +4,7 @@ import android.app.Application
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
+import com.backendforge.telestore.transfers.TransferNotifications
 import com.backendforge.telestore.data.AppContainer
 
 class TeleStoreApplication : Application(), SingletonImageLoader.Factory {
@@ -13,6 +14,7 @@ class TeleStoreApplication : Application(), SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        TransferNotifications.createChannel(this)
         SingletonImageLoader.setSafe { container.imageLoader }
     }
 

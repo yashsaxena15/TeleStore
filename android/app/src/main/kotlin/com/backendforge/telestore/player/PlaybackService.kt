@@ -6,6 +6,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -28,7 +29,7 @@ class PlaybackService : MediaSessionService() {
         super.onCreate()
         val container = (application as TeleStoreApplication).container
         // The app's own client: it adds the sign-in token and shares connections
-        val dataSource = OkHttpDataSource.Factory(container.api().http)
+        val dataSource = DefaultDataSource.Factory(this, OkHttpDataSource.Factory(container.api().http)) // + downloaded copies
         val player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
             .setAudioAttributes(

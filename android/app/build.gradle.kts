@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 // Release signing comes from CI secrets (see .github/workflows/android.yml). Without them the
@@ -72,6 +73,8 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons)
     debugImplementation(libs.androidx.compose.ui.tooling)
+
+    implementation(libs.androidx.work.runtime)
 
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)

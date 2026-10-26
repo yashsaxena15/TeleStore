@@ -11,6 +11,7 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -72,7 +73,8 @@ class VideoViewModel(private val container: AppContainer) : ViewModel() {
     private val api get() = container.api()
 
     val player: ExoPlayer = ExoPlayer.Builder(container.context)
-        .setMediaSourceFactory(DefaultMediaSourceFactory(OkHttpDataSource.Factory(container.api().http)))
+        // Reads downloaded copies (content://) as well as the server (through the app's own client)
+        .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(container.context, OkHttpDataSource.Factory(container.api().http))))
         .setAudioAttributes(
             AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
             /* handleAudioFocus = */ true, // pauses the music player while a video plays
@@ -182,7 +184,9 @@ class VideoViewModel(private val container: AppContainer) : ViewModel() {
         val item = _state.value.item ?: return
         val next = PlaybackPlan.source(api.media, item, _state.value.quality, mustConvert, serverAudioTrack, startMs)
         source = next
-        player.setMediaItem(MediaItem.fromUri(next.url.toString()), if (next.converted) 0L else startMs)
+        // A downloaded copy on the phone plays without the internet
+        val local = if (next.converted) null else container.transfers.store.offlineCopy(container.context, item.id)
+        player.setMediaItem(MediaItem.fromUri(local?.toString() ?: next.url.toString()), if (next.converted) 0L else startMs)
         player.prepare()
         player.playWhenReady = true
         _state.update { it.copy(converted = next.converted, error = null, ended = false) }

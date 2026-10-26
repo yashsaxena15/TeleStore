@@ -1,6 +1,23 @@
 package com.backendforge.telestore.ui
 
 import android.net.Uri
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
+import com.backendforge.telestore.core.ApiException
+import com.backendforge.telestore.transfers.describe
+import com.backendforge.telestore.ui.components.FolderPickerSheet
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.unit.dp
@@ -52,7 +69,7 @@ import com.backendforge.telestore.ui.browse.FolderViewModel
 import com.backendforge.telestore.ui.more.MoreScreen
 import com.backendforge.telestore.ui.search.SearchScreen
 import com.backendforge.telestore.ui.search.SearchViewModel
-import com.backendforge.telestore.ui.transfers.TransfersPlaceholderScreen
+import com.backendforge.telestore.ui.transfers.TransfersScreen
 
 private const val ROUTE_VIDEO = "video"
 private const val ROUTE_PHOTOS = "photos"
@@ -92,6 +109,8 @@ fun MainScreen(
     val music = remember { container.startMusic() }
     val musicState by music.state.collectAsStateWithLifecycle()
 
+    val context = LocalContext.current
+
     /** Opens a video, song or photo with the folder's others queued after it. False: no viewer. */
     fun openFile(item: FileItem, siblings: List<FileItem>): Boolean {
         val (queue, index) = PlayQueue.around(siblings, item)
@@ -101,7 +120,7 @@ fun MainScreen(
                 navController.navigate(ROUTE_VIDEO)
             }
             FileKind.AUDIO -> {
-                music.play(container.api(), queue, index)
+                music.play(container.api(), queue, index) { container.transfers.store.offlineCopy(context, it.id) }
                 navController.navigate(ROUTE_NOW_PLAYING)
             }
             FileKind.PHOTO -> {
@@ -111,6 +130,62 @@ fun MainScreen(
             else -> return false
         }
         return true
+    }
+
+    // ── Uploads and downloads ─────────────────────────────────────────────
+    val scope = rememberCoroutineScope()
+    var uploadFolder by remember { mutableStateOf(TeleStoreApi.HOME) }
+    var transferMessage by remember { mutableStateOf<String?>(null) }
+    val transferItems by container.transfers.store.items.collectAsStateWithLifecycle()
+    val offlineIds = remember(transferItems) { container.transfers.store.offlineIds() }
+    val pendingShare by container.pendingShare.collectAsStateWithLifecycle()
+
+    // Android 13+ asks before showing the progress notification (transfers run either way)
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    fun askForNotifications() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    fun startUploads(uris: List<Uri>, folder: String) {
+        if (uris.isEmpty()) return
+        askForNotifications()
+        val files = uris.map { describe(context, it) }
+        val skipped = container.transfers.upload(files, folder)
+        val queued = files.size - skipped.size
+        transferMessage = buildString {
+            if (queued > 0) append("Uploading $queued file${if (queued != 1) "s" else ""}. See Transfers.")
+            if (skipped.isNotEmpty()) append(" Skipped (empty or unreadable): ${skipped.joinToString()}")
+        }.trim()
+    }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        startUploads(uris, uploadFolder)
+    }
+
+    fun upload(folder: String) {
+        uploadFolder = folder
+        picker.launch(arrayOf("*/*"))
+    }
+
+    fun download(item: FileItem) {
+        askForNotifications()
+        if (item.isFolder) {
+            scope.launch {
+                transferMessage = try {
+                    val count = container.transfers.downloadFolder(container.api(), FolderPaths.childPath(item))
+                    if (count == 0) "This folder is empty." else "Downloading ${item.name} as ZIP ($count files). See Transfers."
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    (e as? ApiException)?.message ?: "Couldn't start the download."
+                }
+            }
+        } else {
+            container.transfers.download(item)
+            transferMessage = "Downloading ${item.name}. See Transfers."
+        }
     }
 
     fun navigateToFolder(prefix: String, path: String) {
@@ -164,8 +239,33 @@ fun MainScreen(
         activity?.finish()
     }
 
+    val snackbar = remember { SnackbarHostState() }
+    LaunchedEffect(transferMessage) {
+        transferMessage?.takeIf { it.isNotEmpty() }?.let {
+            snackbar.showSnackbar(it)
+            transferMessage = null
+        }
+    }
+
+    // Files shared into TeleStore from another app: choose the folder, then upload
+    if (pendingShare.isNotEmpty()) {
+        FolderPickerSheet(
+            title = "Upload ${pendingShare.size} file${if (pendingShare.size != 1) "s" else ""} to",
+            confirmActionLabel = "Upload here",
+            sourceItems = emptyList(),
+            api = container.api(),
+            onSelectFolder = { folder ->
+                val uris = pendingShare.map { it.uri }
+                container.pendingShare.value = emptyList()
+                startUploads(uris, folder)
+            },
+            onDismiss = { container.pendingShare.value = emptyList() },
+        )
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             if (!isPlayer) Column {
                 if (musicState.hasMedia) MiniPlayer(musicState, music, onOpen = { navController.navigate(ROUTE_NOW_PLAYING) })
@@ -213,6 +313,9 @@ fun MainScreen(
                         onNavigateCrumb = { navigateToCrumb("home", it) },
                         onOpenSearch = { navController.navigate("search") },
                         onOpenFile = ::openFile,
+                        onUpload = ::upload,
+                        onDownload = ::download,
+                        offlineIds = offlineIds,
                     )
                 }
             }
@@ -241,6 +344,9 @@ fun MainScreen(
                         onNavigateCrumb = { navigateToCrumb("starred", it) },
                         onOpenSearch = { navController.navigate("search") },
                         onOpenFile = ::openFile,
+                        onUpload = ::upload,
+                        onDownload = ::download,
+                        offlineIds = offlineIds,
                     )
                 }
             }
@@ -269,12 +375,15 @@ fun MainScreen(
                         onNavigateCrumb = { navigateToCrumb("recent", it) },
                         onOpenSearch = { navController.navigate("search") },
                         onOpenFile = ::openFile,
+                        onUpload = ::upload,
+                        onDownload = ::download,
+                        offlineIds = offlineIds,
                     )
                 }
             }
 
             composable("transfers") {
-                TransfersPlaceholderScreen()
+                TransfersScreen(container)
             }
 
             navigation(
@@ -310,6 +419,9 @@ fun MainScreen(
                         onNavigateCrumb = { navigateToCrumb("more", it) },
                         onOpenSearch = { navController.navigate("search") },
                         onOpenFile = ::openFile,
+                        onUpload = ::upload,
+                        onDownload = ::download,
+                        offlineIds = offlineIds,
                     )
                 }
             }
@@ -338,6 +450,7 @@ fun MainScreen(
                     startIndex = container.playback.photoIndex,
                     api = container.api(),
                     onBack = { navController.popBackStack() },
+                    offlineCopy = { container.transfers.store.offlineCopy(context, it.id) },
                 )
             }
 

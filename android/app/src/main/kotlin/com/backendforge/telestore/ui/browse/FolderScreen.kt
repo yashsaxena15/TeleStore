@@ -39,6 +39,8 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarOutline
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -94,6 +96,10 @@ fun FolderScreen(
     onOpenSearch: () -> Unit,
     /** Plays or shows a file; false means there's no viewer for it (its Info opens instead). */
     onOpenFile: (item: FileItem, siblings: List<FileItem>) -> Boolean = { _, _ -> false },
+    /** Picks files on the phone and uploads them into this folder; null hides the button. */
+    onUpload: ((folderPath: String) -> Unit)? = null,
+    onDownload: ((FileItem) -> Unit)? = null,
+    offlineIds: Set<String> = emptySet(),
     modifier: Modifier = Modifier,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -149,6 +155,15 @@ fun FolderScreen(
     Scaffold(
         modifier = modifier,
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        floatingActionButton = {
+            if (onUpload != null && !state.isSpecial && !state.isSelectionMode) {
+                ExtendedFloatingActionButton(
+                    onClick = { onUpload(state.path) },
+                    icon = { Icon(Icons.Default.Upload, contentDescription = null) },
+                    text = { Text("Upload") },
+                )
+            }
+        },
         topBar = {
             if (state.isSelectionMode) {
                 TopAppBar(
@@ -405,6 +420,7 @@ fun FolderScreen(
                                             }
                                         },
                                         onOpenActions = { actionItem = item },
+                                        offline = item.id in offlineIds,
                                     )
                                 }
                                 if (state.loadingMore) {
@@ -505,6 +521,7 @@ fun FolderScreen(
             onTrash = { vm.trashItems(listOf(it)) },
             onRestore = { vm.restoreItems(listOf(it)) },
             onDeleteForever = { deleteForeverItems = listOf(it) },
+            onDownload = onDownload,
             onDismiss = { actionItem = null },
         )
     }

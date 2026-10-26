@@ -50,7 +50,14 @@ import com.backendforge.telestore.ui.components.FileInfoSheet
 
 /** Swipe through the folder's photos; pinch or double-tap to zoom, drag to look around. */
 @Composable
-fun PhotoViewerScreen(photos: List<FileItem>, startIndex: Int, api: TeleStoreApi, onBack: () -> Unit) {
+fun PhotoViewerScreen(
+    photos: List<FileItem>,
+    startIndex: Int,
+    api: TeleStoreApi,
+    onBack: () -> Unit,
+    /** A downloaded copy on the phone, shown instead of fetching it again. */
+    offlineCopy: (FileItem) -> android.net.Uri? = { null },
+) {
     if (photos.isEmpty()) {
         LaunchedEffect(Unit) { onBack() }
         return
@@ -63,7 +70,7 @@ fun PhotoViewerScreen(photos: List<FileItem>, startIndex: Int, api: TeleStoreApi
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         HorizontalPager(state = pager, userScrollEnabled = !zoomed, beyondViewportPageCount = 1, modifier = Modifier.fillMaxSize()) { page ->
             ZoomableImage(
-                url = api.media.file(photos[page]).toString(),
+                url = remember(page) { offlineCopy(photos[page])?.toString() ?: api.media.file(photos[page]).toString() },
                 active = page == pager.currentPage,
                 onZoomChanged = { if (page == pager.currentPage) zoomed = it },
                 onTap = { chrome = !chrome },

@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.DriveFileMove
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
@@ -53,6 +54,8 @@ fun ItemActionSheet(
     onTrash: ((FileItem) -> Unit)? = null,
     onRestore: ((FileItem) -> Unit)? = null,
     onDeleteForever: ((FileItem) -> Unit)? = null,
+    /** Saves the file (or the folder as ZIP) to Downloads/TeleStore on the phone. */
+    onDownload: ((FileItem) -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -124,6 +127,13 @@ fun ItemActionSheet(
                         label = "Info",
                         onClick = { onDismiss(); onInfo(item) },
                     )
+                    if (onDownload != null) {
+                        ActionRow(
+                            icon = Icons.Default.Download,
+                            label = "Download to phone",
+                            onClick = { onDismiss(); onDownload(item) },
+                        )
+                    }
                     ActionRow(
                         icon = Icons.Default.DriveFileMove,
                         label = "Move...",
@@ -155,6 +165,13 @@ fun ItemActionSheet(
                         label = "Info",
                         onClick = { onDismiss(); onInfo(item) },
                     )
+                    if (onDownload != null) {
+                        ActionRow(
+                            icon = Icons.Default.Download,
+                            label = if (item.isFolder) "Download as ZIP" else "Download to phone",
+                            onClick = { onDismiss(); onDownload(item) },
+                        )
+                    }
                     ActionRow(
                         icon = Icons.Default.Edit,
                         label = "Rename",

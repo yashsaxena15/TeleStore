@@ -10,3 +10,6 @@ class UnauthorizedException(message: String = "Please sign in again.") : ApiExce
 class NetworkException(message: String, cause: Throwable? = null) : ApiException(0, message) {
     init { cause?.let { initCause(it) } }
 }
+
+/** 429: the server is busy with earlier work and asks to try again after [seconds]. */
+class RetryLaterException(val seconds: Long, message: String) : ApiException(429, message)

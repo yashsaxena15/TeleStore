@@ -1,6 +1,8 @@
 package com.backendforge.telestore
 
 import android.app.PictureInPictureParams
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
@@ -8,7 +10,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
+import androidx.core.content.IntentCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.backendforge.telestore.transfers.describe
 import com.backendforge.telestore.ui.MainScreen
 import com.backendforge.telestore.ui.signin.SignInScreen
 import com.backendforge.telestore.ui.theme.TeleStoreTheme
@@ -32,6 +36,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         addOnPictureInPictureModeChangedListener { _inPictureInPicture.value = it.isInPictureInPictureMode }
         val container = (application as TeleStoreApplication).container
+        if (savedInstanceState == null) receiveShared(intent)
         setContent {
             TeleStoreTheme {
                 val session by container.session.state.collectAsStateWithLifecycle()
@@ -43,6 +48,23 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        receiveShared(intent)
+    }
+
+    /** Files shared into TeleStore from another app wait for the user to choose a folder. */
+    private fun receiveShared(intent: Intent?) {
+        val uris: List<Uri> = when (intent?.action) {
+            Intent.ACTION_SEND -> listOfNotNull(IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java))
+            Intent.ACTION_SEND_MULTIPLE -> IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
+            else -> emptyList()
+        }
+        if (uris.isEmpty()) return
+        val container = (application as TeleStoreApplication).container
+        container.pendingShare.value = uris.map { describe(this, it) }
     }
 
     /** Opens picture-in-picture now (the video screen's button). False when nothing plays. */

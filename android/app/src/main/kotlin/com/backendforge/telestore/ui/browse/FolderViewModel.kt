@@ -67,6 +67,12 @@ class FolderViewModel(
 
     init {
         loadInitialPage(isRefresh = false)
+        // An upload into this folder just finished: show it
+        viewModelScope.launch {
+            container.transfers.store.uploaded.collect { folder ->
+                if (folder.trimEnd('/') == _state.value.path.trimEnd('/')) refresh()
+            }
+        }
     }
 
     private fun resolveTitle(path: String): String {

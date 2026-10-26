@@ -9,13 +9,20 @@ import com.backendforge.telestore.player.MusicController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import com.backendforge.telestore.transfers.PickedFile
+import com.backendforge.telestore.transfers.TransferManager
 import okhttp3.HttpUrl
 
 /** The app's shared objects, made once in [com.backendforge.telestore.TeleStoreApplication]. */
 class AppContainer(val context: Context) {
     val session = SessionStore(context.applicationContext)
     val playback = PlaybackQueue()
+    val transfers = TransferManager(context.applicationContext)
+
+    /** Files shared into TeleStore from other apps, waiting for the user to pick a folder. */
+    val pendingShare = MutableStateFlow<List<PickedFile>>(emptyList())
 
     /** Background music; made on first use so the service only starts when a song plays. */
     val music: MusicController by lazy { MusicController(context.applicationContext) }
