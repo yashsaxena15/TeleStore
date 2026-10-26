@@ -253,6 +253,8 @@ class ResumableDownloader(private val http: OkHttpClient) {
         target: DownloadTarget,
         etag: String?,
         onProgress: (done: Long, total: Long) -> Unit = { _, _ -> },
+        /** The file's tag, as soon as the server sends it: keep it to resume after an interruption. */
+        onEtag: (String) -> Unit = {},
     ): Result = withContext(Dispatchers.IO) {
         val have = target.length()
         val resume = have > 0 && etag != null
@@ -276,6 +278,7 @@ class ResumableDownloader(private val http: OkHttpClient) {
             if (res.code == 401) throw UnauthorizedException()
             if (!res.isSuccessful) throw ApiException(res.code, "The server answered with an error (${res.code}).")
             val partial = res.code == 206
+            res.header("ETag")?.let(onEtag)
             val start = if (partial) have else 0L
             val body = res.body ?: throw ApiException(res.code, "The server sent no data.")
             val total = if (partial) {

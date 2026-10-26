@@ -5,6 +5,7 @@ import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -171,6 +172,21 @@ class TransfersTest {
         val result = ResumableDownloader(api.http).download(server.url("/dl/a.bin"), target, etag = "\"e1\"")
         assertEquals("NEWFILE", target.out.toString())
         assertEquals("\"e2\"", result.etag)
+    }
+
+    @Test
+    fun `the tag is known before the download ends, so a broken one can resume`() = runBlocking {
+        // Says 100 bytes, sends 9, then drops the connection
+        server.enqueue(
+            MockResponse().setResponseCode(200).setHeader("ETag", "\"e3\"").setBody("only part")
+                .setHeader("Content-Length", "100").setSocketPolicy(SocketPolicy.DISCONNECT_AT_END),
+        )
+        var seen: String? = null
+        val target = Memory()
+        assertThrows<NetworkException> {
+            runBlocking { ResumableDownloader(api.http).download(server.url("/dl/a.bin"), target, etag = null, onEtag = { seen = it }) }
+        }
+        assertEquals("\"e3\"", seen)
     }
 
     @Test

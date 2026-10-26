@@ -146,6 +146,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : TransferWorke
             target = UriDownloadTarget(applicationContext, localUri, transfer.size),
             etag = transfer.etag,
             onProgress = { done, total -> store.update(transferId, force = false) { it.copy(done = done, size = if (total > 0) total else it.size) } },
+            onEtag = { tag -> store.update(transferId) { it.copy(etag = tag) } },
         )
         store.update(transferId) { it.copy(etag = result.etag) }
         DownloadFiles.publish(applicationContext, localUri)
