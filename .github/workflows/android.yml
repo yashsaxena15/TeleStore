@@ -31,10 +31,15 @@ jobs:
         working-directory: android
     env:
       VERSION_CODE: ${{ github.run_number }}
-      VERSION_NAME: ${{ startsWith(github.ref, 'refs/tags/android-v') && github.ref_name || format('0.1.{0}', github.run_number) }}
+      # android-v1.2.0 -> 1.2.0; other builds are 1.0.<run>
+      VERSION_NAME: ${{ startsWith(github.ref, 'refs/tags/android-v') && github.ref_name || format('1.0.{0}', github.run_number) }}
       HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Version from the tag
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        run: echo "VERSION_NAME=${GITHUB_REF_NAME#android-v}" >> "$GITHUB_ENV"
 
       - uses: actions/setup-java@v4
         with:
@@ -94,11 +99,11 @@ jobs:
           gh release delete android-latest --cleanup-tag --yes || true
           gh release create android-latest dist/*.apk --prerelease --target "$GITHUB_SHA" \
             --title "TeleStore for Android (latest)" \
-            --notes "Built from ${GITHUB_SHA::7}. Install the APK on your phone; the app also offers updates."
+            --notes "Built from ${GITHUB_SHA::7} (Build ${VERSION_CODE}). Install the APK on your phone; the app also offers updates."
 
       # A tag like android-v1.0.0 makes a versioned release
       - name: Publish a versioned release
         if: startsWith(github.ref, 'refs/tags/android-v') && env.HAS_KEYSTORE == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.apk --title "TeleStore for Android $GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" dist/*.apk --title "TeleStore for Android $VERSION_NAME" --notes "TeleStore for Android $VERSION_NAME (Build ${VERSION_CODE})." --generate-notes

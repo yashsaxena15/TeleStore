@@ -5,6 +5,7 @@ import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.backendforge.telestore.core.ServerAddress
 import com.backendforge.telestore.core.TeleStoreApi
+import com.backendforge.telestore.core.UpdateChecker
 import com.backendforge.telestore.player.MusicController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +20,9 @@ import okhttp3.HttpUrl
 class AppContainer(val context: Context) {
     val session = SessionStore(context.applicationContext)
     val playback = PlaybackQueue()
+    val settings = AppSettings(context.applicationContext)
+    /** Looks for new APKs on GitHub, with its own client: the sign-in token must never go there. */
+    val updates = UpdateChecker(TeleStoreApi.defaultClient())
     val transfers = TransferManager(context.applicationContext)
 
     /** Files shared into TeleStore from other apps, waiting for the user to pick a folder. */

@@ -1,0 +1,33 @@
+package com.backendforge.telestore.data
+
+import android.content.Context
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+enum class ThemeMode(val label: String) { SYSTEM("System"), LIGHT("Light"), DARK("Dark") }
+
+/** Small app preferences (not secret, so plain SharedPreferences). */
+class AppSettings(context: Context) {
+    private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+    private val _theme = MutableStateFlow(
+        runCatching { ThemeMode.valueOf(prefs.getString(KEY_THEME, null) ?: "") }.getOrDefault(ThemeMode.SYSTEM),
+    )
+    val theme: StateFlow<ThemeMode> = _theme.asStateFlow()
+
+    fun setTheme(mode: ThemeMode) {
+        prefs.edit().putString(KEY_THEME, mode.name).apply()
+        _theme.value = mode
+    }
+
+    /** When the app last looked for an update (it checks at most once a day by itself). */
+    var lastUpdateCheck: Long
+        get() = prefs.getLong(KEY_UPDATE_CHECK, 0)
+        set(value) = prefs.edit().putLong(KEY_UPDATE_CHECK, value).apply()
+
+    private companion object {
+        const val KEY_THEME = "theme"
+        const val KEY_UPDATE_CHECK = "last_update_check"
+    }
+}

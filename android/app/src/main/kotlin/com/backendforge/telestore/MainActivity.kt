@@ -6,10 +6,15 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
+import android.graphics.Color
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import com.backendforge.telestore.data.ThemeMode
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.backendforge.telestore.transfers.describe
@@ -38,7 +43,15 @@ class MainActivity : ComponentActivity() {
         val container = (application as TeleStoreApplication).container
         if (savedInstanceState == null) receiveShared(intent)
         setContent {
-            TeleStoreTheme {
+            val theme by container.settings.theme.collectAsStateWithLifecycle()
+            val systemDark = isSystemInDarkTheme()
+            val dark = when (theme) { ThemeMode.DARK -> true; ThemeMode.LIGHT -> false; ThemeMode.SYSTEM -> systemDark }
+            // Status and navigation bar icons follow the app's theme, not only the phone's
+            LaunchedEffect(dark) {
+                val bars = if (dark) SystemBarStyle.dark(Color.TRANSPARENT) else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+                enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
+            }
+            TeleStoreTheme(dark = dark) {
                 val session by container.session.state.collectAsStateWithLifecycle()
                 val current = session
                 if (current == null) {

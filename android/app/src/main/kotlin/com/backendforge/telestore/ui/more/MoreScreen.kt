@@ -2,6 +2,8 @@ package com.backendforge.telestore.ui.more
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -69,6 +71,7 @@ fun MoreScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
             // User & Server Card
@@ -122,6 +125,8 @@ fun MoreScreen(
                 }
             }
 
+            StorageSection(container)
+
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
@@ -155,7 +160,10 @@ fun MoreScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.weight(1f))
+            AppearanceSection(container)
+            AboutSection(container)
+
+            Spacer(modifier = Modifier.height(8.dp))
 
             OutlinedButton(
                 onClick = { showSignOutConfirm = true },
