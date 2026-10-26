@@ -1,5 +1,16 @@
 package com.backendforge.telestore.player
 
+import android.app.PendingIntent
+import android.content.ComponentName
+import android.content.Intent
+import android.media.audiofx.LoudnessEnhancer
+import android.net.Uri
+import androidx.media3.common.MediaMetadata
+import androidx.media3.session.MediaController
+import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionToken
+import com.backendforge.telestore.MainActivity
+import kotlinx.coroutines.Job
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.AudioAttributes
@@ -32,6 +43,12 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.Locale
 
+/** How the picture fills the screen. */
+enum class Zoom(val label: String) { FIT("Fit"), CROP("Crop"), STRETCH("Stretch") }
+
+/** Extra loudness on top of the phone's maximum volume (LoudnessEnhancer gain, in millibels). */
+val BOOST_LEVELS = listOf(0 to "Off", 400 to "+25%", 800 to "+50%", 1200 to "+100%")
+
 /** One choice in the audio or subtitle list; [index] is the track's position, -1 = subtitles off. */
 data class TrackChoice(val index: Int, val label: String, val selected: Boolean)
 
@@ -54,6 +71,14 @@ data class VideoState(
     val videoWidth: Int = 0,
     val videoHeight: Int = 0,
     val error: String? = null,
+    val backgroundPlay: Boolean = true,
+    val loop: Boolean = false,
+    /** "30 min", "End of video", or null when no sleep timer is set. */
+    val sleepLabel: String? = null,
+    val zoom: Zoom = Zoom.FIT,
+    val boost: Int = 0,
+    /** Play the next video in the folder when this one ends. */
+    val autoplay: Boolean = true,
 ) {
     val item: FileItem? get() = queue.getOrNull(index)
     val title: String get() = item?.let { PlayQueue.title(it) }.orEmpty()
@@ -104,8 +129,16 @@ class VideoViewModel(private val container: AppContainer) : ViewModel() {
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_ENDED && _state.value.hasNext) next()
+            if (playbackState != Player.STATE_ENDED) return
+            if (sleepAtEnd) {
+                sleepAtEnd = false
+                _state.update { it.copy(sleepLabel = null) }
+                return
+            }
+            if (_state.value.hasNext && _state.value.autoplay) next()
         }
+
+        override fun onAudioSessionIdChanged(audioSessionId: Int) = applyBoost()
 
         override fun onVideoSizeChanged(videoSize: VideoSize) {
             if (videoSize.width == 0 || videoSize.height == 0) return
@@ -139,8 +172,29 @@ class VideoViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** Hosts this player's session in [VideoSessionService] so its sound can go on in the background. */
+    private val session: MediaSession = MediaSession.Builder(container.context, player)
+        .setId("video")
+        .setSessionActivity(
+            PendingIntent.getActivity(
+                container.context, 2,
+                Intent(container.context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            ),
+        )
+        .build()
+    private val serviceConnection = MediaController.Builder(
+        container.context, SessionToken(container.context, ComponentName(container.context, VideoSessionService::class.java)),
+    ).also { VideoSessions.current = session }.buildAsync()
+
+    private var enhancer: LoudnessEnhancer? = null
+    private var sleepJob: Job? = null
+    private var sleepAtEnd = false
+    private var inBackground = false
+
     init {
         player.addListener(listener)
+        _state.update { it.copy(backgroundPlay = container.settings.videoBackgroundPlay) }
         if (_state.value.item != null) open(_state.value.index)
         viewModelScope.launch {
             while (isActive) {
@@ -188,7 +242,18 @@ class VideoViewModel(private val container: AppContainer) : ViewModel() {
         source = next
         // A downloaded copy on the phone plays without the internet
         val local = if (next.converted) null else container.transfers.store.offlineCopy(container.context, item.id)
-        player.setMediaItem(MediaItem.fromUri(local?.toString() ?: next.url.toString()), if (next.converted) 0L else startMs)
+        val mediaItem = MediaItem.Builder()
+            .setMediaId(item.id)
+            .setUri(local?.toString() ?: next.url.toString())
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(PlayQueue.title(item))
+                    .setArtist(item.path.trimEnd('/').substringAfterLast('/').ifEmpty { "TeleStore" })
+                    .setArtworkUri(api.media.thumbnail(item)?.let { Uri.parse(it.toString()) })
+                    .build(),
+            )
+            .build()
+        player.setMediaItem(mediaItem, if (next.converted) 0L else startMs)
         player.prepare()
         player.playWhenReady = true
         _state.update { it.copy(converted = next.converted, error = null, ended = false) }
@@ -289,6 +354,94 @@ class VideoViewModel(private val container: AppContainer) : ViewModel() {
         player.trackSelectionParameters = builder.build()
     }
 
+    // ── Player options ─────────────────────────────────────────────────────────
+    fun setBackgroundPlay(on: Boolean) {
+        container.settings.videoBackgroundPlay = on
+        _state.update { it.copy(backgroundPlay = on) }
+    }
+
+    fun setLoop(on: Boolean) {
+        player.repeatMode = if (on) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+        _state.update { it.copy(loop = on) }
+    }
+
+    fun setZoom(zoom: Zoom) = _state.update { it.copy(zoom = zoom) }
+
+    fun setAutoplay(on: Boolean) = _state.update { it.copy(autoplay = on) }
+
+    /** Star or unstar the video playing now. */
+    fun toggleStar() {
+        val item = _state.value.item ?: return
+        viewModelScope.launch {
+            try {
+                val starred = api.setStarred(item, !item.starred)
+                _state.update { s -> s.copy(queue = s.queue.map { if (it.id == item.id) it.copy(starred = starred) else it }) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(error = (e as? com.backendforge.telestore.core.ApiException)?.message ?: "Couldn't update the star.") }
+            }
+        }
+    }
+
+    fun setBoost(millibels: Int) {
+        _state.update { it.copy(boost = millibels) }
+        applyBoost()
+    }
+
+    private fun applyBoost() {
+        val gain = _state.value.boost
+        runCatching {
+            if (gain <= 0) {
+                enhancer?.setEnabled(false)
+            } else {
+                val id = player.audioSessionId
+                if (enhancer == null && id != C.AUDIO_SESSION_ID_UNSET) enhancer = LoudnessEnhancer(id)
+                enhancer?.setTargetGain(gain)
+                enhancer?.setEnabled(true)
+            }
+        }
+    }
+
+    /** [minutes] 0 cancels, -1 means "at the end of this video". */
+    fun setSleepTimer(minutes: Int) {
+        sleepJob?.cancel()
+        sleepAtEnd = minutes == -1
+        _state.update { it.copy(sleepLabel = if (minutes > 0) "$minutes min" else if (minutes == -1) "End of video" else null) }
+        if (minutes > 0) {
+            sleepJob = viewModelScope.launch {
+                delay(minutes * 60_000L)
+                player.pause()
+                _state.update { it.copy(sleepLabel = null) }
+            }
+        }
+        if (sleepAtEnd) setLoop(false)
+    }
+
+    /** CC button: subtitles on (the first track) or off. */
+    fun toggleCaptions() {
+        val subs = _state.value.subtitles
+        if (subs.isEmpty()) return
+        val on = subs.any { it.selected && it.index >= 0 }
+        selectSubtitle(if (on) -1 else subs.first { it.index >= 0 }.index)
+    }
+
+    /** The app went to the background: keep the sound (no picture) or pause, per the setting. */
+    fun onAppHidden() {
+        if (_state.value.backgroundPlay && player.isPlaying) {
+            inBackground = true
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true).build()
+        } else {
+            pause()
+        }
+    }
+
+    fun onAppShown() {
+        if (!inBackground) return
+        inBackground = false
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false).build()
+    }
+
     // ── State ──────────────────────────────────────────────────────────────────
     private fun shownPosition(): Long = PlaybackPlan.shownPosition(source, player.currentPosition)
 
@@ -338,6 +491,11 @@ class VideoViewModel(private val container: AppContainer) : ViewModel() {
 
     override fun onCleared() {
         saveProgress()
+        sleepJob?.cancel()
+        runCatching { enhancer?.release() }
+        if (VideoSessions.current === session) VideoSessions.current = null
+        MediaController.releaseFuture(serviceConnection)
+        session.release()
         player.removeListener(listener)
         player.release()
     }

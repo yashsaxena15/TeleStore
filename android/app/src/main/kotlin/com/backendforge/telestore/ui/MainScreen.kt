@@ -497,7 +497,7 @@ fun MainScreen(
 
                 composable(ROUTE_VIDEO) {
                     val vm: VideoViewModel = viewModel { VideoViewModel(container) }
-                    VideoScreen(vm, onBack = { navController.popBackStack() })
+                    VideoScreen(vm, api = container.api(), onBack = { navController.popBackStack() }, onDownload = ::download)
                 }
 
                 composable(ROUTE_PHOTOS) {

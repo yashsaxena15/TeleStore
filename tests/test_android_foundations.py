@@ -175,6 +175,16 @@ class TestKindListing:
         pattern = re.compile(query["$or"][1]["file_name"]["$regex"], re.I)
         assert pattern.search("Movie.MKV") and not pattern.search("notes.mkv.txt")
 
+    def test_documents_match_by_extension_only(self):
+        repo = Files.__new__(Files)
+        with patch.object(Files, "find", return_value=[]) as find:
+            repo.get_files_by_path(path="all", owner_id="42", kind="document")
+        query = find.call_args.args[0]
+        assert "$or" not in query
+        import re
+        pattern = re.compile(query["file_name"]["$regex"], re.I)
+        assert pattern.search("Report.PDF") and not pattern.search("app.apk")
+
     def test_unknown_kind_is_ignored(self):
         repo = Files.__new__(Files)
         with patch.object(Files, "find", return_value=[]) as find:
