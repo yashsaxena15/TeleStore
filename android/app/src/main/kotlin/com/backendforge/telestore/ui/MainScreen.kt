@@ -77,15 +77,10 @@ fun MainScreen(
 
     fun navigateToCrumb(prefix: String, targetPath: String, stepsToPop: Int) {
         if (stepsToPop > 0) {
-            val backStack = navController.currentBackStack.value
-            val canPop = backStack.size > stepsToPop &&
-                backStack.takeLast(stepsToPop + 1).firstOrNull()?.arguments?.getString("path") == targetPath
-            if (canPop) {
-                repeat(stepsToPop) { navController.popBackStack() }
-                return
-            }
+            repeat(stepsToPop) { navController.popBackStack() }
+        } else {
+            navigateToFolder(prefix, targetPath)
         }
-        navigateToFolder(prefix, targetPath)
     }
 
     fun navigateToTab(tab: MainTab) {
