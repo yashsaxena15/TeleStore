@@ -2,11 +2,14 @@ name: Android
 
 on:
   push:
+    # Naming tags alone would stop branch pushes from running this, so both are listed
+    branches:
+      - "**"
+    tags:
+      - "android-v*"
     paths:
       - "android/**"
       - ".github/workflows/android.yml"
-    tags:
-      - "android-v*"
   pull_request:
     paths:
       - "android/**"
