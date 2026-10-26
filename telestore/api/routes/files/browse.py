@@ -11,7 +11,7 @@ from telestore.db import database
 # For thumbnail route
 from pyrogram import Client
 
-from telestore.api.routes.files.common import _auth_tokens, logger, router
+from telestore.api.routes.files.common import logger, router
 
 @router.get("")
 @router.get("/")
@@ -22,6 +22,7 @@ async def get_all_files_route(
     page_size: Optional[int] = Query(default=None, ge=1, le=500, description="Items per page"),
     sort_by: Optional[str] = Query(default=None, description="Field to sort by (name, date, size)"),
     sort_order: Optional[str] = Query(default=None, description="Sort direction (asc, desc)"),
+    q: Optional[str] = Query(default=None, max_length=200, description="Search names in all your folders (path is ignored)"),
     user: User = Depends(require_auth)
 ):
     try:
@@ -69,10 +70,11 @@ async def get_all_files_route(
                 page_size=ps,
                 sort_by=sort_by,
                 sort_order=sort_order,
-                folders_first=True
+                folders_first=True,
+                q=q
             )
         else:
-            files_data = database.Files.get_files_by_path(path=path, owner_id=user_id)
+            files_data = database.Files.get_files_by_path(path=path, owner_id=user_id, q=q)
             total_items = len(files_data)
 
         files_list = []
@@ -129,37 +131,17 @@ async def get_file_thumbnail(file_id: str, request: Request, auth_token: str = N
         # This will raise an exception if not authenticated via normal means
         require_auth(request)
     except HTTPException:
-        # If normal auth fails, check for auth_token in query params
-        if auth_token:
-            # First check in-memory cache
-            if auth_token in _auth_tokens:
-                # Token is valid, proceed
-                pass
-            else:
-                # Check in database if not found in memory
-                try:
-                    db_token_data = database.Users.get_auth_token(auth_token)
-                    if db_token_data:
-                        # Add to in-memory cache for future requests
-                        _auth_tokens[auth_token] = {
-                            "authenticated": True,
-                            "username": db_token_data['username'],
-                            "auth_method": db_token_data['auth_method'],
-                            "created_at": db_token_data['created_at'].isoformat() if hasattr(db_token_data['created_at'], 'isoformat') else str(db_token_data['created_at'])
-                        }
-                        # Token is valid, proceed
-                        pass
-                    else:
-                        # No valid authentication method
-                        raise HTTPException(status_code=401, detail="Authentication required")
-                except Exception as e:
-                    logger.error(f"Failed to check auth token in database: {e}")
-                    # No valid authentication method
-                    raise HTTPException(status_code=401, detail="Authentication required")
-        else:
-            # No valid authentication method
+        # Image tags can't send headers, so the token may come in the address instead. The shared
+        # check honours expiry and sign-out (this route used to keep its own copy that didn't).
+        from telestore.api.state import _auth_tokens as shared_tokens, cached_token, cached_token_valid
+        if not auth_token:
             raise HTTPException(status_code=401, detail="Authentication required")
-    
+        if not cached_token_valid(auth_token):
+            db_token_data = database.Users.get_auth_token(auth_token)
+            if not db_token_data:
+                raise HTTPException(status_code=401, detail="Authentication required")
+            shared_tokens[auth_token] = cached_token(db_token_data)
+
     try:
         bot_manager = request.app.state.bot_manager
         if not bot_manager:
@@ -190,6 +172,10 @@ async def get_file_thumbnail(file_id: str, request: Request, auth_token: str = N
                         media_type="image/jpeg",
                         headers={"Cache-Control": "max-age=3600"}  # Cache for 1 hour
                     )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error downloading file thumbnail: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # A thumbnail Telegram no longer has (or a bad id) is "not found", so apps show their own icon
+        logger.warning(f"Thumbnail not available: {e}")
+        raise HTTPException(status_code=404, detail="Thumbnail not available")
+    raise HTTPException(status_code=404, detail="Thumbnail not available")

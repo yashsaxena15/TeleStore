@@ -366,12 +366,11 @@ class Users(Collection):
             logger.error(f"Error updating user with identifier {user_identifier}: {e}")
             return False
 
-    def save_auth_token(self, username: str, auth_token: str, auth_method: str) -> None:
-        """Save an auth token for a user"""
+    def save_auth_token(self, username: str, auth_token: str, auth_method: str, ttl_hours: int = 24, device: str = None) -> None:
+        """Save an auth token for a user (24 hours; longer for a signed-in app such as Android)"""
         try:
-            # Save token with user info and expiration time (24 hours from now)
             from datetime import datetime, timedelta
-            expires_at = datetime.now() + timedelta(hours=24)
+            expires_at = datetime.now() + timedelta(hours=ttl_hours)
             
             token_data = {
                 'username': username,
@@ -380,6 +379,8 @@ class Users(Collection):
                 'created_at': datetime.now(),
                 'expires_at': expires_at
             }
+            if device:
+                token_data['device'] = device
             
             # Use upsert to either insert new or update existing token
             self.database.AuthTokens.update_one(

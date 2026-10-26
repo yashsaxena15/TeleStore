@@ -264,17 +264,31 @@ class Files(Collection):
         page_size: int = None,
         sort_by: str = None,
         sort_order: str = None,
-        folders_first: bool = True
+        folders_first: bool = True,
+        q: str = None
     ):
-        """Get files and folders for a specific path with optional pagination and sorting"""
+        """Get files and folders for a specific path with optional pagination and sorting.
+
+        With q, path is ignored: it finds names containing q (any case) in all of the owner's
+        folders, leaving out Trash and the Private Vault.
+        """
         # Build query with owner filter
         def build_query(base_query):
             if owner_id:
                 base_query["owner_id"] = owner_id
             return base_query
         
+        search = (q or "").strip()
+        if search:
+            import re
+            query = build_query({
+                "file_name": {"$regex": re.escape(search), "$options": "i"},
+                "trashed": {"$ne": True},
+                "is_vault": {"$ne": True},
+                "file_path": {"$not": {"$regex": "^/?Vault"}},
+            })
         # Vault path (Root)
-        if path in ["vault", "/vault", "/Vault", "Vault"]:
+        elif path in ["vault", "/vault", "/Vault", "Vault"]:
             query = build_query({"file_path": {"$in": ["/Vault", "Vault"]}, "trashed": {"$ne": True}})
         # Vault subfolders
         elif path.startswith("/Vault/") or path.startswith("Vault/"):

@@ -14,3 +14,6 @@ logs/
 conversation-sharing/
 tree.txt
 temp_archives/
+
+# The Android app is built by GitHub Actions, not part of the server image
+android/

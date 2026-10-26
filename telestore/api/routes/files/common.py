@@ -13,4 +13,3 @@ logger = setup_logger("files_routes")
 router = APIRouter(prefix="/files", tags=["Files"])
 
 # Global variable for auth tokens (should be imported from main app)
-_auth_tokens = {}

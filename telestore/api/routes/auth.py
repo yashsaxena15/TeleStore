@@ -20,12 +20,19 @@ logger = setup_logger("auth_routes")
 # Create router with updated prefix
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
+# Apps that sign in (the Android app sends "android") get a 90-day token instead of 24 hours
+APP_DEVICES = {"android"}
+APP_TOKEN_HOURS = 90 * 24
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str
+    device: Optional[str] = None
 
 class GoogleLoginRequest(BaseModel):
     token: str
+    device: Optional[str] = None
 
 @router.post("/login")
 async def login_post_route(request: Request, login_data: LoginRequest):
@@ -47,7 +54,7 @@ async def login_post_route(request: Request, login_data: LoginRequest):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNT_DISABLED)
     _start_session(request, account, "local")
     logger.info(f"Login successful for user: {account}")
-    return {"message": "Login successful", "username": account, "auth_token": _issue_token(account, "local", user_data)}
+    return {"message": "Login successful", "username": account, "auth_token": _issue_token(account, "local", user_data, login_data.device)}
 
 
 def _start_session(request: Request, username: str, method: str, **extra) -> None:
@@ -57,7 +64,7 @@ def _start_session(request: Request, username: str, method: str, **extra) -> Non
     request.session.update(extra)
 
 
-def _issue_token(username: str, method: str, user_data: Optional[dict]) -> str:
+def _issue_token(username: str, method: str, user_data: Optional[dict], device: Optional[str] = None) -> str:
     """Creates the starter folders once for a verified user and returns a token for the desktop app.
 
     Only the first time: after that they are the user's own folders, free to rename or delete.
@@ -67,7 +74,11 @@ def _issue_token(username: str, method: str, user_data: Optional[dict]) -> str:
         database.Users.update_user_by_identifier(username, {"default_folders_created": True})
         logger.info(f"Default folders created for user {username}: {created}")
     auth_token = secrets.token_urlsafe(32)
-    database.Users.save_auth_token(username, auth_token, method)
+    device = (device or "").strip().lower()
+    if device in APP_DEVICES:
+        database.Users.save_auth_token(username, auth_token, method, ttl_hours=APP_TOKEN_HOURS, device=device)
+    else:
+        database.Users.save_auth_token(username, auth_token, method)
     return auth_token
 
 
@@ -111,7 +122,7 @@ async def google_login_route(request: Request, login_data: GoogleLoginRequest):
     if not account_flags(account, user_data)[0]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNT_DISABLED)
     _start_session(request, account, "google", user_email=user_info["email"], user_picture=user_info["picture"])
-    return {"message": "Login successful", "user": {**user_info, "username": account}, "auth_token": _issue_token(account, "google", user_data)}
+    return {"message": "Login successful", "user": {**user_info, "username": account}, "auth_token": _issue_token(account, "google", user_data, login_data.device)}
 
 
 # ── Forgot password: a 6-digit code to the account's email, then a new password ──────────────
@@ -180,17 +191,20 @@ async def forgot_password_reset(body: ResetPasswordRequest):
 
 @router.post("/logout")
 async def logout_route(request: Request):
+    from telestore.api.state import _auth_tokens
     request.session.clear()
     auth_header = request.headers.get("X-Auth-Token") or request.query_params.get("token")
-    if auth_header:database.Users.remove_auth_token(auth_header)
+    if auth_header:
+        database.Users.remove_auth_token(auth_header)
+        _auth_tokens.pop(auth_header, None)  # the server's memory too, so the token stops working now
     return {"message": "Logged out successfully"}
 
 @router.get("/check")
 async def check_auth(request: Request):
-    from telestore.api.state import _auth_tokens
+    from telestore.api.state import _auth_tokens, cached_token_valid
     # Check if there's an auth token in headers or query param
     auth_header = request.headers.get("X-Auth-Token") or request.query_params.get("token")
-    if auth_header and auth_header in _auth_tokens:
+    if auth_header and cached_token_valid(auth_header):
         token_data = _auth_tokens[auth_header]
         logger.info(f"Auth check result using token: authenticated=True, user={token_data.get('username')}")
         return {
