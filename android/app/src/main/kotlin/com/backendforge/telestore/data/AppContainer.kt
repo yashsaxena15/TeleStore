@@ -36,6 +36,9 @@ class AppContainer(val context: Context) {
     /** Files shared into TeleStore from other apps, waiting for the user to pick a folder. */
     val pendingShare = MutableStateFlow<List<PickedFile>>(emptyList())
 
+    /** A link shared into TeleStore (e.g. from YouTube's Share button), opened in "Add from link". */
+    val pendingLink = MutableStateFlow<String?>(null)
+
     /** Background music; made on first use so the service only starts when a song plays. */
     val music: MusicController by lazy { MusicController(context.applicationContext) }
     private var musicStarted = false
