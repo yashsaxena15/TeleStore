@@ -1,6 +1,13 @@
 package com.backendforge.telestore.ui
 
 import android.net.Uri
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.PhotoLibrary
+import com.backendforge.telestore.ui.home.HomeScreen
+import com.backendforge.telestore.ui.home.HomeShortcut
+import com.backendforge.telestore.ui.home.HomeViewModel
+import com.backendforge.telestore.ui.home.KindScreen
+import com.backendforge.telestore.ui.home.KindViewModel
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import com.backendforge.telestore.core.AppRelease
@@ -87,8 +94,8 @@ private const val ROUTE_NOW_PLAYING = "now_playing"
 
 private enum class MainTab(val title: String, val icon: ImageVector, val graphRoute: String) {
     HOME("Home", Icons.Default.Home, "home_graph"),
-    STARRED("Starred", Icons.Default.Star, "starred_graph"),
-    RECENT("Recent", Icons.Default.Schedule, "recent_graph"),
+    PHOTOS("Photos", Icons.Default.PhotoLibrary, "photos_graph"),
+    FILES("Files", Icons.Default.Folder, "files_graph"),
     TRANSFERS("Transfers", Icons.Default.SwapVert, "transfers"),
     MORE("More", Icons.Default.MoreHoriz, "more_graph"),
 }
@@ -106,8 +113,8 @@ fun MainScreen(
 
     val selectedTab = when {
         currentRoute.startsWith("home_") -> MainTab.HOME
-        currentRoute.startsWith("starred_") -> MainTab.STARRED
-        currentRoute.startsWith("recent_") -> MainTab.RECENT
+        currentRoute.startsWith("photos_") -> MainTab.PHOTOS
+        currentRoute.startsWith("files_") -> MainTab.FILES
         currentRoute == "transfers" -> MainTab.TRANSFERS
         currentRoute.startsWith("more_") -> MainTab.MORE
         else -> MainTab.HOME
@@ -237,9 +244,8 @@ fun MainScreen(
     // Back handling: leaving on root tabs
     val activity = LocalContext.current as? ComponentActivity
     val isAtTabRoot = when {
-        currentRoute.startsWith("home_folder") -> currentPathArg == TeleStoreApi.HOME
-        currentRoute.startsWith("starred_folder") -> currentPathArg == "starred"
-        currentRoute.startsWith("recent_folder") -> currentPathArg == "all"
+        currentRoute == "home_root" || currentRoute == "photos_root" -> true
+        currentRoute.startsWith("files_folder") -> currentPathArg == TeleStoreApi.HOME
         currentRoute == "transfers" -> true
         currentRoute == "more_root" -> true
         else -> false
@@ -338,23 +344,51 @@ fun MainScreen(
                 startDestination = "home_graph",
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             ) {
-                navigation(
-                    startDestination = "home_folder?path=${Uri.encode(TeleStoreApi.HOME)}",
-                    route = "home_graph",
-                ) {
+                navigation(startDestination = "home_root", route = "home_graph") {
+                    composable("home_root") {
+                        val vm: HomeViewModel = viewModel(key = "home-${session.token}") { HomeViewModel(container) }
+                        HomeScreen(
+                            vm = vm,
+                            container = container,
+                            session = session,
+                            onSearch = { navController.navigate("search") },
+                            onAccount = { navigateToTab(MainTab.MORE) },
+                            onKind = { navController.navigate("home_kind/${it.name}") },
+                            onShortcut = { shortcut ->
+                                navigateToFolder("home", when (shortcut) {
+                                    HomeShortcut.STARRED -> "starred"
+                                    HomeShortcut.RECENT -> "all"
+                                    HomeShortcut.TRASH -> "trash"
+                                })
+                            },
+                            onOpenFolder = { navigateToFolder("home", it) },
+                            onOpenFile = ::openFile,
+                            onResume = { entry ->
+                                container.playback.openVideos(listOf(entry.asFile()), 0)
+                                navController.navigate(ROUTE_VIDEO)
+                            },
+                            onUpload = ::upload,
+                            onCreateFolder = { name ->
+                                scope.launch {
+                                    transferMessage = try {
+                                        container.api().createFolder(name, TeleStoreApi.HOME)
+                                        vm.refresh()
+                                        "Folder \"$name\" created."
+                                    } catch (e: CancellationException) {
+                                        throw e
+                                    } catch (e: Exception) {
+                                        (e as? ApiException)?.message ?: "Couldn't create the folder."
+                                    }
+                                }
+                            },
+                        )
+                    }
                     composable(
                         route = "home_folder?path={path}",
-                        arguments = listOf(
-                            navArgument("path") {
-                                type = NavType.StringType
-                                defaultValue = TeleStoreApi.HOME
-                            }
-                        ),
+                        arguments = listOf(navArgument("path") { type = NavType.StringType; defaultValue = TeleStoreApi.HOME }),
                     ) { backStackEntry ->
                         val path = backStackEntry.arguments?.getString("path") ?: TeleStoreApi.HOME
-                        val vm: FolderViewModel = viewModel(key = "$path-${session.token}") {
-                            FolderViewModel(container, initialPath = path)
-                        }
+                        val vm: FolderViewModel = viewModel(key = "home-$path-${session.token}") { FolderViewModel(container, initialPath = path) }
                         FolderScreen(
                             vm = vm,
                             api = container.api(),
@@ -367,61 +401,32 @@ fun MainScreen(
                             offlineIds = offlineIds,
                         )
                     }
-                }
-
-                navigation(
-                    startDestination = "starred_folder?path=starred",
-                    route = "starred_graph",
-                ) {
-                    composable(
-                        route = "starred_folder?path={path}",
-                        arguments = listOf(
-                            navArgument("path") {
-                                type = NavType.StringType
-                                defaultValue = "starred"
-                            }
-                        ),
-                    ) { backStackEntry ->
-                        val path = backStackEntry.arguments?.getString("path") ?: "starred"
-                        val vm: FolderViewModel = viewModel(key = "$path-${session.token}") {
-                            FolderViewModel(container, initialPath = path)
-                        }
-                        FolderScreen(
-                            vm = vm,
-                            api = container.api(),
-                            onNavigateFolder = { navigateToFolder("starred", it) },
-                            onNavigateCrumb = { navigateToCrumb("starred", it) },
-                            onOpenSearch = { navController.navigate("search") },
-                            onOpenFile = ::openFile,
-                            onUpload = ::upload,
-                            onDownload = ::download,
-                            offlineIds = offlineIds,
-                        )
+                    composable("home_kind/{kind}", arguments = listOf(navArgument("kind") { type = NavType.StringType })) { backStackEntry ->
+                        val kind = runCatching { FileKind.valueOf(backStackEntry.arguments?.getString("kind").orEmpty()) }.getOrDefault(FileKind.VIDEO)
+                        val vm: KindViewModel = viewModel(key = "kind-$kind-${session.token}") { KindViewModel(container, kind) }
+                        KindScreen(vm, container, onBack = { navController.popBackStack() }, onOpenFile = ::openFile)
                     }
                 }
 
-                navigation(
-                    startDestination = "recent_folder?path=all",
-                    route = "recent_graph",
-                ) {
+                navigation(startDestination = "photos_root", route = "photos_graph") {
+                    composable("photos_root") {
+                        val vm: KindViewModel = viewModel(key = "photos-${session.token}") { KindViewModel(container, FileKind.PHOTO) }
+                        KindScreen(vm, container, onBack = null, onOpenFile = ::openFile)
+                    }
+                }
+
+                navigation(startDestination = "files_folder?path=${Uri.encode(TeleStoreApi.HOME)}", route = "files_graph") {
                     composable(
-                        route = "recent_folder?path={path}",
-                        arguments = listOf(
-                            navArgument("path") {
-                                type = NavType.StringType
-                                defaultValue = "all"
-                            }
-                        ),
+                        route = "files_folder?path={path}",
+                        arguments = listOf(navArgument("path") { type = NavType.StringType; defaultValue = TeleStoreApi.HOME }),
                     ) { backStackEntry ->
-                        val path = backStackEntry.arguments?.getString("path") ?: "all"
-                        val vm: FolderViewModel = viewModel(key = "$path-${session.token}") {
-                            FolderViewModel(container, initialPath = path)
-                        }
+                        val path = backStackEntry.arguments?.getString("path") ?: TeleStoreApi.HOME
+                        val vm: FolderViewModel = viewModel(key = "files-$path-${session.token}") { FolderViewModel(container, initialPath = path) }
                         FolderScreen(
                             vm = vm,
                             api = container.api(),
-                            onNavigateFolder = { navigateToFolder("recent", it) },
-                            onNavigateCrumb = { navigateToCrumb("recent", it) },
+                            onNavigateFolder = { navigateToFolder("files", it) },
+                            onNavigateCrumb = { navigateToCrumb("files", it) },
                             onOpenSearch = { navController.navigate("search") },
                             onOpenFile = ::openFile,
                             onUpload = ::upload,
@@ -445,6 +450,8 @@ fun MainScreen(
                             session = session,
                             onNavigateTrash = { navigateToFolder("more", "trash") },
                             onNavigateInbox = { navigateToFolder("more", "inbox") },
+                            onNavigateStarred = { navigateToFolder("more", "starred") },
+                            onNavigateRecent = { navigateToFolder("more", "all") },
                         )
                     }
 

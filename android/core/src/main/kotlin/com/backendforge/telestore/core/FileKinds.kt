@@ -1,6 +1,8 @@
 package com.backendforge.telestore.core
 
-enum class FileKind { FOLDER, VIDEO, AUDIO, PHOTO, DOCUMENT, ARCHIVE, OTHER }
+enum class FileKind(val wire: String? = null) {
+    FOLDER, VIDEO("video"), AUDIO("audio"), PHOTO("photo"), DOCUMENT("document"), ARCHIVE, OTHER
+}
 
 /** File type from the server's type or the extension (mirrors the website's fileTypes.js). */
 object FileKinds {

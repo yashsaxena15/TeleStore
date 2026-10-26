@@ -85,6 +85,8 @@ class TeleStoreApi(
         sortBy: SortBy = SortBy.NAME,
         ascending: Boolean = true,
         query: String? = null,
+        /** With path "all": only this kind (video, photo, audio or document). */
+        kind: FileKind? = null,
     ): FilePage = get(
         url("files").newBuilder()
             .addQueryParameter("path", path)
@@ -93,6 +95,7 @@ class TeleStoreApi(
             .addQueryParameter("sort_by", sortBy.wire)
             .addQueryParameter("sort_order", if (ascending) "asc" else "desc")
             .apply { query?.trim()?.takeIf { it.isNotEmpty() }?.let { addQueryParameter("q", it) } }
+            .apply { kind?.wire?.let { addQueryParameter("kind", it) } }
             .build()
     )
 

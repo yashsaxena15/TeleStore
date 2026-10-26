@@ -23,6 +23,7 @@ async def get_all_files_route(
     sort_by: Optional[str] = Query(default=None, description="Field to sort by (name, date, size)"),
     sort_order: Optional[str] = Query(default=None, description="Sort direction (asc, desc)"),
     q: Optional[str] = Query(default=None, max_length=200, description="Search names in all your folders (path is ignored)"),
+    kind: Optional[str] = Query(default=None, description="With path=all: only video, photo, audio or document files"),
     user: User = Depends(require_auth)
 ):
     try:
@@ -71,10 +72,11 @@ async def get_all_files_route(
                 sort_by=sort_by,
                 sort_order=sort_order,
                 folders_first=True,
-                q=q
+                q=q,
+                kind=kind
             )
         else:
-            files_data = database.Files.get_files_by_path(path=path, owner_id=user_id, q=q)
+            files_data = database.Files.get_files_by_path(path=path, owner_id=user_id, q=q, kind=kind)
             total_items = len(files_data)
 
         files_list = []
