@@ -1,7 +1,9 @@
 package com.backendforge.telestore.core
 
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -31,6 +33,8 @@ class TeleStoreApi(
     private val token: () -> String?,
     private val onUnauthorized: () -> Unit = {},
     client: OkHttpClient = defaultClient(),
+    /** Where network work runs: sending AND reading replies (Android kills apps that read on the main thread). */
+    private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
     /** Shared with image loading and the player so they use the same connections and token. */
     val http: OkHttpClient = client.newBuilder()
@@ -65,7 +69,7 @@ class TeleStoreApi(
 
     /** Ends this token on the server; never throws (signing out works offline too). */
     suspend fun logout() {
-        runCatching { send(Request.Builder().url(url("auth/logout")).post(EMPTY_JSON).build()).close() }
+        runCatching { withContext(io) { execute(Request.Builder().url(url("auth/logout")).post(EMPTY_JSON).build()).close() } }
     }
 
     // ── Files ───────────────────────────────────────────────────────────────────
@@ -95,22 +99,33 @@ class TeleStoreApi(
     fun url(path: String): HttpUrl = baseUrl.newBuilder().addPathSegments(path).build()
 
     private suspend inline fun <reified T> get(url: HttpUrl): T =
-        decode(send(Request.Builder().url(url).get().build()))
+        call(Request.Builder().url(url).get().build())
 
     private suspend inline fun <reified T> post(url: HttpUrl, body: JsonObject): T =
-        decode(send(Request.Builder().url(url).post(body.toString().toRequestBody(JSON)).build()))
+        call(Request.Builder().url(url).post(body.toString().toRequestBody(JSON)).build())
 
-    private inline fun <reified T> decode(response: Response): T = response.use {
-        json.decodeFromString(it.body?.string().orEmpty())
+    /** Sends the request and reads and decodes the reply, all on [io], never on the caller's thread. */
+    private suspend inline fun <reified T> call(request: Request): T = withContext(io) {
+        val text = try {
+            execute(request).use { it.body?.string().orEmpty() }
+        } catch (e: IOException) {
+            throw NetworkException("The connection to ${baseUrl.host} was lost. Try again.", e)
+        }
+        try {
+            json.decodeFromString<T>(text)
+        } catch (e: SerializationException) {
+            throw ApiException(0, "The server sent a reply the app couldn't read. Update the app or the server.")
+        }
     }
 
-    private suspend fun send(request: Request): Response = withContext(Dispatchers.IO) {
+    /** Runs the request (blocking; call it on [io]); a refused request becomes an [ApiException]. */
+    private fun execute(request: Request): Response {
         val response = try {
             http.newCall(request).execute()
         } catch (e: IOException) {
             throw NetworkException("Couldn't reach ${baseUrl.host}. Check your connection.", e)
         }
-        if (response.isSuccessful) return@withContext response
+        if (response.isSuccessful) return response
         val message = response.use { errorMessage(it) }
         if (response.code == 401) {
             onUnauthorized()
