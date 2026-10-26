@@ -36,7 +36,7 @@ from telestore.config import API_DOCS_ENABLED, APP_NAME, OWNER, SESSION_SECRET_K
 from telestore.db import database
 
 # Import utility functions and global variables
-from telestore.api.state import _auth_tokens, load_persistent_tokens, cleanup_stale_upload_files
+from telestore.api.state import _auth_tokens, cached_token, cached_token_valid, load_persistent_tokens, cleanup_stale_upload_files
 
 app = FastAPI(
     docs_url="/docs" if API_DOCS_ENABLED else None,
@@ -122,8 +122,8 @@ async def auth_token_middleware(request: Request, call_next):
         # Also check query param 'token' for direct browser downloads or media streaming
         auth_header = request.query_params.get("token")
     if auth_header:
-        # First check in-memory cache
-        if auth_header in _auth_tokens:
+        # First check in-memory cache (an expired token is dropped there)
+        if cached_token_valid(auth_header):
             token_data = _auth_tokens[auth_header]
             # Add token data to session-like storage for the route handlers
             request.state.auth_token_data = token_data
@@ -133,12 +133,7 @@ async def auth_token_middleware(request: Request, call_next):
             db_token_data = database.Users.get_auth_token(auth_header)
             if db_token_data:
                 # Add to in-memory cache for future requests
-                _auth_tokens[auth_header] = {
-                    "authenticated": True,
-                    "username": db_token_data['username'],
-                    "auth_method": db_token_data['auth_method'],
-                    "created_at": db_token_data['created_at'].isoformat() if hasattr(db_token_data['created_at'], 'isoformat') else str(db_token_data['created_at'])
-                }
+                _auth_tokens[auth_header] = cached_token(db_token_data)
                 # Add token data to session-like storage for the route handlers
                 request.state.auth_token_data = _auth_tokens[auth_header]
                 request.state.authenticated_via_token = True

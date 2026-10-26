@@ -10,6 +10,27 @@ logger = setup_logger("web_server_utilities")
 work_loads = {}
 _auth_tokens: Dict[str, Dict] = {}
 
+def cached_token(token_data: dict) -> dict:
+    """The in-memory copy of a stored token, keeping its expiry so it stops working on time."""
+    created, expires = token_data.get('created_at'), token_data.get('expires_at')
+    return {
+        "authenticated": True,
+        "username": token_data['username'],
+        "auth_method": token_data['auth_method'],
+        "created_at": created.isoformat() if hasattr(created, 'isoformat') else str(created),
+        "expires_at": expires if isinstance(expires, datetime) else None,
+    }
+
+
+def cached_token_valid(token: str):
+    """The cached token's data while it is still valid; an expired one is dropped."""
+    data = _auth_tokens.get(token)
+    if data and data.get("expires_at") and data["expires_at"] < datetime.now():
+        _auth_tokens.pop(token, None)
+        return None
+    return data
+
+
 def load_persistent_tokens(app):
     """Load persistent auth tokens from database on startup"""
     try:
@@ -21,12 +42,7 @@ def load_persistent_tokens(app):
         loaded_count = 0
         for token_data in tokens_cursor:
             auth_token = token_data['auth_token']
-            _auth_tokens[auth_token] = {
-                "authenticated": True,
-                "username": token_data['username'],
-                "auth_method": token_data['auth_method'],
-                "created_at": token_data['created_at'].isoformat() if hasattr(token_data['created_at'], 'isoformat') else str(token_data['created_at'])
-            }
+            _auth_tokens[auth_token] = cached_token(token_data)
             loaded_count += 1
         
     except Exception as e:

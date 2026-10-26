@@ -64,58 +64,93 @@ RESOLUTION_HEIGHT_MAP = {
 from telestore.config import PORT
 
 
-def _get_internal_stream_url(file_name: str, token: Optional[str] = None) -> str:
+def _get_internal_stream_url(file_name: str, token: Optional[str] = None, file_id: Optional[str] = None) -> str:
     """Generate internal loopback URL for ffmpeg/ffprobe to stream from local Uvicorn"""
     encoded_name = urllib.parse.quote(file_name)
     port = PORT or 8000
     url = f"http://127.0.0.1:{port}/dl/{encoded_name}?inline=1"
+    if file_id:
+        url += f"&file_id={urllib.parse.quote(str(file_id))}"
     if token:
         url += f"&token={urllib.parse.quote(token)}"
     return url
 
 
+def _owner_ids(user) -> list:
+    return [i for i in {str(user.telegram_user_id) if user.telegram_user_id else None, user.username} if i]
+
+
+def _find_own_file(user, name: str, file_id: Optional[str]) -> Optional[dict]:
+    """The caller's own file, by id or by name (never another user's file of the same name)."""
+    from bson import ObjectId
+    mine = {"owner_id": {"$in": _owner_ids(user)}}
+    if file_id and ObjectId.is_valid(file_id):
+        found = database.Files.find_one({"_id": ObjectId(file_id), **mine})
+        if found:
+            return found
+    for candidate in (name, os.path.basename(name)):
+        found = database.Files.find_one({"file_name": candidate, "trashed": {"$ne": True}, **mine})
+        if found:
+            return found
+    return None
+
+
+def _caller_token(request: Request, token: Optional[str], user) -> str:
+    """A token that lets ffmpeg/ffprobe read the file as the caller, never as another account.
+
+    Apps send theirs (?token= or X-Auth-Token). A website session has none, so a short-lived one
+    is made for this user and kept only in memory.
+    """
+    supplied = token or request.query_params.get("token") or request.headers.get("X-Auth-Token")
+    if supplied:
+        return supplied
+    import secrets
+    from datetime import datetime, timedelta
+    from telestore.api.state import _auth_tokens
+    minted = secrets.token_urlsafe(24)
+    _auth_tokens[minted] = {
+        "authenticated": True,
+        "username": user.username,
+        "auth_method": "internal",
+        "created_at": datetime.now().isoformat(),
+        "expires_at": datetime.now() + timedelta(hours=6),
+    }
+    return minted
+
+
 @router.get("/info/{file_name:path}")
-async def get_media_info(request: Request, file_name: str, token: Optional[str] = None):
+async def get_media_info(request: Request, file_name: str, token: Optional[str] = None, file_id: Optional[str] = None):
     """
     Probe media file using ffprobe to detect resolution, audio tracks, and subtitle tracks.
     Results are cached in memory and database for instant responses.
     """
     try:
-        require_auth(request)
+        user = require_auth(request)
     except HTTPException:
         raise HTTPException(status_code=401, detail="Authentication required")
 
     decoded_file_name = urllib.parse.unquote(file_name)
 
-    # Check memory cache
-    if decoded_file_name in _MEDIA_INFO_CACHE:
-        return _MEDIA_INFO_CACHE[decoded_file_name]
-
-    # Find file in database
-    file_data = database.Files.find_one({"file_name": decoded_file_name})
-    if not file_data:
-        base_name = os.path.basename(decoded_file_name)
-        file_data = database.Files.find_one({"file_name": base_name})
-
+    # Only the caller's own file, found by id when the app sends it
+    file_data = _find_own_file(user, decoded_file_name, file_id)
     if not file_data:
         raise HTTPException(status_code=404, detail="File not found")
+    cache_key = str(file_data["_id"])
+
+    # Check memory cache
+    if cache_key in _MEDIA_INFO_CACHE:
+        return _MEDIA_INFO_CACHE[cache_key]
 
     actual_file_name = file_data.get("file_name", decoded_file_name)
 
     # Check if media_info is already stored in database
     if file_data.get("media_info"):
         db_info = file_data["media_info"]
-        _MEDIA_INFO_CACHE[decoded_file_name] = db_info
+        _MEDIA_INFO_CACHE[cache_key] = db_info
         return db_info
 
-    # Extract auth token from request
-    auth_token = token or request.query_params.get("token")
-    if not auth_token:
-        token_doc = database.Users.db["AuthTokens"].find_one({"username": "admin"})
-        if token_doc:
-            auth_token = token_doc.get("auth_token")
-
-    stream_url = _get_internal_stream_url(actual_file_name, auth_token)
+    auth_token = _caller_token(request, token, user)
+    stream_url = _get_internal_stream_url(actual_file_name, auth_token, cache_key)
 
     cmd = [
         "nice", "-n", "19",
@@ -257,7 +292,7 @@ async def get_media_info(request: Request, file_name: str, token: Optional[str] 
     }
 
     # Cache in memory and MongoDB
-    _MEDIA_INFO_CACHE[decoded_file_name] = result
+    _MEDIA_INFO_CACHE[cache_key] = result
     if file_data and "_id" in file_data:
         try:
             database.Files.update_one(
@@ -275,25 +310,24 @@ async def get_subtitles(
     request: Request,
     file_name: str,
     track: int = Query(0, description="0-indexed subtitle track"),
-    token: Optional[str] = None
+    token: Optional[str] = None,
+    file_id: Optional[str] = None
 ):
     """
     Extract embedded subtitle track from video container into WebVTT text format on-the-fly.
     """
     try:
-        require_auth(request)
+        user = require_auth(request)
     except HTTPException:
         raise HTTPException(status_code=401, detail="Authentication required")
 
     decoded_file_name = urllib.parse.unquote(file_name)
+    file_data = _find_own_file(user, decoded_file_name, file_id)
+    if not file_data:
+        raise HTTPException(status_code=404, detail="File not found")
 
-    auth_token = token or request.query_params.get("token")
-    if not auth_token:
-        token_doc = database.Users.db["AuthTokens"].find_one({"username": "admin"})
-        if token_doc:
-            auth_token = token_doc.get("auth_token")
-
-    stream_url = _get_internal_stream_url(decoded_file_name, auth_token)
+    auth_token = _caller_token(request, token, user)
+    stream_url = _get_internal_stream_url(file_data.get("file_name", decoded_file_name), auth_token, str(file_data["_id"]))
 
     cmd = [
         "nice", "-n", "19",
@@ -351,6 +385,7 @@ async def media_transcode_stream(
     audio_track: Optional[int] = Query(None, description="0-indexed audio track to select"),
     start_time: Optional[float] = Query(0.0, description="Start timestamp in seconds for seeking"),
     token: Optional[str] = Query(None, description="Auth token"),
+    file_id: Optional[str] = Query(None, description="The file's id (exact match; otherwise found by name)"),
 ):
     """
     Stream video with quality downscaling or custom audio track selection on-the-fly.
@@ -359,19 +394,19 @@ async def media_transcode_stream(
     - If quality is lower (e.g. 480p, 360p): encodes video downscale using single-core ultrafast preset.
     """
     try:
-        require_auth(request)
+        user = require_auth(request)
     except HTTPException:
         raise HTTPException(status_code=401, detail="Authentication required")
 
     decoded_file_name = urllib.parse.unquote(file_name)
+    file_data = _find_own_file(user, decoded_file_name, file_id)
+    if not file_data:
+        raise HTTPException(status_code=404, detail="File not found")
+    own_id = str(file_data["_id"])
+    supplied_token = token or request.query_params.get("token") or request.headers.get("X-Auth-Token")
 
-    auth_token = token or request.query_params.get("token")
-    if not auth_token:
-        token_doc = database.Users.db["AuthTokens"].find_one({"username": "admin"})
-        if token_doc:
-            auth_token = token_doc.get("auth_token")
-
-    stream_url = _get_internal_stream_url(decoded_file_name, auth_token)
+    auth_token = _caller_token(request, token, user)
+    stream_url = _get_internal_stream_url(file_data.get("file_name", decoded_file_name), auth_token, own_id)
 
     is_original_quality = (
         not quality
@@ -384,7 +419,11 @@ async def media_transcode_stream(
 
     # Native containers (MP4, WebM, M4V, etc.) at original quality ALWAYS stream directly via HTTP Range (0% CPU, no FFmpeg)
     if is_browser_native_container and is_original_quality and is_default_audio:
-        return Response(status_code=307, headers={"Location": f"/dl/{urllib.parse.quote(decoded_file_name)}?inline=1&token={auth_token or ''}"})
+        # The browser follows this itself: with its session cookie, or with the app's own token
+        location = f"/dl/{urllib.parse.quote(decoded_file_name)}?inline=1&file_id={own_id}"
+        if supplied_token:
+            location += f"&token={urllib.parse.quote(supplied_token)}"
+        return Response(status_code=307, headers={"Location": location})
 
     # Prepare FFmpeg command with lowest CPU scheduling priority (nice -n 19), single thread, fast seeking and zero-latency probing
     cmd = [
