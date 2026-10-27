@@ -37,7 +37,8 @@ def _tokens():
 def touch(token: str, cached: dict) -> None:
     """Records that this device was just used (at most every few minutes)."""
     now = time.monotonic()
-    if now - cached.get("_touched", 0) < TOUCH_EVERY:
+    # (monotonic counts from boot, so "never saved" must not look like "saved at 0")
+    if cached.get("_touched") is not None and now - cached["_touched"] < TOUCH_EVERY:
         return
     cached["_touched"] = now
     try:

@@ -68,6 +68,13 @@ def test_names_this_device_first_and_old_sign_ins(tokens):
     assert "phone" not in str(devices)  # tokens never leave the server
 
 
+def test_first_use_is_saved_even_just_after_the_server_machine_started(tokens):
+    tokens.add("laptop")
+    with patch.object(device_service.time, "monotonic", return_value=12.0):
+        device_service.touch("laptop", {})
+    assert "last_seen" in tokens.docs[0]
+
+
 def test_last_use_is_saved_now_and_then(tokens):
     tokens.add("laptop")
     cached = {}
