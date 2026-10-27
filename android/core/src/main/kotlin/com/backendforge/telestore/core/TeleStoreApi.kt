@@ -492,6 +492,46 @@ class TeleStoreApi(
     suspend fun emptyTrash(): MessageReply =
         post(url("files/trash/empty"), buildJsonObject { })
 
+    // ── Playlists ───────────────────────────────────────────────────────────────
+    /** Liked music first, then the user's playlists. */
+    suspend fun playlists(): List<Playlist> = get<PlaylistsReply>(url("files/playlists")).playlists
+
+    /** One playlist with its items. */
+    suspend fun playlist(id: String): Playlist = get(playlistUrl(id))
+
+    suspend fun createPlaylist(name: String, items: List<FileItem> = emptyList()): Playlist = post(url("files/playlists"), buildJsonObject {
+        put("name", name.trim())
+        if (items.isNotEmpty()) put("file_ids", fileIds(items))
+    })
+
+    suspend fun renamePlaylist(id: String, name: String): Playlist =
+        call(Request.Builder().url(playlistUrl(id)).patch(buildJsonObject { put("name", name.trim()) }.toString().toRequestBody(JSON)).build())
+
+    suspend fun deletePlaylist(id: String) {
+        call<MessageReply>(Request.Builder().url(playlistUrl(id)).delete().build())
+    }
+
+    suspend fun addToPlaylist(id: String, items: List<FileItem>): Playlist =
+        post(playlistUrl(id, "items"), buildJsonObject { put("file_ids", fileIds(items)) })
+
+    suspend fun removeFromPlaylist(id: String, items: List<FileItem>): Playlist =
+        post(playlistUrl(id, "items/remove"), buildJsonObject { put("file_ids", fileIds(items)) })
+
+    /** [items] in their new order (exactly the playlist's items). */
+    suspend fun reorderPlaylist(id: String, items: List<FileItem>): Playlist =
+        put(playlistUrl(id, "order"), buildJsonObject { put("file_ids", fileIds(items)) })
+
+    /** Likes or unlikes [item]; returns whether it's liked now. */
+    suspend fun setLiked(item: FileItem, liked: Boolean): Boolean = post<LikeReply>(url("files/playlists/like"), buildJsonObject {
+        put("file_id", item.id)
+        put("liked", liked)
+    }).liked
+
+    private fun playlistUrl(id: String, rest: String? = null): HttpUrl =
+        url("files/playlists").newBuilder().addPathSegment(id).apply { if (rest != null) addPathSegments(rest) }.build()
+
+    private fun fileIds(items: List<FileItem>) = kotlinx.serialization.json.JsonArray(items.map { kotlinx.serialization.json.JsonPrimitive(it.id) })
+
     // ── Plumbing ────────────────────────────────────────────────────────────────
     fun url(path: String): HttpUrl = baseUrl.newBuilder().addPathSegments(path).build()
 

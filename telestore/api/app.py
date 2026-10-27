@@ -24,6 +24,7 @@ from telestore.api.routes.user import router as user_router
 from telestore.api.routes.media import router as media_router
 from telestore.api.routes.archive import router as archive_router
 from telestore.api.routes.vault import router as vault_router
+from telestore.api.routes.playlists import router as playlists_router
 from telestore.api.routes.remote_transfer import router as remote_transfer_router
 from telestore.api.routes.cloud import router as cloud_router
 from telestore.api.routes.worker import router as worker_router
@@ -142,6 +143,7 @@ async def auth_token_middleware(request: Request, call_next):
 
 # Include our new routers with updated prefixes
 app.include_router(auth_router)
+app.include_router(playlists_router)
 app.include_router(files_router)
 app.include_router(folders_router)
 app.include_router(system_router)

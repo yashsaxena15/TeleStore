@@ -26,6 +26,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import com.backendforge.telestore.ui.playlists.PlaylistStore
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
@@ -108,6 +110,8 @@ fun FolderScreen(
     onShare: ((FileItem) -> Unit)? = null,
     /** Opens the file in another app on the phone. */
     onOpenWith: ((FileItem) -> Unit)? = null,
+    /** Music and videos: opens "Add to playlist" for them. */
+    onAddToPlaylist: ((List<FileItem>) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -291,13 +295,23 @@ fun FolderScreen(
                             label = { Text("Copy") },
                             enabled = selected.isNotEmpty(),
                         )
-                        NavigationBarItem(
-                            selected = false,
-                            onClick = { compressItems = selected },
-                            icon = { Icon(Icons.Default.FolderZip, contentDescription = null) },
-                            label = { Text("ZIP") },
-                            enabled = selected.isNotEmpty(),
-                        )
+                        // Only music and videos selected: a playlist is more useful than a ZIP
+                        if (onAddToPlaylist != null && selected.isNotEmpty() && selected.all(PlaylistStore::canAdd)) {
+                            NavigationBarItem(
+                                selected = false,
+                                onClick = { onAddToPlaylist(selected) },
+                                icon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = null) },
+                                label = { Text("Playlist") },
+                            )
+                        } else {
+                            NavigationBarItem(
+                                selected = false,
+                                onClick = { compressItems = selected },
+                                icon = { Icon(Icons.Default.FolderZip, contentDescription = null) },
+                                label = { Text("ZIP") },
+                                enabled = selected.isNotEmpty(),
+                            )
+                        }
                         NavigationBarItem(
                             selected = false,
                             onClick = { vm.starItems(selected, !allStarred) },
@@ -544,6 +558,7 @@ fun FolderScreen(
             onShare = onShare,
             onOpenWith = onOpenWith,
             onCompress = { compressItems = listOf(it) },
+            onAddToPlaylist = onAddToPlaylist?.let { add -> { item: FileItem -> add(listOf(item)) } },
             onDismiss = { actionItem = null },
         )
     }

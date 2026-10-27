@@ -37,6 +37,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -169,6 +175,8 @@ fun NowPlayingScreen(state: MusicState, controller: MusicController, container: 
 
     // Lyrics for the song playing (looked up once per song)
     val item = state.item
+    val liked by container.playlists.liked.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { container.playlists.refreshQuietly() }
     var online by remember { mutableStateOf(container.settings.onlineLyrics) }
     var lyrics by remember(item?.id) { mutableStateOf(item?.id?.let { lyricsCache[it] }) }
     var lyricsLoading by remember(item?.id) { mutableStateOf(item != null && item.id !in lyricsCache) }
@@ -224,6 +232,28 @@ fun NowPlayingScreen(state: MusicState, controller: MusicController, container: 
                         Text(state.artist, color = muted, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     if (state.isPlaying) EqualizerBars(onGround.copy(alpha = 0.85f))
+                    // The heart: Liked music (a playlist on both the app and the website)
+                    val isLiked = item?.id in liked
+                    val heartScale by animateFloatAsState(if (isLiked) 1f else 0.9f, spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "heart")
+                    IconButton(onClick = {
+                        val song = item ?: return@IconButton
+                        haptics.click()
+                        scope.launch {
+                            try {
+                                container.playlists.setLiked(song, !isLiked)
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                message = (e as? ApiException)?.message ?: "Couldn't update Liked music."
+                            }
+                        }
+                    }) {
+                        Icon(
+                            if (isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                            contentDescription = if (isLiked) "Remove from Liked music" else "Add to Liked music",
+                            tint = onGround, modifier = Modifier.scale(heartScale),
+                        )
+                    }
                     IconButton(onClick = {
                         val song = item ?: return@IconButton
                         scope.launch {
@@ -242,6 +272,7 @@ fun NowPlayingScreen(state: MusicState, controller: MusicController, container: 
                 }
 
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
+                    item { Chip(Icons.AutoMirrored.Filled.PlaylistAdd, "Add to playlist", onGround) { item?.let { container.playlists.requestAdd(listOf(it)) } } }
                     item { Chip(Icons.Filled.Download, "Download", onGround) { item?.let { container.transfers.download(it); message = "Downloading ${it.name}. See Transfers." } } }
                     item { Chip(Icons.Filled.Lyrics, "Lyrics", onGround) { sheet = MusicSheet.LYRICS } }
                     item { Chip(Icons.Filled.Bedtime, state.sleepLabel ?: "Sleep timer", onGround) { sheet = MusicSheet.SLEEP } }

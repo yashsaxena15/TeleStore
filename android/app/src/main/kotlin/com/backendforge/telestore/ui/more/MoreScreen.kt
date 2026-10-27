@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.AccountCircle
@@ -64,6 +65,7 @@ fun MoreScreen(
     onNavigateTrash: () -> Unit,
     onNavigateInbox: () -> Unit,
     onNavigateStarred: () -> Unit = {},
+    onNavigatePlaylists: () -> Unit = {},
     onNavigateRecent: () -> Unit = {},
     onNavigateVault: () -> Unit = {},
     onNavigateDrive: () -> Unit = {},
@@ -169,6 +171,8 @@ fun MoreScreen(
                     MoreNavRow(icon = Icons.Default.Cloud, label = "Google Drive", onClick = onNavigateDrive)
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
                     MoreNavRow(icon = Icons.Default.Lan, label = "WebDAV (use in other apps)", onClick = onNavigateWebDav)
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
+                    MoreNavRow(icon = Icons.AutoMirrored.Filled.QueueMusic, label = "Playlists", onClick = onNavigatePlaylists)
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
                     MoreNavRow(icon = Icons.Default.Star, label = "Starred", onClick = onNavigateStarred)
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))

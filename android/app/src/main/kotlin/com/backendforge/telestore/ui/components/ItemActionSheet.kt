@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import com.backendforge.telestore.ui.playlists.PlaylistStore
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -68,6 +70,8 @@ fun ItemActionSheet(
     onShare: ((FileItem) -> Unit)? = null,
     onOpenWith: ((FileItem) -> Unit)? = null,
     onCompress: ((FileItem) -> Unit)? = null,
+    /** Music and videos: opens "Add to playlist". */
+    onAddToPlaylist: ((FileItem) -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -179,6 +183,13 @@ fun ItemActionSheet(
                         label = "Info",
                         onClick = { onDismiss(); onInfo(item) },
                     )
+                    if (onAddToPlaylist != null && PlaylistStore.canAdd(item)) {
+                        ActionRow(
+                            icon = Icons.AutoMirrored.Filled.PlaylistAdd,
+                            label = "Add to playlist",
+                            onClick = { onDismiss(); onAddToPlaylist(item) },
+                        )
+                    }
                     if (!item.isFolder && onShare != null) {
                         ActionRow(
                             icon = Icons.Default.Share,

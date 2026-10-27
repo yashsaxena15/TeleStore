@@ -1,5 +1,15 @@
 package com.backendforge.telestore.ui
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.ui.graphics.TransformOrigin
 import com.backendforge.telestore.ui.viewers.DocumentScreen
 import com.backendforge.telestore.ui.viewers.ArchiveScreen
 import com.backendforge.telestore.ui.components.rememberOpenElsewhere
@@ -13,6 +23,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.backendforge.telestore.player.VideoHost
+import com.backendforge.telestore.ui.playlists.PlaylistsScreen
+import com.backendforge.telestore.ui.playlists.PlaylistScreen
+import com.backendforge.telestore.ui.playlists.AddToPlaylistSheet
 import com.backendforge.telestore.player.VideoMiniPlayer
 import com.backendforge.telestore.core.CloudAccount
 import com.backendforge.telestore.ui.drive.CopyToDriveSheet
@@ -117,6 +130,8 @@ import com.backendforge.telestore.ui.search.SearchViewModel
 import com.backendforge.telestore.ui.transfers.TransfersScreen
 
 private const val ROUTE_VIDEO = "video"
+private const val ROUTE_PLAYLISTS = "playlists"
+private const val ROUTE_PLAYLIST = "playlist"
 private const val ROUTE_PHOTOS = "photos"
 private const val ROUTE_NOW_PLAYING = "now_playing"
 private const val ROUTE_VAULT = "vault"
@@ -188,6 +203,22 @@ fun MainScreen(
         if (currentRoute != ROUTE_VIDEO) navController.navigate(ROUTE_VIDEO)
     }
 
+    /**
+     * Plays a playlist from [index]: a song in the music player with the playlist's songs queued,
+     * a video in the video player with its videos.
+     */
+    fun playItems(items: List<FileItem>, index: Int) {
+        val start = items.getOrNull(index) ?: return
+        val queue = items.filter { it.kind == start.kind }
+        val at = queue.indexOfFirst { it.id == start.id }.coerceAtLeast(0)
+        if (start.kind == FileKind.VIDEO) {
+            openVideo(queue, at)
+        } else {
+            music.play(container.api(), queue, at) { container.transfers.store.offlineCopy(context, it.id) }
+            navController.navigate(ROUTE_NOW_PLAYING)
+        }
+    }
+
     /** Opens a video, song or photo with the folder's others queued after it. False: no viewer. */
     fun openFile(item: FileItem, siblings: List<FileItem>): Boolean {
         val (queue, index) = PlayQueue.around(siblings, item)
@@ -219,6 +250,14 @@ fun MainScreen(
     val scope = rememberCoroutineScope()
     var uploadFolder by remember { mutableStateOf(TeleStoreApi.HOME) }
     var transferMessage by remember { mutableStateOf<String?>(null) }
+    // "Add to playlist", asked for from any screen or player
+    val addingToPlaylist by container.playlists.adding.collectAsStateWithLifecycle()
+    addingToPlaylist?.let { items ->
+        AddToPlaylistSheet(container, items, onDismiss = container.playlists::closeAdd) { done ->
+            container.playlists.closeAdd()
+            transferMessage = done
+        }
+    }
     val transferItems by container.transfers.store.items.collectAsStateWithLifecycle()
     val offlineIds = remember(transferItems) { container.transfers.store.offlineIds() }
     val pendingShare by container.pendingShare.collectAsStateWithLifecycle()
@@ -465,6 +504,7 @@ fun MainScreen(
                             onKind = { navController.navigate("home_kind/${it.name}") },
                             onShortcut = { shortcut ->
                                 when (shortcut) {
+                                    HomeShortcut.PLAYLISTS -> navController.navigate(ROUTE_PLAYLISTS)
                                     HomeShortcut.STARRED -> navigateToFolder("home", "starred")
                                     HomeShortcut.RECENT -> navigateToFolder("home", "all")
                                     HomeShortcut.TRASH -> navigateToFolder("home", "trash")
@@ -498,6 +538,7 @@ fun MainScreen(
                         val path = backStackEntry.arguments?.getString("path") ?: TeleStoreApi.HOME
                         val vm: FolderViewModel = viewModel(key = "home-$path-${session.token}") { FolderViewModel(container, initialPath = path) }
                         FolderScreen(
+                            onAddToPlaylist = { container.playlists.requestAdd(it) },
                             vm = vm,
                             api = container.api(),
                             onNavigateFolder = { navigateToFolder("home", it) },
@@ -541,6 +582,7 @@ fun MainScreen(
                         val path = backStackEntry.arguments?.getString("path") ?: TeleStoreApi.HOME
                         val vm: FolderViewModel = viewModel(key = "photos-$path-${session.token}") { FolderViewModel(container, initialPath = path) }
                         FolderScreen(
+                            onAddToPlaylist = { container.playlists.requestAdd(it) },
                             vm = vm,
                             api = container.api(),
                             onNavigateFolder = { navigateToFolder("photos", it) },
@@ -565,6 +607,7 @@ fun MainScreen(
                         val path = backStackEntry.arguments?.getString("path") ?: TeleStoreApi.HOME
                         val vm: FolderViewModel = viewModel(key = "files-$path-${session.token}") { FolderViewModel(container, initialPath = path) }
                         FolderScreen(
+                            onAddToPlaylist = { container.playlists.requestAdd(it) },
                             vm = vm,
                             api = container.api(),
                             onNavigateFolder = { navigateToFolder("files", it) },
@@ -606,6 +649,7 @@ fun MainScreen(
                             onNavigateTrash = { navigateToFolder("more", "trash") },
                             onNavigateInbox = { navigateToFolder("more", "inbox") },
                             onNavigateStarred = { navigateToFolder("more", "starred") },
+                            onNavigatePlaylists = { navController.navigate(ROUTE_PLAYLISTS) },
                             onNavigateRecent = { navigateToFolder("more", "all") },
                             onNavigateVault = { navController.navigate(ROUTE_VAULT) },
                             onNavigateDrive = { navController.navigate("drive") },
@@ -630,6 +674,7 @@ fun MainScreen(
                             FolderViewModel(container, initialPath = path)
                         }
                         FolderScreen(
+                            onAddToPlaylist = { container.playlists.requestAdd(it) },
                             vm = vm,
                             api = container.api(),
                             onNavigateFolder = { navigateToFolder("more", it) },
@@ -659,12 +704,12 @@ fun MainScreen(
                     )
                 }
 
-                composable(ROUTE_VIDEO) {
+                composable(ROUTE_VIDEO, enterTransition = { PlayerMotion.open }, exitTransition = { PlayerMotion.covered }, popEnterTransition = { PlayerMotion.uncovered }, popExitTransition = { PlayerMotion.minimize }) {
                     val vm = video
                     if (vm == null) {
                         LaunchedEffect(Unit) { navController.popBackStack() }
                     } else {
-                        VideoScreen(vm, api = container.api(), onBack = { navController.popBackStack() }, onDownload = ::download)
+                        VideoScreen(vm, api = container.api(), onBack = { navController.popBackStack() }, onDownload = ::download, onSaveToPlaylist = { container.playlists.requestAdd(listOf(it)) })
                     }
                 }
 
@@ -706,10 +751,29 @@ fun MainScreen(
                     VaultScreen(vm, container, onBack = { navController.popBackStack() }, onOpenFile = ::openFile, onDownload = ::download)
                 }
 
-                composable(ROUTE_NOW_PLAYING) {
+                composable(ROUTE_PLAYLISTS) {
+                    PlaylistsScreen(container, onBack = { navController.popBackStack() }, onOpen = { navController.navigate("$ROUTE_PLAYLIST/${it.id}") })
+                }
+                composable("$ROUTE_PLAYLIST/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
+                    val id = entry.arguments?.getString("id") ?: return@composable
+                    PlaylistScreen(container, id, onBack = { navController.popBackStack() }, onPlay = ::playItems)
+                }
+
+                composable(ROUTE_NOW_PLAYING, enterTransition = { PlayerMotion.open }, popExitTransition = { PlayerMotion.minimize }) {
                     NowPlayingScreen(musicState, music, container, onClose = { navController.popBackStack() })
                 }
             }
         }
     }
+}
+
+/**
+ * Players open by rising out of the mini player and close by carrying on down into it, shrinking
+ * from the top (where the finger is when pulling down), so a pull-down never jumps.
+ */
+private object PlayerMotion {
+    val open: EnterTransition = slideInVertically(tween(320)) { it / 2 } + scaleIn(tween(320), initialScale = 0.9f, transformOrigin = TransformOrigin(0.5f, 1f)) + fadeIn(tween(220))
+    val minimize: ExitTransition = slideOutVertically(tween(260)) { it } + scaleOut(tween(260), targetScale = 0.55f, transformOrigin = TransformOrigin(0.5f, 0f)) + fadeOut(tween(260, delayMillis = 60))
+    val covered: ExitTransition = fadeOut(tween(200))
+    val uncovered: EnterTransition = fadeIn(tween(200))
 }

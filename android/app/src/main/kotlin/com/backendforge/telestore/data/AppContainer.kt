@@ -48,6 +48,10 @@ class AppContainer(val context: Context) {
 
     /** Background music; made on first use so the service only starts when a song plays. */
     val music: MusicController by lazy { MusicController(context.applicationContext) }
+    /** Playlists and Liked music, shared by every screen and both players. */
+    val playlists: com.backendforge.telestore.ui.playlists.PlaylistStore by lazy {
+        com.backendforge.telestore.ui.playlists.PlaylistStore({ api() }, scope)
+    }
     private var musicStarted = false
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -63,6 +67,7 @@ class AppContainer(val context: Context) {
                         com.backendforge.telestore.widget.QuickWidget.refresh(context)
                     }
                     files.clear()
+                    playlists.clear()
                 }
             }
         }
