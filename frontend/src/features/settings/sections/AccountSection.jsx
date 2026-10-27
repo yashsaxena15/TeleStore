@@ -9,6 +9,7 @@ import { useUserProfile, displayName } from "@/hooks/useShellData";
 import { api } from "@/lib/api";
 import { SettingsPanel, Field, ValueBox, StatusPill } from "../SettingsUi";
 import { errorMessage } from "../errorMessage";
+import { DevicesPanel } from "./DevicesPanel";
 
 const MIN_PASSWORD = 6;
 
@@ -102,6 +103,8 @@ export const AccountSection = ({ onLogout }) => {
           </div>
         </Field>
       </SettingsPanel>
+
+      <DevicesPanel />
 
       <SettingsPanel icon={Send} title="Telegram" description="Connect your Telegram account so files you send to the bots land in your Inbox.">
         {profile.telegram_user_id ? (<div className="grid gap-3">

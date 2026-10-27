@@ -129,6 +129,8 @@ fun AccountScreen(container: AppContainer, onBack: () -> Unit) {
                 }
             }
 
+            item { DevicesPanel(container, onMessage = { say(it) }) }
+
             item {
                 Panel(Icons.AutoMirrored.Filled.Send, "Telegram", "Connect your Telegram account so files you send to the bots land in your Inbox, and so you can upload.") {
                     if (me.telegramId != null) {

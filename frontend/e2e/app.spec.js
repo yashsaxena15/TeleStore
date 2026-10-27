@@ -407,6 +407,28 @@ test.describe("sign-in and passwords", () => {
         expect(JSON.parse(reset.body)).toEqual({ username: "yashsaxena15", code: "123456", new_password: "brandnew1" });
     });
 
+    test("your devices: this one is marked, others can be signed out", async ({ page, request }) => {
+        await page.goto("/settings?tab=account");
+        const list = page.getByRole("list", { name: "Signed-in devices" });
+        await expect(list.getByRole("listitem").filter({ hasText: "Chrome on Linux" }).getByText("This device")).toBeVisible();
+        await expect(list.getByRole("button", { name: "Sign out Chrome on Linux" })).toHaveCount(0);
+        await list.getByRole("button", { name: "Sign out Android app" }).click();
+        await page.getByRole("alertdialog").getByRole("button", { name: "Sign out" }).click();
+        await expect(list.getByText("Android app")).toHaveCount(0);
+        expect((await mutations(request)).some((r) => r.method === "DELETE" && r.path === "/auth/devices/d2")).toBe(true);
+        // Only one other left: no "all others" button needed
+        await expect(page.getByRole("button", { name: "Sign out all others" })).toHaveCount(0);
+    });
+
+    test("sign out all other devices", async ({ page, request }) => {
+        await page.goto("/settings?tab=account");
+        await page.getByRole("button", { name: "Sign out all others" }).click();
+        await expect(page.getByRole("alertdialog").getByText("Sign out 2 other devices?")).toBeVisible();
+        await page.getByRole("alertdialog").getByRole("button", { name: "Sign out" }).click();
+        await expect(page.getByText("You're only signed in here.")).toBeVisible();
+        expect((await mutations(request)).some((r) => r.path === "/auth/devices/sign-out-others")).toBe(true);
+    });
+
     test("owner sets a new password without the old one", async ({ page, request }) => {
         await page.goto("/settings?tab=users");
         await page.getByRole("button", { name: "Actions for family" }).click();
@@ -457,7 +479,11 @@ test.describe("item actions", () => {
         await page.getByRole("button", { name: "Star Q3-report.pdf" }).click();
         await expect.poll(async () => (await sent(request, "/files/star")).length).toBe(1);
 
-        await page.getByRole("button", { name: "More actions for project-src.zip" }).first().click();
+        // The list redraws after the star (and when offline marks load): open the menu again if a click lands mid-redraw
+        await expect(async () => {
+            await page.getByRole("button", { name: "More actions for project-src.zip" }).first().click();
+            await expect(page.getByRole("menuitem", { name: /Rename/ })).toBeVisible({ timeout: 2000 });
+        }).toPass({ timeout: 15000 });
         await page.getByRole("menuitem", { name: /Rename/ }).click();
         const input = page.locator("input:focus");
         await input.fill("project-src-2.zip");

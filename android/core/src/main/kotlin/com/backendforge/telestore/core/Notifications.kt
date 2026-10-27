@@ -33,6 +33,27 @@ data class NotificationList(
 @Serializable
 internal data class UnreadReply(val unread: Int = 0)
 
+/** A place this account is signed in (Settings › Your devices). */
+@Serializable
+data class SignedInDevice(
+    val id: String,
+    val name: String = "",
+    /** "app" or "browser". */
+    val kind: String = "browser",
+    /** "password" or "google". */
+    val method: String = "password",
+    @SerialName("signed_in_at") val signedInAt: String? = null,
+    @SerialName("last_seen") val lastSeen: String? = null,
+    /** The device asking: it can't be signed out from the list. */
+    val current: Boolean = false,
+)
+
+@Serializable
+internal data class DevicesReply(val devices: List<SignedInDevice> = emptyList())
+
+@Serializable
+internal data class SignedOutReply(@SerialName("signed_out") val signedOut: Int = 0)
+
 /** Every kind of notification, each with its own switch in Settings › Notifications. */
 enum class NotificationKind(val wire: String, val label: String, val detail: String) {
     PHONE_TRANSFERS("phone_transfers", "Uploads and downloads", "Finished or failed on this phone"),

@@ -547,6 +547,17 @@ class TeleStoreApi(
         put("all", all)
     }).unread
 
+    // ── Your devices ────────────────────────────────────────────────────────────
+    /** Where this account is signed in, this phone first. */
+    suspend fun devices(): List<SignedInDevice> = get<DevicesReply>(url("auth/devices")).devices
+
+    /** Signs another device out; its next request lands on its sign-in screen. */
+    suspend fun signOutDevice(id: String): MessageReply =
+        call(Request.Builder().url(url("auth/devices").newBuilder().addPathSegment(id).build()).delete().build())
+
+    /** Signs out every device but this one; returns how many. */
+    suspend fun signOutOtherDevices(): Int = post<SignedOutReply>(url("auth/devices/sign-out-others"), buildJsonObject { }).signedOut
+
     /** Every file in [folderPath] and its subfolders (for folders kept offline). */
     suspend fun filesUnder(folderPath: String, max: Int = 5000): List<FileItem> {
         val found = mutableListOf<FileItem>()

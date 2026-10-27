@@ -93,6 +93,19 @@ const resetNotifications = () => {
 resetNotifications();
 const notificationsJson = () => ({ items: NOTIFICATIONS, unread: NOTIFICATIONS.filter((n) => !n.read).length, latest: NOTIFICATIONS[0]?.id || null });
 
+// Your devices (Settings › Account): this browser, the phone app and an old sign-in
+const DEVICES = [];
+const resetDevices = () => {
+    DEVICES.length = 0;
+    const ago = (min) => new Date(Date.now() - min * 60_000).toISOString().replace(/\.\d+Z$/, "");
+    DEVICES.push(
+        { id: "d1", name: "Chrome on Linux", kind: "browser", method: "password", signed_in_at: ago(60 * 24), last_seen: ago(0), current: true },
+        { id: "d2", name: "Android app", kind: "app", method: "password", signed_in_at: ago(60 * 48), last_seen: ago(12), current: false },
+        { id: "d3", name: "Unknown device (signed in before this update)", kind: "browser", method: "google", signed_in_at: ago(60 * 24 * 9), last_seen: ago(60 * 24 * 3), current: false },
+    );
+};
+resetDevices();
+
 const requests = [];
 const uploadState = { sentOne: false };
 
@@ -194,6 +207,17 @@ const mutation = (req, res, url, body) => {
         NOTIFICATIONS.forEach((n) => { if (data.all || (data.ids || []).includes(n.id)) n.read = true; });
         return send(res, 200, { unread: notificationsJson().unread });
     }
+    if (url.pathname === "/auth/devices/sign-out-others") {
+        const count = DEVICES.filter((d) => !d.current).length;
+        DEVICES.splice(0, DEVICES.length, ...DEVICES.filter((d) => d.current));
+        return send(res, 200, { signed_out: count });
+    }
+    if (url.pathname.startsWith("/auth/devices/") && req.method === "DELETE") {
+        const at = DEVICES.findIndex((d) => d.id === decodeURIComponent(url.pathname.split("/").pop()));
+        if (at < 0) return send(res, 404, { detail: "That device is already signed out." });
+        DEVICES.splice(at, 1);
+        return send(res, 200, { message: "Signed out." });
+    }
     if (url.pathname === "/auth/login") {
         return body.includes('"password":"wrong"') ? send(res, 401, { detail: "Incorrect username or password" }) : send(res, 200, { message: "Login successful", username: "admin", auth_token: "test-token" });
     }
@@ -281,6 +305,7 @@ http.createServer((req, res) => {
                 requests.length = 0;
                 resetPlaylists();
                 resetNotifications();
+                resetDevices();
             }
             return send(res, 200, requests);
         }
@@ -292,6 +317,7 @@ http.createServer((req, res) => {
         if (ROUTES[url.pathname]) return send(res, 200, ROUTES[url.pathname]);
         if (url.pathname === "/files") return send(res, 200, listFiles(url));
         if (url.pathname === "/user/notifications") return send(res, 200, notificationsJson());
+        if (url.pathname === "/auth/devices") return send(res, 200, { devices: DEVICES });
         if (/^\/files\/(preview|thumbnail)\//.test(url.pathname)) {
             requests.push({ method: req.method, path: url.pathname, body: "" });
             return send(res, 200, PIXEL, "image/png");

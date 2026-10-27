@@ -280,6 +280,9 @@ export const api = {
     // Notifications (the bell): newest first, with the unread count
     fetchNotifications: (after, limit = 30) => request('/user/notifications', { query: { after, limit }, timeout: 15000, fallback: "Couldn't load notifications" }),
     markNotificationsRead: (ids) => post('/user/notifications/read', ids === 'all' ? { all: true } : { ids }, { fallback: "Couldn't mark as read" }),
+    fetchDevices: () => request('/auth/devices', { fallback: "Couldn't load your devices" }),
+    signOutDevice: (id) => request(`/auth/devices/${encodeURIComponent(id)}`, { method: 'DELETE', fallback: "Couldn't sign out that device" }),
+    signOutOtherDevices: () => post('/auth/devices/sign-out-others', {}, { fallback: "Couldn't sign out the other devices" }),
     updateUserIndexChat: (indexChatData) => put('/user/index-chat', indexChatData, { timeout: 3000, fallback: 'Failed to update index chat' }),
 
     // ── Private Vault ──────────────────────────────────────────────────

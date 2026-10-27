@@ -26,13 +26,14 @@ class TestAppTokens:
     def test_android_gets_a_90_day_token(self):
         auth_routes._issue_token("bob", "local", None, device="Android")
         args, kwargs = database.Users.save_auth_token.call_args
-        assert kwargs == {"ttl_hours": 90 * 24, "device": "android"}
+        assert kwargs == {"ttl_hours": 90 * 24, "device": "android", "device_name": "Android app"}
 
     def test_website_keeps_24_hours(self):
+        # Only the name (for Your devices) is passed: no longer life, no app device
         auth_routes._issue_token("bob", "local", None)
-        assert database.Users.save_auth_token.call_args.kwargs == {}
-        auth_routes._issue_token("bob", "local", None, device="toaster")
-        assert database.Users.save_auth_token.call_args.kwargs == {}
+        assert database.Users.save_auth_token.call_args.kwargs == {"device_name": "Unknown browser"}
+        auth_routes._issue_token("bob", "local", None, device="toaster", user_agent="Mozilla/5.0 (Windows NT 10.0) Chrome/128.0")
+        assert database.Users.save_auth_token.call_args.kwargs == {"device_name": "Chrome on Windows"}
 
     def test_login_passes_the_device(self, client):
         with patch.object(auth_routes, "check_login", return_value="bob"), \

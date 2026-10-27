@@ -366,7 +366,7 @@ class Users(Collection):
             logger.error(f"Error updating user with identifier {user_identifier}: {e}")
             return False
 
-    def save_auth_token(self, username: str, auth_token: str, auth_method: str, ttl_hours: int = 24, device: str = None) -> None:
+    def save_auth_token(self, username: str, auth_token: str, auth_method: str, ttl_hours: int = 24, device: str = None, device_name: str = None) -> None:
         """Save an auth token for a user (24 hours; longer for a signed-in app such as Android)"""
         try:
             from datetime import datetime, timedelta
@@ -381,6 +381,10 @@ class Users(Collection):
             }
             if device:
                 token_data['device'] = device
+            if device_name:
+                token_data['device_name'] = device_name
+            from telestore.services.device_service import token_id
+            token_data['token_id'] = token_id(auth_token)
             
             # Use upsert to either insert new or update existing token
             self.database.AuthTokens.update_one(
