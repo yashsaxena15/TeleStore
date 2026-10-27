@@ -1,5 +1,8 @@
 package com.backendforge.telestore.ui
 
+import com.backendforge.telestore.ui.viewers.DocumentScreen
+import com.backendforge.telestore.ui.viewers.ArchiveScreen
+import com.backendforge.telestore.ui.components.rememberOpenElsewhere
 import android.net.Uri
 import com.backendforge.telestore.data.CrashReporter
 import com.backendforge.telestore.ui.settings.AccountScreen
@@ -115,6 +118,8 @@ private const val ROUTE_VIDEO = "video"
 private const val ROUTE_PHOTOS = "photos"
 private const val ROUTE_NOW_PLAYING = "now_playing"
 private const val ROUTE_VAULT = "vault"
+private const val ROUTE_DOCUMENT = "document"
+private const val ROUTE_ARCHIVE = "archive"
 
 private enum class MainTab(val title: String, val icon: ImageVector, val graphRoute: String) {
     HOME("Home", Icons.Default.Home, "home_graph"),
@@ -151,6 +156,9 @@ fun MainScreen(
     val musicState by music.state.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
+
+    // Share to another app, or open in one (fetches the file first)
+    val elsewhere = rememberOpenElsewhere(container)
 
     // The video player outlives its screen: pulled down, it keeps playing in a mini player
     val videos = remember { VideoHost(container) }
@@ -191,7 +199,16 @@ fun MainScreen(
                 container.playback.openPhotos(queue, index)
                 navController.navigate(ROUTE_PHOTOS)
             }
-            else -> return false
+            FileKind.ARCHIVE -> {
+                container.playback.document = item
+                navController.navigate(ROUTE_ARCHIVE)
+            }
+            FileKind.FOLDER -> return false
+            // Documents show in the app; anything else offers another app
+            else -> {
+                container.playback.document = item
+                navController.navigate(ROUTE_DOCUMENT)
+            }
         }
         return true
     }
@@ -343,6 +360,20 @@ fun MainScreen(
     }
 
     // A link shared into TeleStore from another app opens "Add from link"
+    // A home-screen widget button
+    val widgetAction by container.pendingAction.collectAsStateWithLifecycle()
+    val appLocked by container.appLock.locked.collectAsStateWithLifecycle()
+    LaunchedEffect(widgetAction, appLocked) {
+        // Waits for the app lock, so nothing opens on top of it
+        val action = widgetAction?.takeIf { !appLocked } ?: return@LaunchedEffect
+        container.pendingAction.value = null
+        when (action) {
+            "upload" -> upload(TeleStoreApi.HOME)
+            "link" -> navController.navigate("add_link")
+            "photos" -> navigateToTab(MainTab.PHOTOS)
+            "search" -> navController.navigate("search")
+        }
+    }
     val sharedLink by container.pendingLink.collectAsStateWithLifecycle()
     LaunchedEffect(sharedLink) {
         sharedLink?.let {
@@ -469,6 +500,8 @@ fun MainScreen(
                             onDownload = ::download,
                             offlineIds = offlineIds,
                             onCopyToDrive = { copyToDrive = listOf(it) },
+                            onShare = elsewhere::share,
+                            onOpenWith = elsewhere::openWith,
                         )
                     }
                     composable("home_kind/{kind}", arguments = listOf(navArgument("kind") { type = NavType.StringType })) { backStackEntry ->
@@ -510,6 +543,8 @@ fun MainScreen(
                             onDownload = ::download,
                             offlineIds = offlineIds,
                             onCopyToDrive = { copyToDrive = listOf(it) },
+                            onShare = elsewhere::share,
+                            onOpenWith = elsewhere::openWith,
                         )
                     }
                 }
@@ -532,6 +567,8 @@ fun MainScreen(
                             onDownload = ::download,
                             offlineIds = offlineIds,
                             onCopyToDrive = { copyToDrive = listOf(it) },
+                            onShare = elsewhere::share,
+                            onOpenWith = elsewhere::openWith,
                         )
                     }
                 }
@@ -595,6 +632,8 @@ fun MainScreen(
                             onDownload = ::download,
                             offlineIds = offlineIds,
                             onCopyToDrive = { copyToDrive = listOf(it) },
+                            onShare = elsewhere::share,
+                            onOpenWith = elsewhere::openWith,
                         )
                     }
                 }
@@ -642,6 +681,12 @@ fun MainScreen(
                 ) { entry ->
                     val account = CloudAccount(id = entry.arguments?.getString("id").orEmpty(), email = entry.arguments?.getString("email")?.ifEmpty { null })
                     DriveBrowserScreen(container, account, onBack = { navController.popBackStack() })
+                }
+                composable(ROUTE_DOCUMENT) {
+                    DocumentScreen(container, container.playback.document, onBack = { navController.popBackStack() }, onDownload = ::download)
+                }
+                composable(ROUTE_ARCHIVE) {
+                    ArchiveScreen(container, container.playback.document, onBack = { navController.popBackStack() })
                 }
                 composable("settings_account") { AccountScreen(container, onBack = { navController.popBackStack() }) }
                 composable("settings_downloads") { DownloadsScreen(container, onBack = { navController.popBackStack() }) }

@@ -1,5 +1,10 @@
 package com.backendforge.telestore.ui.components
 
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -60,12 +65,17 @@ fun ItemActionSheet(
     onDownload: ((FileItem) -> Unit)? = null,
     onMoveToVault: ((FileItem) -> Unit)? = null,
     onCopyToDrive: ((FileItem) -> Unit)? = null,
+    onShare: ((FileItem) -> Unit)? = null,
+    onOpenWith: ((FileItem) -> Unit)? = null,
+    onCompress: ((FileItem) -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                // Many actions: scrolls on small phones
+                .verticalScroll(rememberScrollState())
                 .padding(bottom = 24.dp),
         ) {
             // Header
@@ -169,11 +179,32 @@ fun ItemActionSheet(
                         label = "Info",
                         onClick = { onDismiss(); onInfo(item) },
                     )
+                    if (!item.isFolder && onShare != null) {
+                        ActionRow(
+                            icon = Icons.Default.Share,
+                            label = "Share to an app",
+                            onClick = { onDismiss(); onShare(item) },
+                        )
+                    }
+                    if (!item.isFolder && onOpenWith != null) {
+                        ActionRow(
+                            icon = Icons.AutoMirrored.Filled.OpenInNew,
+                            label = "Open with another app",
+                            onClick = { onDismiss(); onOpenWith(item) },
+                        )
+                    }
                     if (onDownload != null) {
                         ActionRow(
                             icon = Icons.Default.Download,
                             label = if (item.isFolder) "Download as ZIP" else "Download to phone",
                             onClick = { onDismiss(); onDownload(item) },
+                        )
+                    }
+                    if (onCompress != null) {
+                        ActionRow(
+                            icon = Icons.Default.FolderZip,
+                            label = "Compress to ZIP",
+                            onClick = { onDismiss(); onCompress(item) },
                         )
                     }
                     ActionRow(

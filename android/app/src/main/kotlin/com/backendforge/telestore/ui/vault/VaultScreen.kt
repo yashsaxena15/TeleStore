@@ -181,6 +181,7 @@ class VaultViewModel(private val container: AppContainer) : ViewModel() {
 
     fun lock() = act {
         runCatching { api.vaultLock() }
+        container.files.forgetVault()
         _state.update { it.copy(step = VaultStep.LOCKED, items = emptyList(), path = TeleStoreApi.VAULT) }
     }
 

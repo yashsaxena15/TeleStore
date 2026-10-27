@@ -18,6 +18,8 @@ class TeleStoreApplication : Application(), SingletonImageLoader.Factory {
         CrashReporter.install(this)
         container = AppContainer(this)
         TransferNotifications.createChannel(this)
+        // A vault file left from the last run (the app was closed while it was open)
+        container.files.forgetVault()
         // Keep the photo backup scheduled (after an update or a restart)
         container.backup.settings.value.takeIf { it.enabled }?.let { BackupWorker.schedule(this, it) }
         SingletonImageLoader.setSafe { container.imageLoader }

@@ -69,6 +69,7 @@ fun TransfersScreen(container: AppContainer, onAddLink: () -> Unit = {}) {
     val phone by manager.store.items.collectAsStateWithLifecycle()
     var server by remember { mutableStateOf<RemoteTaskList?>(null) }
     var serverError by remember { mutableStateOf<String?>(null) }
+    var archives by remember { mutableStateOf<List<com.backendforge.telestore.core.ArchiveTask>>(emptyList()) }
     var refreshTick by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
 
@@ -78,6 +79,8 @@ fun TransfersScreen(container: AppContainer, onAddLink: () -> Unit = {}) {
             try {
                 server = container.api().remoteTasks()
                 serverError = null
+                // ZIP jobs: the ones running, and the last few finished in the past day
+                archives = runCatching { container.api().archiveTasks().tasks }.getOrDefault(archives).take(10)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -160,6 +163,9 @@ fun TransfersScreen(container: AppContainer, onAddLink: () -> Unit = {}) {
                     onCancel = { serverAction { container.api().cancelRemoteGroup(groupId) } },
                     onResume = { serverAction { container.api().resumeRemoteGroup(groupId) } },
                 )
+            }
+            items(archives, key = { "a-" + it.id }) { task ->
+                ArchiveRow(task, onCancel = { serverAction { container.api().cancelArchiveTask(task.id) } })
             }
             items(loose, key = { "t-" + it.id }) { task ->
                 ServerRow(
@@ -296,5 +302,32 @@ private fun ServerRow(task: RemoteTask, onCancel: () -> Unit, onRetry: () -> Uni
             if (task.isActive) IconButton(onClick = onCancel) { Icon(Icons.Filled.Close, contentDescription = "Cancel") }
         }
         if (task.isActive) LinearProgressIndicator(progress = { ((task.progress ?: 0.0) / 100).toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+    }
+}
+
+/** A ZIP being made or unpacked by the server. */
+@Composable
+private fun ArchiveRow(task: com.backendforge.telestore.core.ArchiveTask, onCancel: () -> Unit) {
+    Card {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(task.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                val detail = when (task.status) {
+                    "completed" -> if (task.type == "extract") "Extracted" else "ZIP ready"
+                    "failed" -> task.error ?: "Failed"
+                    "cancelled" -> "Cancelled"
+                    "queued" -> "${task.verb} · waiting"
+                    else -> "${task.verb} · ${task.percent.toInt()}%" + (task.currentFile?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "")
+                }
+                Text(
+                    detail, style = MaterialTheme.typography.bodySmall, maxLines = 2,
+                    color = if (task.status == "failed") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (task.active) TextButton(onClick = onCancel) { Text("Cancel") }
+        }
+        if (task.active) {
+            androidx.compose.material3.LinearProgressIndicator(progress = { (task.percent / 100).toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+        }
     }
 }

@@ -23,6 +23,7 @@ class AppContainer(val context: Context) {
     val session = SessionStore(context.applicationContext)
     val playback = PlaybackQueue()
     val settings = AppSettings(context.applicationContext)
+    val appLock = com.backendforge.telestore.security.AppLock(settings)
     val watchHistory = WatchHistory(context.applicationContext)
     /** Looks for new APKs on GitHub, with its own client: the sign-in token must never go there. */
     val updates = UpdateChecker(TeleStoreApi.defaultClient())
@@ -39,6 +40,12 @@ class AppContainer(val context: Context) {
     /** A link shared into TeleStore (e.g. from YouTube's Share button), opened in "Add from link". */
     val pendingLink = MutableStateFlow<String?>(null)
 
+    /** A home-screen widget button that opened the app: "upload", "link", "photos" or "search". */
+    val pendingAction = MutableStateFlow<String?>(null)
+
+    /** Files fetched to show in a viewer, share or open in another app. */
+    val files: FileCache by lazy { FileCache(context.applicationContext, { api() }) { transfers.store.offlineCopy(context, it) } }
+
     /** Background music; made on first use so the service only starts when a song plays. */
     val music: MusicController by lazy { MusicController(context.applicationContext) }
     private var musicStarted = false
@@ -47,12 +54,23 @@ class AppContainer(val context: Context) {
     init {
         // Signing out stops the music (its stream needs the token that just ended)
         scope.launch {
-            session.state.collect { if (it == null && musicStarted) music.stop() }
+            session.state.collect {
+                if (it == null && musicStarted) music.stop()
+                if (it == null) {
+                    // Nothing about the account stays on the phone: the widget's storage line, cached files
+                    if (settings.lastStorageLine != null) {
+                        settings.lastStorageLine = null
+                        com.backendforge.telestore.widget.QuickWidget.refresh(context)
+                    }
+                    files.clear()
+                }
+            }
         }
     }
 
     /** Locks the Private Vault on the server (the app was left); never throws. */
     fun lockVaultInBackground() {
+        files.forgetVault()
         scope.launch { runCatching { api().vaultLock() } }
     }
 

@@ -1,5 +1,7 @@
 package com.backendforge.telestore.ui.components
 
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
@@ -137,5 +139,45 @@ fun ConfirmDialog(
                 Text("Cancel")
             }
         },
+    )
+}
+
+/** Name for the ZIP of [items]; it's saved next to them. */
+@Composable
+fun CompressDialog(
+    items: List<com.backendforge.telestore.core.FileItem>,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    val suggested = remember(items) {
+        (if (items.size == 1) items[0].name.substringBeforeLast('.').ifBlank { items[0].name } else "Archive") + ".zip"
+    }
+    var name by remember { mutableStateOf(suggested) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Compress to ZIP") },
+        text = {
+            androidx.compose.foundation.layout.Column {
+                Text(
+                    if (items.size == 1) "${items[0].name} is packed into one ZIP in this folder." else "${items.size} items are packed into one ZIP in this folder.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("ZIP name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(name.trim().let { if (it.lowercase().endsWith(".zip")) it else "$it.zip" }) },
+                enabled = name.isNotBlank() && '/' !in name,
+            ) { Text("Compress") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

@@ -76,6 +76,9 @@ dependencies {
 
     implementation(libs.androidx.work.runtime)
     implementation(libs.androidx.palette)
+    // App lock: fingerprint, face or the phone's PIN (BiometricPrompt needs a FragmentActivity)
+    implementation(libs.androidx.biometric)
+    implementation(libs.androidx.fragment)
 
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)

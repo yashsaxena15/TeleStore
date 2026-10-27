@@ -1,5 +1,6 @@
 package com.backendforge.telestore.ui.more
 
+import com.backendforge.telestore.player.findActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -61,7 +62,11 @@ fun StorageSection(container: AppContainer) {
     var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         try {
-            stats = container.api().storage()
+            stats = container.api().storage().also { s ->
+                // The home-screen widget shows this line
+                container.settings.lastStorageLine = "${formatBytes(s.usedBytes)} used"
+                com.backendforge.telestore.widget.QuickWidget.refresh(container.context)
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -117,6 +122,57 @@ fun AppearanceSection(container: AppContainer) {
             }
             androidx.compose.material3.Switch(checked = haptics, onCheckedChange = { haptics = it; container.settings.haptics = it })
         }
+    }
+}
+
+/** App lock: fingerprint, face or the phone's PIN when coming back to the app. */
+@Composable
+fun SecuritySection(container: AppContainer) {
+    val activity = LocalContext.current.findActivity() as? androidx.fragment.app.FragmentActivity
+    var on by remember { mutableStateOf(container.settings.appLock) }
+    var after by remember { mutableStateOf(container.settings.appLockAfterSeconds) }
+    var message by remember { mutableStateOf<String?>(null) }
+    SectionLabel("Security")
+    SectionCard {
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(1f)) {
+                Text("App lock", style = MaterialTheme.typography.bodyLarge)
+                Text("Fingerprint, face or your phone's PIN to open TeleStore", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            androidx.compose.material3.Switch(checked = on, onCheckedChange = { wanted ->
+                message = null
+                val host = activity ?: return@Switch
+                if (!wanted) {
+                    container.settings.appLock = false
+                    container.appLock.turnedOff()
+                    on = false
+                    return@Switch
+                }
+                val missing = com.backendforge.telestore.security.AppLock.unavailableReason(host)
+                if (missing != null) {
+                    message = missing
+                    return@Switch
+                }
+                // Prove it works before turning it on, so nobody locks themselves out
+                container.appLock.prompt(host, title = "Turn on app lock") { problem ->
+                    if (problem == null) {
+                        container.settings.appLock = true
+                        on = true
+                    } else {
+                        message = problem
+                    }
+                }
+            })
+        }
+        if (on) {
+            Text("Lock after the app is in the background for", style = MaterialTheme.typography.bodyMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(30 to "30 s", 60 to "1 min", 300 to "5 min", 900 to "15 min").forEach { (seconds, label) ->
+                    FilterChip(selected = after == seconds, onClick = { after = seconds; container.settings.appLockAfterSeconds = seconds }, label = { Text(label) })
+                }
+            }
+        }
+        message?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
     }
 }
 

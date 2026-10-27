@@ -29,6 +29,31 @@ class ExtractRequest(BaseModel):
     target_path: str
 
 
+def _owner_ids(user: User) -> list:
+    return [i for i in {str(user.telegram_user_id) if user.telegram_user_id else None, user.username} if i]
+
+
+def _in_vault(doc: dict) -> bool:
+    path = (doc.get("file_path") or "").lstrip("/")
+    return bool(doc.get("is_vault")) or path == "Vault" or path.startswith("Vault/")
+
+
+def _own_item(request: Request, user: User, item_id: str) -> dict:
+    """The caller's own file or folder (never another user's), and vault items only while unlocked."""
+    from telestore.api.routes.vault import is_vault_unlocked
+    mine = {"owner_id": {"$in": _owner_ids(user)}}
+    doc = None
+    if ObjectId.is_valid(item_id):
+        doc = database.Files.find_one({"_id": ObjectId(item_id), **mine})
+    if not doc:
+        doc = database.Files.find_one({"file_unique_id": item_id, **mine})
+    if not doc:
+        raise HTTPException(status_code=404, detail="File not found")
+    if _in_vault(doc) and not is_vault_unlocked(request):
+        raise HTTPException(status_code=403, detail="Open the Private Vault with your PIN first.")
+    return doc
+
+
 @router.get("/inspect/{file_id}")
 async def inspect_archive_endpoint(
     file_id: str,
@@ -36,16 +61,7 @@ async def inspect_archive_endpoint(
     user: User = Depends(require_auth)
 ):
     """Inspects the files and folders inside an archive without extracting it (supports .zip, .rar, .7z, .tar)."""
-    try:
-        doc = database.Files.find_one({"_id": ObjectId(file_id)})
-    except Exception:
-        doc = None
-
-    if not doc:
-        doc = database.Files.find_one({"$or": [{"file_unique_id": file_id}, {"file_name": file_id}]})
-
-    if not doc:
-        raise HTTPException(status_code=404, detail="Archive file not found")
+    doc = _own_item(request, user, file_id)
 
     bot_manager = getattr(request.app.state, 'bot_manager', None)
     if not bot_manager:
@@ -83,16 +99,7 @@ async def extract_archive_endpoint(
     Initiates asynchronous cloud extraction.
     Runs preflight 25 GB safety check first, then enqueues background task.
     """
-    try:
-        doc = database.Files.find_one({"_id": ObjectId(body.file_id)})
-    except Exception:
-        doc = None
-
-    if not doc:
-        doc = database.Files.find_one({"$or": [{"file_unique_id": body.file_id}, {"file_name": body.file_id}]})
-
-    if not doc:
-        raise HTTPException(status_code=404, detail="Archive file not found")
+    doc = _own_item(request, user, body.file_id)
 
     archive_size = int(doc.get("file_size") or 0)
     # Estimated peak disk space: archive size on disk + 2 GB buffer for single currently uploading file
@@ -144,19 +151,11 @@ async def compress_archive_endpoint(
     if not body.item_ids:
         raise HTTPException(status_code=400, detail="No items selected for compression")
 
-    # Fast sub-millisecond calculation of total source size
+    # Only the caller's own items; a folder brings only the caller's files inside it
+    owner_ids = _owner_ids(user)
+    docs = [_own_item(request, user, item_id) for item_id in body.item_ids]
     total_size = 0
-    for item_id in body.item_ids:
-        doc = None
-        try:
-            doc = database.Files.find_one({"_id": ObjectId(item_id)})
-        except Exception:
-            pass
-        if not doc:
-            doc = database.Files.find_one({"$or": [{"file_unique_id": item_id}, {"file_name": item_id}]})
-        if not doc:
-            continue
-
+    for doc in docs:
         if doc.get("file_type") == "folder":
             f_name = doc.get("file_name")
             f_path = doc.get("file_path", "/")
@@ -164,7 +163,8 @@ async def compress_archive_endpoint(
             cursor = database.Files.find({
                 "file_path": {"$regex": regex_pat},
                 "file_type": {"$ne": "folder"},
-                "trashed": {"$ne": True}
+                "trashed": {"$ne": True},
+                "owner_id": {"$in": owner_ids},
             }, {"file_size": 1})
             for c in cursor:
                 total_size += int(c.get("file_size") or 0)
@@ -190,7 +190,8 @@ async def compress_archive_endpoint(
         user_id=uid,
         target_name=body.zip_name,
         payload={
-            "item_ids": body.item_ids,
+            "item_ids": [str(d["_id"]) for d in docs],
+            "owner_ids": owner_ids,
             "destination_path": body.destination_path,
             "zip_name": body.zip_name,
             "user_id": uid,
