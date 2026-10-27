@@ -1,5 +1,8 @@
 package com.backendforge.telestore.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -15,6 +18,7 @@ import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -51,4 +55,19 @@ object SelectionMotion {
     /** A check mark popping over a tile. */
     val markEnter = fadeIn(tween(120)) + scaleIn(initialScale = 0.4f, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy))
     val markExit = fadeOut(tween(100)) + scaleOut(targetScale = 0.4f)
+}
+
+/**
+ * Shows or hides [content] with an animation, in any layout. (Inside a Column or Row, Compose picks
+ * AnimatedVisibility's Column/Row version, which can't be called from a Box nested in them.)
+ */
+@Composable
+fun AnimatedShow(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+    enter: EnterTransition = SelectionMotion.markEnter,
+    exit: ExitTransition = SelectionMotion.markExit,
+    content: @Composable () -> Unit,
+) {
+    AnimatedVisibility(visible = visible, modifier = modifier, enter = enter, exit = exit) { content() }
 }

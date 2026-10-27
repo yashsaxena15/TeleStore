@@ -1,6 +1,5 @@
 package com.backendforge.telestore.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -106,12 +105,7 @@ fun FileGridCard(
                     }
                 }
 
-                AnimatedVisibility(
-                    visible = isSelectionMode,
-                    enter = SelectionMotion.markEnter,
-                    exit = SelectionMotion.markExit,
-                    modifier = Modifier.align(Alignment.TopEnd),
-                ) {
+                AnimatedShow(visible = isSelectionMode, modifier = Modifier.align(Alignment.TopEnd)) {
                     Checkbox(
                         checked = isSelected,
                         onCheckedChange = { onToggleSelect() },
@@ -144,7 +138,7 @@ fun FileGridCard(
                     )
                 }
 
-                AnimatedVisibility(visible = !isSelectionMode, enter = fadeIn(), exit = fadeOut()) {
+                AnimatedShow(visible = !isSelectionMode, enter = fadeIn(), exit = fadeOut()) {
                     IconButton(
                         onClick = onOpenActions,
                         modifier = Modifier.size(28.dp),

@@ -78,6 +78,7 @@ import com.backendforge.telestore.core.Memory
 import com.backendforge.telestore.core.Timeline
 import com.backendforge.telestore.data.AppContainer
 import com.backendforge.telestore.ui.components.FileThumbnail
+import com.backendforge.telestore.ui.components.AnimatedShow
 import com.backendforge.telestore.ui.components.SelectionMotion
 import com.backendforge.telestore.ui.home.AppLogo
 import kotlinx.coroutines.launch
@@ -288,12 +289,7 @@ private fun PhotoCell(item: FileItem, api: com.backendforge.telestore.core.TeleS
         if (item.starred && !selecting) {
             Icon(Icons.Filled.Star, contentDescription = "Starred", tint = Color.White, modifier = Modifier.align(Alignment.BottomStart).padding(5.dp).size(16.dp))
         }
-        androidx.compose.animation.AnimatedVisibility(
-            visible = selecting,
-            enter = SelectionMotion.markEnter,
-            exit = SelectionMotion.markExit,
-            modifier = Modifier.align(Alignment.TopStart),
-        ) {
+        AnimatedShow(visible = selecting, modifier = Modifier.align(Alignment.TopStart)) {
             androidx.compose.animation.Crossfade(targetState = selected, label = "photo check") { isOn ->
                 Icon(
                     if (isOn) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
