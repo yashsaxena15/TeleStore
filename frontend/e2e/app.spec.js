@@ -688,3 +688,45 @@ test.describe("phone @phone", () => {
         expect(overflow).toBeLessThanOrEqual(0);
     });
 });
+
+test.describe("photos", () => {
+    test("shows only the phone backup, by day, with previews for files without a thumbnail", async ({ page, request }) => {
+        await page.goto("/");
+        await page.getByRole("complementary").first().getByRole("button", { name: "Photos" }).click();
+        await expect(page).toHaveURL(/\/photos$/);
+        await expect(page.getByRole("heading", { level: 1, name: "Photos" })).toBeVisible();
+        await expect(page.getByText("3 items from your phone backup")).toBeVisible();
+        await expect(page.getByRole("heading", { level: 2, name: "Today" })).toBeVisible();
+        await expect(page.getByRole("heading", { level: 2, name: "Fri, 3 Jan 2025" })).toBeVisible();
+        await expect(page.getByTestId("photo-tile")).toHaveCount(3);
+        await expect(page.getByTestId("photo-tile").locator("img")).toHaveCount(3);
+        const asked = (await mutations(request)).map((r) => r.path);
+        // HEIC and the video have no Telegram thumbnail: the server makes previews
+        expect(asked).toEqual(expect.arrayContaining(["/files/preview/ph1", "/files/preview/ph2", "/files/thumbnail/THUMB1"]));
+        expect(asked).not.toContain("/files/preview/ph3");
+    });
+
+    test("select, star, and Escape ends the selection", async ({ page, request }) => {
+        await page.goto("/photos");
+        await page.getByRole("button", { name: "Select IMG_0003.HEIC" }).click();
+        await expect(page.getByText("1 selected")).toBeVisible();
+        await page.getByTestId("photo-tile").nth(1).click(); // while selecting, a click selects
+        await expect(page.getByText("2 selected")).toBeVisible();
+        await page.getByRole("toolbar", { name: "Selected photos" }).getByRole("button", { name: "Star" }).click();
+        await expect(page.getByText("Starred 2 items")).toBeVisible();
+        const stars = (await mutations(request)).filter((r) => r.path === "/files/star").map((r) => JSON.parse(r.body).file_id);
+        expect(stars.sort()).toEqual(["ph1", "ph2"]);
+        await page.getByRole("button", { name: "Select Today" }).click();
+        await expect(page.getByText("2 selected")).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("heading", { level: 1, name: "Photos" })).toBeVisible();
+    });
+
+    test("@phone Photos is in the More sheet", async ({ page }) => {
+        await page.goto("/");
+        await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "More" }).click();
+        await page.getByRole("button", { name: "Photos" }).click();
+        await expect(page).toHaveURL(/\/photos$/);
+        await expect(page.getByTestId("photo-tile")).toHaveCount(3);
+    });
+});

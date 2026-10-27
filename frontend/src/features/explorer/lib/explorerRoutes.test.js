@@ -9,6 +9,7 @@ describe("explorer routes", () => {
         expect(viewFromPathname("/users")).toBe("settings");
         expect(viewFromPathname("/settings")).toBe("settings");
         expect(viewFromPathname("/storage")).toBe("storage");
+        expect(viewFromPathname("/photos")).toBe("photos");
         expect(viewFromPathname("/downloads")).toBe("transfers");
     });
     it("round-trips folder paths", () => {

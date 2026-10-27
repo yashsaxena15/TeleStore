@@ -99,38 +99,46 @@ fun FileThumbnail(
     shapeRadius: Dp = 10.dp,
     iconSize: Dp = 24.dp,
 ) {
+    // Telegram's thumbnail when there is one, else a preview the server makes from the original
+    // (photos and videos sent as documents, e.g. HEIC or big photos, have no Telegram thumbnail)
     val thumbnailUrl = if (!item.isFolder) api.media.thumbnail(item)?.toString() else null
+    val previewUrl = if (!item.isFolder) api.media.preview(item)?.toString() else null
     val shape = RoundedCornerShape(shapeRadius)
+    val kindBox: @Composable () -> Unit = {
+        FileKindBox(kind = item.kind, modifier = Modifier.fillMaxSize(), iconSize = iconSize, shapeRadius = shapeRadius)
+    }
 
-    if (thumbnailUrl != null) {
-        SubcomposeAsyncImage(
+    when {
+        thumbnailUrl != null -> SubcomposeAsyncImage(
             model = thumbnailUrl,
             contentDescription = item.name,
             contentScale = ContentScale.Crop,
             modifier = modifier.clip(shape),
-            loading = {
-                FileKindBox(
-                    kind = item.kind,
-                    modifier = Modifier.fillMaxSize(),
-                    iconSize = iconSize,
-                    shapeRadius = shapeRadius,
-                )
-            },
+            loading = { kindBox() },
+            // A Telegram thumbnail that is gone: try the server's preview before giving up
             error = {
-                FileKindBox(
-                    kind = item.kind,
-                    modifier = Modifier.fillMaxSize(),
-                    iconSize = iconSize,
-                    shapeRadius = shapeRadius,
-                )
+                if (previewUrl != null) {
+                    SubcomposeAsyncImage(
+                        model = previewUrl,
+                        contentDescription = item.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                        loading = { kindBox() },
+                        error = { kindBox() },
+                    )
+                } else {
+                    kindBox()
+                }
             },
         )
-    } else {
-        FileKindBox(
-            kind = item.kind,
-            modifier = modifier,
-            iconSize = iconSize,
-            shapeRadius = shapeRadius,
+        previewUrl != null -> SubcomposeAsyncImage(
+            model = previewUrl,
+            contentDescription = item.name,
+            contentScale = ContentScale.Crop,
+            modifier = modifier.clip(shape),
+            loading = { kindBox() },
+            error = { kindBox() },
         )
+        else -> FileKindBox(kind = item.kind, modifier = modifier, iconSize = iconSize, shapeRadius = shapeRadius)
     }
 }

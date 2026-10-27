@@ -29,6 +29,7 @@ async def get_all_files_route(
     sort_order: Optional[str] = Query(default=None, description="Sort direction (asc, desc)"),
     q: Optional[str] = Query(default=None, max_length=200, description="Search names in all your folders (path is ignored)"),
     kind: Optional[str] = Query(default=None, description="With path=all: only video, photo, audio or document files"),
+    under: Optional[str] = Query(default=None, max_length=500, description="With path=all: only files inside this /Home folder and its subfolders"),
     user: User = Depends(require_auth)
 ):
     try:
@@ -84,10 +85,11 @@ async def get_all_files_route(
                 sort_order=sort_order,
                 folders_first=True,
                 q=q,
-                kind=kind
+                kind=kind,
+                under=under
             )
         else:
-            files_data = database.Files.get_files_by_path(path=path, owner_id=user_id, q=q, kind=kind)
+            files_data = database.Files.get_files_by_path(path=path, owner_id=user_id, q=q, kind=kind, under=under)
             total_items = len(files_data)
 
         files_list = []
@@ -194,3 +196,31 @@ async def get_file_thumbnail(file_id: str, request: Request, auth_token: str = N
         logger.warning(f"Thumbnail not available: {e}")
         raise HTTPException(status_code=404, detail="Thumbnail not available")
     raise HTTPException(status_code=404, detail="Thumbnail not available")
+
+
+@router.get("/preview/{file_id}")
+async def get_file_preview(file_id: str, request: Request, token: Optional[str] = None, user: User = Depends(require_auth)):
+    """A JPEG preview of a photo or video that has no Telegram thumbnail (made once, then kept).
+
+    Image tags can't send headers, so apps pass ?token= (accepted by the auth middleware).
+    """
+    from bson import ObjectId
+    from fastapi.responses import FileResponse
+    from telestore.api.routes import media
+    from telestore.services.preview_service import make_preview
+
+    if not ObjectId.is_valid(file_id):
+        raise HTTPException(status_code=404, detail="Preview not available")
+    owner_ids = [i for i in {user.username, str(user.telegram_user_id) if user.telegram_user_id else None} if i]
+    doc = database.Files.find_one({"_id": ObjectId(file_id), "owner_id": {"$in": owner_ids}, "trashed": {"$ne": True}})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Preview not available")
+    if doc.get("is_vault"):
+        from telestore.api.routes.vault import is_vault_unlocked
+        if not is_vault_unlocked(request):
+            raise HTTPException(status_code=403, detail="Unlock your Private Vault first.")
+    source = media._get_internal_stream_url(doc.get("file_name", ""), media._caller_token(request, token, user), file_id)
+    path = await make_preview(doc, source)
+    if not path:
+        raise HTTPException(status_code=404, detail="Preview not available")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=604800"})

@@ -20,9 +20,9 @@ export const GridTile = ({ item, index, ctx }) => {
     const meta = item.type === "folder"
         ? (formatShortDate(item.modified) || "Folder")
         : [item.size ? formatBytes(item.size) : null, formatShortDate(item.modified)].filter(Boolean).join(" · ");
-    return (<div {...itemRowProps(item, index, s)} className={cn("group relative rounded-[10px] p-1.5 cursor-pointer select-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary", s.isSelected ? "bg-primary/10" : s.isFocused ? "bg-muted/60" : "hover:bg-card", (s.isDragging || s.isCut) && "opacity-50", s.isDropTarget && "ring-2 ring-primary/50")}>
+    return (<div {...itemRowProps(item, index, s)} className={cn("group relative rounded-[10px] p-1.5 cursor-pointer select-none outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-primary", s.isSelected ? "bg-primary/10" : s.isFocused ? "bg-muted/60" : "hover:bg-card", (s.isDragging || s.isCut) && "opacity-50", s.isDropTarget && "ring-2 ring-primary/50")}>
       <div role="gridcell" className="contents">
-      <div className={cn("relative aspect-[16/10] rounded-lg border border-border bg-muted/30 overflow-hidden grid place-items-center transition-shadow", s.isSelected ? "outline outline-2 outline-primary outline-offset-2" : "group-hover:shadow-[0_0_0_1px_hsl(var(--primary)/0.5),0_0_26px_-8px_hsl(var(--primary)/0.5)]")}>
+      <div className={cn("relative aspect-[16/10] rounded-lg border border-border bg-muted/30 overflow-hidden grid place-items-center transition-[box-shadow,transform] duration-200 ease-out", s.isSelected ? "outline outline-2 outline-primary outline-offset-2 motion-safe:scale-[0.95]" : "group-hover:shadow-[0_0_0_1px_hsl(var(--primary)/0.5),0_0_26px_-8px_hsl(var(--primary)/0.5)]")}>
         {item.type === "folder" ? <Folder className="w-10 h-10 text-primary pointer-events-none" strokeWidth={1.4}/> : <div className="w-full h-full grid place-items-center pointer-events-none"><Thumbnail item={item} size="fill" thumbnailSrc={item.thumbnail ? loadedThumbnails[item.thumbnail] : undefined} loadingState={item.thumbnail ? loadingStates[item.thumbnail] : undefined}/></div>}
         {!s.isRenaming && checkbox(item, index, s, "absolute top-2 left-2 z-20")}
         {!s.isRenaming && (<div className="absolute top-1.5 right-1.5 z-10 flex gap-1">
@@ -63,12 +63,12 @@ export const ListRow = ({ item, index, ctx }) => {
     const typeInfo = getTypeInfo(item);
     const date = formatShortDate(item.modified);
     const size = item.type === "folder" ? "" : (item.size ? formatBytes(item.size) : "");
-    return (<div {...itemRowProps(item, index, s)} className={cn("group relative rounded-md cursor-pointer select-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary", s.isSelected ? "bg-primary/10" : s.isFocused ? "bg-muted/60" : "hover:bg-muted/50", (s.isDragging || s.isCut) && "opacity-50", s.isDropTarget && "ring-2 ring-primary/50")}>
+    return (<div {...itemRowProps(item, index, s)} className={cn("group relative rounded-md cursor-pointer select-none outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-primary", s.isSelected ? "bg-primary/10" : s.isFocused ? "bg-muted/60" : "hover:bg-muted/50", (s.isDragging || s.isCut) && "opacity-50", s.isDropTarget && "ring-2 ring-primary/50")}>
         {/* Desktop row */}
         <div className={cn("hidden md:grid gap-3 items-center h-9 px-2 text-xs", LIST_COLUMNS)}>
           <div role="gridcell">{!s.isRenaming && checkbox(item, index, s)}</div>
           <div role="gridcell" className="flex items-center gap-2.5 min-w-0">
-            <span className="w-6 h-6 rounded-md grid place-items-center shrink-0 pointer-events-none">{getFileIcon(item)}</span>
+            <span className={cn("w-6 h-6 rounded-md grid place-items-center shrink-0 pointer-events-none transition-transform duration-200", s.isSelected && "motion-safe:scale-90")}>{getFileIcon(item)}</span>
             {s.isRenaming ? (<div className="flex-1" onClick={(e) => e.stopPropagation()}>
                 <RenameInput initialName={item.name} onSave={onRenameConfirm} onCancel={onRenameCancel}/>
               </div>) : (<span className={cn("truncate pointer-events-none", s.isSelected && "text-primary font-medium")} title={item.name}>{item.name}</span>)}
@@ -86,7 +86,7 @@ export const ListRow = ({ item, index, ctx }) => {
         {/* Phone row */}
         <div role="gridcell" className="md:hidden flex items-center gap-3 min-h-[48px] px-2 py-1.5">
           {!s.isRenaming && checkbox(item, index, s)}
-          <span className="w-8 h-8 rounded-md grid place-items-center shrink-0 pointer-events-none">{getFileIcon(item)}</span>
+          <span className={cn("w-8 h-8 rounded-md grid place-items-center shrink-0 pointer-events-none transition-transform duration-200", s.isSelected && "motion-safe:scale-90")}>{getFileIcon(item)}</span>
           <div className="min-w-0 flex-1 pointer-events-none">
             {s.isRenaming ? (<div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
                 <RenameInput initialName={item.name} onSave={onRenameConfirm} onCancel={onRenameCancel}/>

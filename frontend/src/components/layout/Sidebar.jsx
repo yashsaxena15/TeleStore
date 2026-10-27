@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { HardDrive, User, Settings, Users, LogOut, Laptop, ArrowUpDown, Lock, Cloud, Unlink, Plus, Search, PanelLeftClose, PanelLeftOpen, ChevronsUpDown } from "lucide-react";
+import { HardDrive, Images, User, Settings, Users, LogOut, Laptop, ArrowUpDown, Lock, Cloud, Unlink, Plus, Search, PanelLeftClose, PanelLeftOpen, ChevronsUpDown } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useTransferManager } from "@/features/transfers/useTransferManager";
@@ -148,6 +148,11 @@ export const Sidebar = ({ selectedFilter, activeView = "files", onNavigateView, 
             {!collapsed && <span className="truncate">{name}</span>}
             {!collapsed && filter === "vault" && !isVaultUnlocked && <Lock className="w-3 h-3 ml-auto text-muted-foreground/70"/>}
           </button>))}
+
+        <button onClick={() => onNavigateView("photos")} className={navClass(activeView === "photos", collapsed)} title={collapsed ? "Photos" : undefined} aria-label="Photos">
+          <Images className="w-4 h-4 shrink-0"/>
+          {!collapsed && <span className="truncate">Photos</span>}
+        </button>
 
         <SectionLabel collapsed={collapsed} action={<button onClick={() => onAction("connect-drive")} className="text-[11px] text-primary hover:underline font-medium" aria-label="Connect cloud drive">+ Connect</button>}>
           Cloud drives

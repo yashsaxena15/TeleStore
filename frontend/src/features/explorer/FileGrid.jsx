@@ -635,11 +635,11 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
     });
     // Always visible on touch screens and while selecting; otherwise on hover
     const checkbox = (item, index, s, extra = "") => (<button type="button" onClick={(e) => handleCheckboxClick(e, item, index)} className={cn("w-4 h-4 rounded flex items-center justify-center border-[1.5px] transition-all shrink-0", s.isSelected
-            ? "bg-primary border-primary text-primary-foreground"
+            ? "bg-primary border-primary text-primary-foreground motion-safe:animate-select-pop"
             : selectedItems.size > 0
                 ? "border-muted-foreground/70 bg-background/80 hover:border-primary"
                 : "border-muted-foreground/60 bg-background/70 hover:border-primary opacity-0 group-hover:opacity-100 focus:opacity-100 touch:opacity-100", extra)} title={s.isSelected ? "Deselect" : "Select"} aria-label={s.isSelected ? `Deselect ${item.name}` : `Select ${item.name}`} aria-pressed={s.isSelected}>
-        <Check className={cn("w-3 h-3 stroke-[3]", s.isSelected ? "opacity-100" : "opacity-0")}/>
+        <Check className={cn("w-3 h-3 stroke-[3] transition-[opacity,transform] duration-200", s.isSelected ? "opacity-100 scale-100" : "opacity-0 scale-50")}/>
       </button>);
     const starOrRestore = (item, s, cls, alwaysVisible = false) => (isTrashMode ? (<button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRestoreItem?.(item); }} className={cn("grid place-items-center text-primary", cls)} title="Restore" aria-label={`Restore ${item.name}`}>
         <RotateCcw className="w-3.5 h-3.5"/>

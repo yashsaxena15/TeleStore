@@ -1,63 +1,55 @@
 import { useState, useEffect, useRef } from "react";
 import { FileText, Image as ImageIcon, FileVideo, FileAudio, FileArchive, FileSpreadsheet, Presentation } from "lucide-react";
 import { getApiBaseUrl, fetchWithTimeout } from "@/lib/api";
-// Simple cache to store loaded thumbnails
+import { canPreview, firstStage } from "./lib/previews";
+// Loaded pictures (object URLs), by Telegram thumbnail id or "preview:<file id>"
 const thumbnailCache = new Map();
-// Queue to manage thumbnail loading
-const loadingQueue = [];
-let activeLoads = 0;
-const MAX_CONCURRENT_LOADS = 6; // Limit concurrent loads to prevent browser overload
-// Process the loading queue
-function processQueue() {
-    if (activeLoads >= MAX_CONCURRENT_LOADS)
-        return;
-    while (activeLoads < MAX_CONCURRENT_LOADS && loadingQueue.length > 0) {
-        const job = loadingQueue.shift();
-        if (job) {
-            activeLoads++;
-            job();
-        }
+// Two queues: Telegram thumbnails are quick; previews may be made from the original on the
+// server (HEIC, big photos, videos without a thumbnail), so they get fewer slots and more time
+const QUEUES = {
+    thumb: { jobs: [], active: 0, max: 6, timeout: 5000 },
+    preview: { jobs: [], active: 0, max: 3, timeout: 60000 },
+};
+function processQueue(queue) {
+    while (queue.active < queue.max && queue.jobs.length > 0) {
+        const job = queue.jobs.shift();
+        queue.active++;
+        job();
     }
 }
-// Add a thumbnail load job to the queue
-function queueThumbnailLoad(thumbnailId, url, onLoad, onError) {
-    const job = () => {
-        // Check cache first
-        if (thumbnailCache.has(thumbnailId)) {
-            onLoad(thumbnailCache.get(thumbnailId));
-            activeLoads--;
-            processQueue();
+function queuePictureLoad(kind, key, url, onLoad, onError) {
+    const queue = QUEUES[kind];
+    const done = () => {
+        queue.active--;
+        processQueue(queue);
+    };
+    queue.jobs.push(() => {
+        if (thumbnailCache.has(key)) {
+            onLoad(thumbnailCache.get(key));
+            done();
             return;
         }
-        // Fetch the thumbnail using our authenticated API client
-        Promise.resolve().then(() => {
-            fetchWithTimeout(url, { method: 'GET' }, 5000)
-                .then(response => {
-                if (!response.ok)
-                    throw new Error('Network response was not ok');
-                return response.blob();
-            })
-                .then(blob => {
-                const dataUrl = URL.createObjectURL(blob);
-                thumbnailCache.set(thumbnailId, dataUrl);
-                onLoad(dataUrl);
-            })
-                .catch(() => {
-                onError();
-            })
-                .finally(() => {
-                activeLoads--;
-                processQueue();
-            });
-        }).catch((error) => {
-            console.error('Failed to import API client:', error);
-            onError();
-            activeLoads--;
-            processQueue();
-        });
-    };
-    loadingQueue.push(job);
-    processQueue();
+        fetchWithTimeout(url, { method: 'GET' }, queue.timeout)
+            .then(response => {
+            if (!response.ok)
+                throw new Error('Network response was not ok');
+            return response.blob();
+        })
+            .then(blob => {
+            const dataUrl = URL.createObjectURL(blob);
+            thumbnailCache.set(key, dataUrl);
+            onLoad(dataUrl);
+        })
+            .catch(() => onError())
+            .finally(done);
+    });
+    processQueue(queue);
+}
+// In the browser a relative address avoids CORS; the desktop app needs the full server address
+function apiUrl(path) {
+    const isTauri = typeof window !== 'undefined' && !!window.__TAURI__;
+    const baseUrl = isTauri ? getApiBaseUrl() : '';
+    return `${baseUrl || ''}${path}`;
 }
 export const Thumbnail = ({ item, size = 'lg', thumbnailSrc: propThumbnailSrc, loadingState: propLoadingState }) => {
     // Define size classes based on the size prop
@@ -69,67 +61,53 @@ export const Thumbnail = ({ item, size = 'lg', thumbnailSrc: propThumbnailSrc, l
         fill: 'w-full h-full'
     };
     const currentSizeClass = sizeClasses[size];
-    const [thumbnailError, setThumbnailError] = useState(false);
+    // "thumb" → "preview" (when the thumbnail is missing or fails) → "none" (icon)
+    const [stage, setStage] = useState(() => firstStage(item));
     const [thumbnailLoading, setThumbnailLoading] = useState(true);
     const [thumbnailSrc, setThumbnailSrc] = useState(null);
     const isMounted = useRef(true);
-    // Reset error state when item changes
+    const fail = () => {
+        setThumbnailSrc(null);
+        setThumbnailLoading(true);
+        setStage((current) => (current === "thumb" && canPreview(item) ? "preview" : "none"));
+    };
+    // Start again when the item changes
     useEffect(() => {
-        setThumbnailError(false);
+        setStage(firstStage(item));
         setThumbnailLoading(true);
         setThumbnailSrc(null);
         isMounted.current = true;
         return () => {
             isMounted.current = false;
         };
-    }, [item.thumbnail]);
-    // Use pre-loaded thumbnail data if provided
+    }, [item.thumbnail, item.id]);
+    // Use the thumbnail FileGrid already loaded, when it passes one
     useEffect(() => {
-        if (propThumbnailSrc !== undefined) {
-            setThumbnailSrc(propThumbnailSrc);
-            setThumbnailLoading(false);
-            setThumbnailError(propLoadingState === 'error');
-        }
-    }, [propThumbnailSrc, propLoadingState]);
-    // Load thumbnail with queuing (fallback when not pre-loaded)
-    useEffect(() => {
-        // If we already have pre-loaded data, don't load again
-        if (propThumbnailSrc !== undefined || !item.thumbnail || thumbnailError)
+        if (stage !== "thumb" || propThumbnailSrc === undefined)
             return;
-        // Check if we're in Tauri environment
-        const isTauri = typeof window !== 'undefined' && !!window.__TAURI__;
-        // Construct the thumbnail URL
-        // For browser environments, use relative path to avoid CORS issues
-        // For Tauri environments, use the full API base URL
-        let thumbnailUrl;
-        if (isTauri) {
-            const baseUrl = getApiBaseUrl();
-            thumbnailUrl = baseUrl
-                ? `${baseUrl}/files/thumbnail/${item.thumbnail}`
-                : `/files/thumbnail/${item.thumbnail}`;
+        if (propLoadingState === 'error') {
+            fail();
+            return;
         }
-        else {
-            // Use relative path for browser to avoid CORS issues
-            thumbnailUrl = `/files/thumbnail/${item.thumbnail}`;
-        }
-        // For Tauri environment, the X-Auth-Token header is automatically added by the fetch implementation
-        // No need to add auth token as query parameter
-        // Queue the thumbnail load
-        queueThumbnailLoad(item.thumbnail, thumbnailUrl, (dataUrl) => {
+        setThumbnailSrc(propThumbnailSrc);
+        setThumbnailLoading(!propThumbnailSrc);
+    }, [propThumbnailSrc, propLoadingState, stage]);
+    // Otherwise load it here, through the queue
+    useEffect(() => {
+        if (stage === "none" || (stage === "thumb" && propThumbnailSrc !== undefined))
+            return;
+        const key = stage === "thumb" ? item.thumbnail : `preview:${item.id}`;
+        const url = stage === "thumb" ? apiUrl(`/files/thumbnail/${item.thumbnail}`) : apiUrl(`/files/preview/${encodeURIComponent(item.id)}`);
+        queuePictureLoad(stage, key, url, (dataUrl) => {
             if (isMounted.current) {
                 setThumbnailSrc(dataUrl);
                 setThumbnailLoading(false);
             }
         }, () => {
-            if (isMounted.current) {
-                setThumbnailError(true);
-                setThumbnailLoading(false);
-            }
+            if (isMounted.current)
+                fail();
         });
-        return () => {
-            // Cleanup function
-        };
-    }, [item.thumbnail, thumbnailError, propThumbnailSrc]);
+    }, [stage, item.thumbnail, item.id, propThumbnailSrc]);
     // If it's a folder, show folder icon
     if (item.type === "folder") {
         return (<div className={`${currentSizeClass} flex items-center justify-center transition-all duration-200 hover:scale-105`}>
@@ -140,8 +118,8 @@ export const Thumbnail = ({ item, size = 'lg', thumbnailSrc: propThumbnailSrc, l
         </div>
       </div>);
     }
-    // If no thumbnail or thumbnail already failed, show default icon
-    if (!item.thumbnail || thumbnailError) {
+    // Nothing to show, or every picture failed: the type's icon
+    if (stage === "none") {
         return (<div className={`${currentSizeClass} flex items-center justify-center transition-all duration-200 hover:scale-105`}>
         {getDefaultFileIcon(item)}
       </div>);
@@ -152,10 +130,7 @@ export const Thumbnail = ({ item, size = 'lg', thumbnailSrc: propThumbnailSrc, l
         </div>)}
       {thumbnailSrc && (<img src={thumbnailSrc} alt={item.name} className={`${size === 'fill' ? 'w-full h-full object-cover' : 'max-w-full max-h-full object-contain rounded-lg hover:scale-105 hover:shadow-lg'} transition-all duration-300 ${thumbnailLoading ? 'opacity-0' : 'opacity-100'}`} onLoad={() => {
                 setThumbnailLoading(false);
-            }} onError={() => {
-                setThumbnailError(true);
-                setThumbnailLoading(false);
-            }}/>)}
+            }} onError={fail}/>)}
     </div>);
 };
 const getDefaultFileIcon = (item) => {

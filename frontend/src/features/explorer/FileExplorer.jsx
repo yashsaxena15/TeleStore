@@ -46,6 +46,7 @@ const InstagramImportDialog = lazy(() => import("@/features/cloud/InstagramImpor
 // Mounts a lazy dialog only while it is open
 const WhenOpen = ({ open, children }) => (open ? <Suspense fallback={null}>{children}</Suspense> : null);
 const SettingsContent = lazy(() => import("@/features/settings/SettingsContent").then((m) => ({ default: m.SettingsContent })));
+const PhotosPage = lazy(() => import("@/features/photos/PhotosPage").then((m) => ({ default: m.PhotosPage })));
 const StorageAnalyticsContent = lazy(() => import("@/features/storage/StorageAnalyticsContent").then((m) => ({ default: m.StorageAnalyticsContent })));
 const PanelLoading = () => (<div className="flex flex-1 items-center justify-center p-10 text-sm text-muted-foreground">Loading…</div>);
 export const FileExplorer = () => {
@@ -583,6 +584,9 @@ export const FileExplorer = () => {
         else if (target === 'storage') {
             navigate('/storage');
         }
+        else if (target === 'photos') {
+            navigate('/photos');
+        }
         else if (target === 'transfers' || target === 'downloads') {
             navigate('/transfers');
         }
@@ -676,6 +680,10 @@ export const FileExplorer = () => {
                 setTypeFilter(categoryKey);
                 showFiles();
             }} onShowInFolder={openFolderPath}/>
+            </Suspense>
+          </div>) : view === "photos" ? (<div key="photos" className={PAGE_CLASS}>
+            <Suspense fallback={<PanelLoading />}>
+              <PhotosPage />
             </Suspense>
           </div>) : view === "transfers" ? (<div key="transfers" className={PAGE_CLASS}>
             <Suspense fallback={<PanelLoading />}>

@@ -38,10 +38,21 @@ class MediaUrls(private val baseUrl: HttpUrl, private val token: () -> String?) 
         .withToken("token")
         .build()
 
-    /** The small preview image, or null when the file has none. */
+    /** The small preview image Telegram made, or null when the file has none. */
     fun thumbnail(item: FileItem): HttpUrl? = item.thumbnail?.takeIf { it.isNotBlank() }?.let {
         baseUrl.newBuilder().addPathSegments("files/thumbnail").addPathSegment(it).withToken("auth_token").build()
     }
+
+    /**
+     * A preview the server makes from the original, for photos and videos Telegram has no
+     * thumbnail for (HEIC, big photos, files sent as documents). Null for other kinds.
+     */
+    fun preview(item: FileItem): HttpUrl? = item.takeIf { it.kind == FileKind.PHOTO || it.kind == FileKind.VIDEO }?.let {
+        baseUrl.newBuilder().addPathSegments("files/preview").addPathSegment(it.id).withToken("token").build()
+    }
+
+    /** What to show for a file: Telegram's thumbnail when there is one, else the server preview. */
+    fun picture(item: FileItem): HttpUrl? = if (item.isFolder) null else thumbnail(item) ?: preview(item)
 
     private fun HttpUrl.Builder.withToken(name: String): HttpUrl.Builder = apply {
         token()?.let { addQueryParameter(name, it) }

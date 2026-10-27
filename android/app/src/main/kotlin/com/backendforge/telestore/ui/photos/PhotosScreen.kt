@@ -78,6 +78,7 @@ import com.backendforge.telestore.core.Memory
 import com.backendforge.telestore.core.Timeline
 import com.backendforge.telestore.data.AppContainer
 import com.backendforge.telestore.ui.components.FileThumbnail
+import com.backendforge.telestore.ui.components.SelectionMotion
 import com.backendforge.telestore.ui.home.AppLogo
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -274,9 +275,11 @@ private fun DayHeader(label: String, selecting: Boolean, allSelected: Boolean, o
 @Composable
 private fun PhotoCell(item: FileItem, api: com.backendforge.telestore.core.TeleStoreApi, selecting: Boolean, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     val haptics = rememberHaptics()
-    Box(Modifier.aspectRatio(1f).combinedClickable(onClick = onClick, onLongClick = { haptics.longPress(); onLongClick() })) {
-        val inset = if (selected) Modifier.padding(10.dp).clip(RoundedCornerShape(10.dp)) else Modifier
-        Box(Modifier.fillMaxSize().then(inset)) {
+    val inset by SelectionMotion.inset(selected)
+    val highlight by SelectionMotion.background(selected)
+    Box(Modifier.aspectRatio(1f).background(highlight).combinedClickable(onClick = onClick, onLongClick = { haptics.longPress(); onLongClick() })) {
+        // The photo shrinks into a rounded tile when selected, and back out with a spring
+        Box(Modifier.fillMaxSize().padding(inset).clip(RoundedCornerShape(inset))) {
             FileThumbnail(item = item, api = api, modifier = Modifier.fillMaxSize(), shapeRadius = 0.dp, iconSize = 26.dp)
         }
         if (item.kind == FileKind.VIDEO) {
@@ -285,13 +288,20 @@ private fun PhotoCell(item: FileItem, api: com.backendforge.telestore.core.TeleS
         if (item.starred && !selecting) {
             Icon(Icons.Filled.Star, contentDescription = "Starred", tint = Color.White, modifier = Modifier.align(Alignment.BottomStart).padding(5.dp).size(16.dp))
         }
-        if (selecting) {
-            Icon(
-                if (selected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
-                contentDescription = if (selected) "Selected" else "Not selected",
-                tint = if (selected) MaterialTheme.colorScheme.primary else Color.White,
-                modifier = Modifier.align(Alignment.TopStart).padding(5.dp).size(22.dp).background(if (selected) Color.White else Color.Transparent, CircleShape),
-            )
+        androidx.compose.animation.AnimatedVisibility(
+            visible = selecting,
+            enter = SelectionMotion.markEnter,
+            exit = SelectionMotion.markExit,
+            modifier = Modifier.align(Alignment.TopStart),
+        ) {
+            androidx.compose.animation.Crossfade(targetState = selected, label = "photo check") { isOn ->
+                Icon(
+                    if (isOn) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                    contentDescription = if (isOn) "Selected" else "Not selected",
+                    tint = if (isOn) MaterialTheme.colorScheme.primary else Color.White,
+                    modifier = Modifier.padding(5.dp).size(22.dp).background(if (isOn) Color.White else Color.Transparent, CircleShape),
+                )
+            }
         }
     }
 }

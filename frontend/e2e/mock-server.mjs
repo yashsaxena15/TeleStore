@@ -88,9 +88,19 @@ const send = (res, code, body, type = "application/json") => {
     res.end(data);
 };
 
+// Photos: the phone backup, newest taken first (one with a Telegram thumbnail, two without)
+const PHOTOS = [
+    { id: "ph1", file_name: "IMG_0003.HEIC", file_type: "document", file_size: 3_100_000, file_path: "/Home/Phone Backup/Camera", taken_at: new Date().toISOString(), modified_date: new Date().toISOString() },
+    { id: "ph2", file_name: "VID_0002.mp4", file_type: "document", file_size: 9_400_000, file_path: "/Home/Phone Backup/Camera", taken_at: new Date().toISOString(), modified_date: new Date().toISOString() },
+    { id: "ph3", file_name: "IMG_0001.jpg", file_type: "photo", thumbnail: "THUMB1", file_size: 2_000_000, file_path: "/Home/Phone Backup/Camera", taken_at: "2025-01-03T10:00:00", modified_date: "2026-10-01T10:00:00" },
+];
+// A 1×1 PNG for thumbnails and previews
+const PIXEL = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+
 const listFiles = (url) => {
     const p = (url.searchParams.get("path") || "/Home").replace(/\/+$/, "") || "/Home";
-    const all = FOLDERS[p] || [];
+    const under = url.searchParams.get("under");
+    const all = p === "all" && under === "/Home/Phone Backup" ? PHOTOS : (FOLDERS[p] || []);
     const page = Number(url.searchParams.get("page") || 1);
     // No page size means "All" in the pagination menu
     const size = url.searchParams.has("page_size") ? Number(url.searchParams.get("page_size")) : all.length || 1;
@@ -206,6 +216,10 @@ http.createServer((req, res) => {
         if (req.method !== "GET" && req.method !== "HEAD") return mutation(req, res, url, body);
         if (ROUTES[url.pathname]) return send(res, 200, ROUTES[url.pathname]);
         if (url.pathname === "/files") return send(res, 200, listFiles(url));
+        if (/^\/files\/(preview|thumbnail)\//.test(url.pathname)) {
+            requests.push({ method: req.method, path: url.pathname, body: "" });
+            return send(res, 200, PIXEL, "image/png");
+        }
         // A 300 MB file: HEAD reports its size; the browser download gets a small stand-in body
         if (decodeURIComponent(url.pathname) === "/dl/huge-backup.zip") {
             requests.push({ method: req.method, path: url.pathname, body: url.search });

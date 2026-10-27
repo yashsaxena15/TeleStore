@@ -40,6 +40,8 @@ import com.backendforge.telestore.core.AppRelease
 import com.backendforge.telestore.data.AppVersion
 import com.backendforge.telestore.data.openInBrowser
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
@@ -406,6 +408,9 @@ fun MainScreen(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        // Each screen draws its own top bar under the status bar. The shell adding the status
+        // bar too left an empty band at the top of every screen.
+        contentWindowInsets = WindowInsets(0),
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             if (!isPlayer) Column {
@@ -426,7 +431,10 @@ fun MainScreen(
         },
     ) { padding ->
         // Players draw edge to edge and handle the system bars themselves
-        Row(Modifier.fillMaxSize().padding(if (isPlayer) PaddingValues(0.dp) else padding)) {
+        // The space the tabs and mini players take counts as used, so screens below don't add the
+        // navigation-bar gap again
+        val shellPadding = if (isPlayer) PaddingValues(0.dp) else padding
+        Row(Modifier.fillMaxSize().padding(shellPadding).consumeWindowInsets(shellPadding)) {
             // Tablets and landscape: the tabs move to a rail on the left
             if (wide && !isPlayer && !isSearch) {
                 NavigationRail {

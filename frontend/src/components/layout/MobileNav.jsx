@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Folder, Inbox, ArrowUpDown, LayoutGrid, Plus, Star, ShieldCheck, Trash2, HardDrive, Cloud, User, Settings, Users, Laptop, LogOut } from "lucide-react";
+import { Folder, Images, Inbox, ArrowUpDown, LayoutGrid, Plus, Star, ShieldCheck, Trash2, HardDrive, Cloud, User, Settings, Users, Laptop, LogOut } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useTransferManager } from "@/features/transfers/useTransferManager";
 import { useCloudAccounts, useIsOwner, useUserProfile, displayName } from "@/hooks/useShellData";
@@ -50,6 +50,7 @@ export const MobileNav = ({ selectedFilter, activeView, onNavigateView, onAction
             <SheetTitle className="text-base">{displayName(profile)}</SheetTitle>
           </SheetHeader>
           <div className="grid gap-0.5">
+            <SheetRow icon={Images} label="Photos" onClick={() => go("photos")}/>
             <SheetRow icon={Star} label="Starred" onClick={() => go("files", "starred")}/>
             <SheetRow icon={ShieldCheck} label="Private Vault" onClick={() => go("files", "vault")}/>
             <SheetRow icon={Trash2} label="Trash" onClick={() => go("files", "trash")}/>
