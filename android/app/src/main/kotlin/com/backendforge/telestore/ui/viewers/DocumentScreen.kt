@@ -54,7 +54,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -253,8 +252,9 @@ private fun PdfPages(file: LocalFile) {
         ) {
             items(renderer.pageCount) { index ->
                 // The page's shape and picture, made off the main thread, one page at a time
-                val page by produceState<Pair<Float, Bitmap?>?>(null, index, widthPx) {
-                    value = withContext(Dispatchers.IO) {
+                var page by remember(index, widthPx) { mutableStateOf<Pair<Float, Bitmap?>?>(null) }
+                LaunchedEffect(index, widthPx) {
+                    page = withContext(Dispatchers.IO) {
                         lock.withLock {
                             runCatching {
                                 val open = renderer.openPage(index)
