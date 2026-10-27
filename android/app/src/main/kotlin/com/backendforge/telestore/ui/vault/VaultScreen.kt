@@ -1,5 +1,7 @@
 package com.backendforge.telestore.ui.vault
 
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.backendforge.telestore.ui.components.rememberHaptics
 import android.view.WindowManager
 import androidx.compose.foundation.background
@@ -205,6 +207,12 @@ class VaultViewModel(private val container: AppContainer) : ViewModel() {
         _state.update { it.copy(message = "PIN changed.") }
     }
 
+    /** Recovery email changed: show the new (partly hidden) address. */
+    fun recoveryEmailChanged() = act {
+        val status = api.vaultStatus()
+        _state.update { it.copy(status = status, message = "Recovery email changed.") }
+    }
+
     fun setAutoLock(minutes: Int) = act {
         api.vaultAutoLock(minutes)
         _state.update { it.copy(status = it.status?.copy(autoLockMinutes = minutes), message = "Locks after $minutes minutes without use.") }
@@ -245,6 +253,7 @@ fun VaultScreen(
     var info by remember { mutableStateOf<FileItem?>(null) }
     var newFolder by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
+    var recoveryEmail by remember { mutableStateOf(false) }
 
     // No screenshots, and a blank preview in Recents, while the vault is on screen; lock when the app is left
     DisposableEffect(activity, lifecycle) {
@@ -347,7 +356,11 @@ fun VaultScreen(
     }
     info?.let { FileInfoSheet(item = it, api = container.api(), onDismiss = { info = null }) }
     if (newFolder) NewFolderDialog(onDismiss = { newFolder = false }, onConfirm = { newFolder = false; vm.createFolder(it) })
-    if (settings) VaultSettingsDialog(state.status, onAutoLock = vm::setAutoLock, onChangePin = vm::changePin, onDismiss = { settings = false })
+    if (settings) VaultSettingsDialog(
+        state.status, onAutoLock = vm::setAutoLock, onChangePin = vm::changePin,
+        onRecoveryEmail = { settings = false; recoveryEmail = true }, onDismiss = { settings = false },
+    )
+    if (recoveryEmail) RecoveryEmailDialog(container, state.status?.email, onDismiss = { recoveryEmail = false }, onChanged = vm::recoveryEmailChanged)
 }
 
 @Composable
@@ -419,7 +432,13 @@ private fun PinPad(title: String, error: String?, busy: Boolean, onPin: (String)
 }
 
 @Composable
-private fun VaultSettingsDialog(status: VaultStatus?, onAutoLock: (Int) -> Unit, onChangePin: (String, String) -> Unit, onDismiss: () -> Unit) {
+private fun VaultSettingsDialog(
+    status: VaultStatus?,
+    onAutoLock: (Int) -> Unit,
+    onChangePin: (String, String) -> Unit,
+    onRecoveryEmail: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     var current by remember { mutableStateOf("") }
     var new by remember { mutableStateOf("") }
     AlertDialog(
@@ -439,11 +458,74 @@ private fun VaultSettingsDialog(status: VaultStatus?, onAutoLock: (Int) -> Unit,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword))
                 OutlinedTextField(new, { new = it.filter(Char::isDigit).take(4) }, label = { Text("New PIN") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword))
+                Text("Recovery email", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
+                Text(status?.email ?: "Not set", style = MaterialTheme.typography.bodyMedium)
+                TextButton(onClick = onRecoveryEmail, contentPadding = PaddingValues(0.dp)) { Text("Change recovery email") }
             }
         },
         confirmButton = {
             TextButton(onClick = { onChangePin(current, new); onDismiss() }, enabled = VaultPin.isValid(current) && VaultPin.isValid(new)) { Text("Change PIN") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+/** New recovery email: your PIN and the new address, then the code sent there. */
+@Composable
+private fun RecoveryEmailDialog(container: AppContainer, current: String?, onDismiss: () -> Unit, onChanged: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var email by remember { mutableStateOf("") }
+    var pin by remember { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
+    var askCode by remember { mutableStateOf(false) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Change recovery email") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!askCode) {
+                    Text("Forgot-PIN codes go to this address. Now: ${current ?: "not set"}.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(email, { email = it; error = null }, label = { Text("New email") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(pin, { pin = it.filter(Char::isDigit).take(4); error = null }, label = { Text("Vault PIN") }, singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), modifier = Modifier.fillMaxWidth())
+                } else {
+                    Text(notice ?: "Enter the 6-digit code we sent to $email.", style = MaterialTheme.typography.bodyMedium)
+                    OutlinedTextField(code, { code = it.filter(Char::isDigit).take(6); error = null }, label = { Text("6-digit code") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !busy && if (askCode) code.length == 6 else email.contains('@') && VaultPin.isValid(pin),
+                onClick = {
+                    scope.launch {
+                        busy = true
+                        try {
+                            if (!askCode) {
+                                notice = container.api().vaultRecoveryCode(email, pin).message
+                                askCode = true
+                            } else {
+                                container.api().vaultRecoveryConfirm(email, pin, code)
+                                onChanged()
+                                onDismiss()
+                            }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            error = (e as? ApiException)?.message ?: "Couldn't change the recovery email."
+                        }
+                        busy = false
+                    }
+                },
+            ) { Text(if (busy) "Please wait…" else if (askCode) "Confirm" else "Send code") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

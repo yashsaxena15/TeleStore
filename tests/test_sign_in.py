@@ -140,6 +140,22 @@ class TestOwnerReset:
         assert res.status_code == 400
 
 
+    def test_password_change_never_logs_the_account_record(self, client, as_user):
+        from telestore.api.routes import user as user_routes
+        as_user(username="family")
+        secret = "scrypt$do-not-log-this-hash"
+        _users([{"username": "family", "password_hash": secret, "email": "f@example.com"}])
+        database.Users.get_user_by_identifier.return_value = {"username": "family", "password_hash": secret}
+        database.Users.get_password_hash.return_value = secret
+        database.Users.verify_current_password.return_value = True
+        database.Users.update_user_by_identifier.return_value = True
+        with patch.object(user_routes, "logger") as log:
+            res = client.put("/user/family/password", json={"current_password": "old-pass", "new_password": "fresh123"})
+        assert res.status_code == 200, res.text
+        logged = " ".join(str(c) for c in log.mock_calls)
+        assert secret not in logged and "old-pass" not in logged and "fresh123" not in logged
+
+
 class TestUsersList:
     def test_bot_start_records_are_hidden(self, client, as_user):
         as_user(username="admin")

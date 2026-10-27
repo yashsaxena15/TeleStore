@@ -25,6 +25,9 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -38,6 +41,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,10 +68,16 @@ fun MoreScreen(
     onNavigateVault: () -> Unit = {},
     onNavigateDrive: () -> Unit = {},
     onNavigateWebDav: () -> Unit = {},
+    onNavigateAccount: () -> Unit = {},
+    onNavigateDownloads: () -> Unit = {},
+    onNavigateUsers: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
     var showSignOutConfirm by remember { mutableStateOf(false) }
+    // Users is for the owner only
+    var isOwner by remember { mutableStateOf(false) }
+    LaunchedEffect(session.token) { isOwner = runCatching { container.api().isOwner() }.getOrDefault(false) }
 
     Scaffold(
         modifier = modifier,
@@ -86,6 +96,7 @@ fun MoreScreen(
         ) {
             // User & Server Card
             Card(
+                onClick = onNavigateAccount,
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                 modifier = Modifier.fillMaxWidth(),
@@ -106,7 +117,7 @@ fun MoreScreen(
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
                             Text(
-                                text = "Signed in",
+                                text = "Signed in · Account, password, Telegram",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -177,6 +188,29 @@ fun MoreScreen(
                         label = "Telegram Inbox",
                         onClick = onNavigateInbox,
                     )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+            Text(
+                text = "Settings",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+            )
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column {
+                    MoreNavRow(icon = Icons.Default.Person, label = "Account and Telegram", onClick = onNavigateAccount)
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
+                    MoreNavRow(icon = Icons.Default.Movie, label = "Video downloads", onClick = onNavigateDownloads)
+                    if (isOwner) {
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
+                        MoreNavRow(icon = Icons.Default.Group, label = "Users", onClick = onNavigateUsers)
+                    }
                 }
             }
 

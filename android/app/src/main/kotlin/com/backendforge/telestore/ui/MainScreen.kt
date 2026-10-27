@@ -2,6 +2,9 @@ package com.backendforge.telestore.ui
 
 import android.net.Uri
 import com.backendforge.telestore.data.CrashReporter
+import com.backendforge.telestore.ui.settings.AccountScreen
+import com.backendforge.telestore.ui.settings.DownloadsScreen
+import com.backendforge.telestore.ui.settings.UsersScreen
 import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -562,6 +565,9 @@ fun MainScreen(
                             onNavigateVault = { navController.navigate(ROUTE_VAULT) },
                             onNavigateDrive = { navController.navigate("drive") },
                             onNavigateWebDav = { navController.navigate("webdav") },
+                            onNavigateAccount = { navController.navigate("settings_account") },
+                            onNavigateDownloads = { navController.navigate("settings_downloads") },
+                            onNavigateUsers = { navController.navigate("settings_users") },
                         )
                     }
 
@@ -637,6 +643,9 @@ fun MainScreen(
                     val account = CloudAccount(id = entry.arguments?.getString("id").orEmpty(), email = entry.arguments?.getString("email")?.ifEmpty { null })
                     DriveBrowserScreen(container, account, onBack = { navController.popBackStack() })
                 }
+                composable("settings_account") { AccountScreen(container, onBack = { navController.popBackStack() }) }
+                composable("settings_downloads") { DownloadsScreen(container, onBack = { navController.popBackStack() }) }
+                composable("settings_users") { UsersScreen(container, session.username, onBack = { navController.popBackStack() }) }
                 composable("webdav") { WebDavScreen(container, session, onBack = { navController.popBackStack() }) }
 
                 composable(ROUTE_VAULT) {
