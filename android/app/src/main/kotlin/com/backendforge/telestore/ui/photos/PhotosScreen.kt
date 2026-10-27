@@ -207,7 +207,7 @@ fun PhotosScreen(
 @Composable
 private fun Header(backupOn: Boolean, status: BackupStatus, onBackup: () -> Unit) {
     Row(Modifier.statusBarsPadding().fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        AppLogo(30)
+        AppLogo(24)
         Text("Photos", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).padding(start = 10.dp))
         IconButton(onClick = onBackup) {
             when {

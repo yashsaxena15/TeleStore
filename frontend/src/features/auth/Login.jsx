@@ -127,9 +127,7 @@ const Login = () => {
       {!(isDesktop && showBackendConfig) ? (<Card className="w-full max-w-md shadow-2xl rounded-3xl border border-border bg-card/95 backdrop-blur-xl">
           <CardHeader className="space-y-2 text-center pt-8 pb-2">
             <div className="flex justify-center mb-1">
-              <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-lg border border-border bg-muted">
-                <img src="/logo.jpg" alt="TeleStore" className="w-full h-full object-cover"/>
-              </div>
+              <img src="/logo-symbol.svg" alt="TeleStore" className="h-20 w-auto"/>
             </div>
             <CardTitle className="text-3xl font-bold text-foreground">TeleStore</CardTitle>
             <CardDescription className="text-muted-foreground">

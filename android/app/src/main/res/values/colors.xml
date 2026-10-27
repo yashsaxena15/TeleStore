@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ground">#FF09090B</color>
-    <color name="brand">#FF4F46E5</color>
+    <!-- Behind the logo on the launcher icon -->
+    <color name="launcher_ground">#FFFFFF</color>
 </resources>
