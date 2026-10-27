@@ -1,6 +1,14 @@
 package com.backendforge.telestore.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -51,17 +59,23 @@ fun FileRow(
     }.let { if (offline) "$it • Offline" else it
     }
 
+    val highlight by SelectionMotion.background(isSelected)
+    val pictureScale by SelectionMotion.scale(isSelected, selectedScale = 0.88f)
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
+            .padding(horizontal = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(highlight)
             .combinedClickable(
                 onClick = { if (isSelectionMode) onToggleSelect() else onClick() },
                 onLongClick = { haptics.longPress(); onLongClick() },
             )
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
-        if (isSelectionMode) {
+        AnimatedVisibility(visible = isSelectionMode, enter = SelectionMotion.checkboxEnter, exit = SelectionMotion.checkboxExit) {
             Checkbox(
                 checked = isSelected,
                 onCheckedChange = { onToggleSelect() },
@@ -72,7 +86,7 @@ fun FileRow(
         FileThumbnail(
             item = item,
             api = api,
-            modifier = Modifier.size(44.dp),
+            modifier = Modifier.size(44.dp).graphicsLayer { scaleX = pictureScale; scaleY = pictureScale },
             shapeRadius = 10.dp,
             iconSize = 22.dp,
         )
@@ -110,7 +124,7 @@ fun FileRow(
             }
         }
 
-        if (!isSelectionMode) {
+        AnimatedVisibility(visible = !isSelectionMode, enter = fadeIn(), exit = fadeOut()) {
             IconButton(onClick = onOpenActions) {
                 Icon(
                     imageVector = Icons.Default.MoreVert,

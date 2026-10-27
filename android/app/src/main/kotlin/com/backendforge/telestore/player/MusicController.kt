@@ -115,7 +115,7 @@ class MusicController(private val context: Context) {
                     MediaMetadata.Builder()
                         .setTitle(PlayQueue.title(item))
                         .setArtist(folder)
-                        .setArtworkUri(api.media.thumbnail(item)?.let { Uri.parse(it.toString()) })
+                        .setArtworkUri(api.media.picture(item)?.let { Uri.parse(it.toString()) })
                         .build(),
                 )
                 .build()

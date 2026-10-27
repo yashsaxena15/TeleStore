@@ -4,9 +4,10 @@
 const SETTINGS_PATHS = new Set(["/settings", "/profile", "/users"]);
 const VAULT_ROOTS = new Set(["Private Vault", "Vault"]);
 
-/** "files" | "settings" | "storage" | "transfers" for a pathname. */
+/** "files" | "settings" | "storage" | "transfers" | "photos" for a pathname. */
 export function viewFromPathname(pathname = "/") {
     if (SETTINGS_PATHS.has(pathname)) return "settings";
+    if (pathname === "/photos") return "photos";
     if (pathname === "/storage") return "storage";
     if (pathname === "/transfers" || pathname === "/downloads") return "transfers";
     return "files";

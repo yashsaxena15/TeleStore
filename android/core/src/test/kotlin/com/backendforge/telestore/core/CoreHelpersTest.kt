@@ -51,6 +51,23 @@ class CoreHelpersTest {
     }
 
     @Test
+    fun `photos and videos without a thumbnail get a server preview`() {
+        val urls = MediaUrls("https://ts.example/".toHttpUrl()) { "tok" }
+        val heic = FileItem(id = "p1", name = "IMG_0001.HEIC")
+        val preview = urls.preview(heic)!!
+        assertEquals("/files/preview/p1", preview.encodedPath)
+        assertEquals("tok", preview.queryParameter("token"))
+        assertEquals(preview, urls.picture(heic))
+        assertEquals("/files/preview/v1", urls.picture(FileItem(id = "v1", name = "clip.mkv"))!!.encodedPath)
+        // A Telegram thumbnail wins when there is one
+        val withThumb = FileItem(id = "p2", name = "a.jpg", thumbnail = "AAMC")
+        assertEquals(urls.thumbnail(withThumb), urls.picture(withThumb))
+        // Nothing to preview for documents
+        assertNull(urls.preview(FileItem(id = "d", name = "notes.pdf")))
+        assertNull(urls.picture(FileItem(id = "d", name = "notes.pdf")))
+    }
+
+    @Test
     fun `folder paths calculates childPath parent crumbs and isInside`() {
         // childPath with spaces and brackets
         val folder = FileItem(id = "1", name = "Sci-Fi & Action [2024]", path = "/Home/Movies", type = "folder")

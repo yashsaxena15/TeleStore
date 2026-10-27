@@ -1,5 +1,11 @@
 package com.backendforge.telestore.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -50,9 +56,14 @@ fun FileGridCard(
     modifier: Modifier = Modifier,
 ) {
     val haptics = rememberHaptics()
+    val cardColor by animateColorAsState(
+        if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+        animationSpec = tween(180), label = "card selection",
+    )
+    val pictureScale by SelectionMotion.scale(isSelected)
     Card(
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        colors = CardDefaults.cardColors(containerColor = cardColor),
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
@@ -71,7 +82,7 @@ fun FileGridCard(
                 FileThumbnail(
                     item = item,
                     api = api,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = pictureScale; scaleY = pictureScale },
                     shapeRadius = 8.dp,
                     iconSize = 36.dp,
                 )
@@ -94,13 +105,11 @@ fun FileGridCard(
                     }
                 }
 
-                if (isSelectionMode) {
+                AnimatedShow(visible = isSelectionMode, modifier = Modifier.align(Alignment.TopEnd)) {
                     Checkbox(
                         checked = isSelected,
                         onCheckedChange = { onToggleSelect() },
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(2.dp),
+                        modifier = Modifier.padding(2.dp),
                     )
                 }
             }
@@ -129,7 +138,7 @@ fun FileGridCard(
                     )
                 }
 
-                if (!isSelectionMode) {
+                AnimatedShow(visible = !isSelectionMode, enter = fadeIn(), exit = fadeOut()) {
                     IconButton(
                         onClick = onOpenActions,
                         modifier = Modifier.size(28.dp),

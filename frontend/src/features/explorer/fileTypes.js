@@ -74,6 +74,7 @@ export const apiFileToFileItem = (apiFile) => {
         thumbnail: apiFile.thumbnail,
         file_path: apiFile.file_path,
         modified: serverTime(apiFile.modified_date),
+        takenAt: serverTime(apiFile.taken_at) || undefined,
         chat_id: apiFile.chat_id,
         message_id: apiFile.message_id,
         caption: apiFile.file_caption,

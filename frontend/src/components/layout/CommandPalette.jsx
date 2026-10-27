@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { ArrowUpDown, HardDrive, User, Settings, Users, Cloud, RefreshCw, Laptop, Moon, Sun, Monitor, LogOut, Plug, ShieldCheck } from "lucide-react";
+import { ArrowUpDown, HardDrive, Images, User, Settings, Users, Cloud, RefreshCw, Laptop, Moon, Sun, Monitor, LogOut, Plug, ShieldCheck } from "lucide-react";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator, CommandShortcut } from "@/components/ui/command";
 import { useCloudAccounts, useIsOwner } from "@/hooks/useShellData";
 import { setTheme } from "@/lib/theme";
@@ -34,6 +34,7 @@ export const CommandPalette = ({ open, onOpenChange, onNavigateView, onAction })
           {LIBRARY.map(({ name, icon, filter }) => <Item key={filter} icon={icon} label={name} onSelect={() => onNavigateView("files", filter)}/>)}
           {cloudAccounts.map((acc) => <Item key={acc.id} icon={Cloud} label={acc.account_name} keywords={["drive", "google", acc.account_email]} hint="Drive" onSelect={() => onNavigateView("files", `cloud:${acc.id}:root`)}/>)}
           <Item icon={ArrowUpDown} label="Transfers" keywords={["downloads", "uploads", "leech"]} onSelect={() => onNavigateView("transfers")}/>
+          <Item icon={Images} label="Photos" keywords={["gallery", "backup", "camera", "pictures"]} onSelect={() => onNavigateView("photos")}/>
           <Item icon={HardDrive} label="Storage" keywords={["analytics", "usage", "cache"]} onSelect={() => onNavigateView("storage")}/>
           <Item icon={User} label="Account" keywords={["profile", "telegram", "password"]} onSelect={() => onNavigateView("settings", "account")}/>
           <Item icon={Settings} label="Settings" keywords={["preferences"]} onSelect={() => onNavigateView("settings")}/>

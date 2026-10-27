@@ -97,6 +97,8 @@ class TeleStoreApi(
         kind: FileKind? = null,
         /** With path "all": photos and videos together (the Photos timeline). */
         mediaOnly: Boolean = false,
+        /** With path "all": only files inside this /Home folder and its subfolders. */
+        under: String? = null,
     ): FilePage = get(
         url("files").newBuilder()
             .addQueryParameter("path", path)
@@ -106,6 +108,7 @@ class TeleStoreApi(
             .addQueryParameter("sort_order", if (ascending) "asc" else "desc")
             .apply { query?.trim()?.takeIf { it.isNotEmpty() }?.let { addQueryParameter("q", it) } }
             .apply { (if (mediaOnly) "media" else kind?.wire)?.let { addQueryParameter("kind", it) } }
+            .apply { under?.takeIf { it.isNotBlank() }?.let { addQueryParameter("under", it) } }
             .build()
     )
 

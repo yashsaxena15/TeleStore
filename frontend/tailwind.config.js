@@ -91,6 +91,12 @@ export default {
   			sm: 'calc(var(--radius) - 4px)'
   		},
   		keyframes: {
+  			// Selecting an item: the check mark pops in (same feel as the Android app)
+  			'select-pop': {
+  				'0%': { transform: 'scale(0.5)' },
+  				'60%': { transform: 'scale(1.18)' },
+  				'100%': { transform: 'scale(1)' }
+  			},
   			'accordion-down': {
   				from: {
   					height: '0'
@@ -109,6 +115,7 @@ export default {
   			}
   		},
   		animation: {
+  			'select-pop': 'select-pop 0.28s cubic-bezier(.34,1.56,.64,1)',
   			'accordion-down': 'accordion-down 0.2s ease-out',
   			'accordion-up': 'accordion-up 0.2s ease-out'
   		},

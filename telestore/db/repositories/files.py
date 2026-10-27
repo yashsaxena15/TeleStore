@@ -275,7 +275,8 @@ class Files(Collection):
         sort_order: str = None,
         folders_first: bool = True,
         q: str = None,
-        kind: str = None
+        kind: str = None,
+        under: str = None
     ):
         """Get files and folders for a specific path with optional pagination and sorting.
 
@@ -316,6 +317,11 @@ class Files(Collection):
         elif path == "all":
             # Get all files except folders
             query = build_query({"file_type": {"$ne": "folder"}, "trashed": {"$ne": True}, "is_vault": {"$ne": True}, "file_path": {"$not": {"$regex": "^/?Vault"}}})
+            # Only inside one folder and its subfolders (the Photos timeline shows the phone backup folder)
+            folder = "/" + (under or "").strip().strip("/")
+            if under and folder.startswith("/Home"):
+                import re
+                query["file_path"] = {"$regex": f"^{re.escape(folder)}(/|$)"}
             # One kind only (the app's Videos / Photos / Music / Documents): by stored type or extension,
             # since some uploads (e.g. over WebDAV) are stored as "document" whatever they are
             kind_rule = KIND_FILTERS.get((kind or "").lower())

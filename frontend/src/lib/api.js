@@ -219,6 +219,8 @@ export const api = {
     fetchFiles: (path = '/', page, pageSize, sortBy, sortOrder) => request('/files', { query: { path, page, page_size: pageSize, sort_by: sortBy, sort_order: sortOrder }, timeout: 5000, fallback: 'Failed to fetch files' }),
     createFolder: (folderName, currentPath) => post('/folders/create', { folderName, currentPath }, { timeout: 3000, fallback: 'Failed to create folder' }),
     createFolderPath: (fullPath) => post('/folders/create-path', { fullPath }, { timeout: 3000, fallback: 'Failed to create folder path' }),
+    // Photos: photos and videos in one folder tree (the phone backup), newest taken first
+    fetchMedia: (under, page, pageSize) => request('/files', { query: { path: 'all', kind: 'media', under, page, page_size: pageSize, sort_by: 'taken', sort_order: 'desc' }, timeout: 15000, fallback: 'Failed to fetch photos' }),
     toggleStar: (fileId, starred) => post('/files/star', { file_id: fileId, starred }, { fallback: 'Failed to update star status' }),
     trashFile: (fileId) => post('/files/trash', { file_id: fileId }, { fallback: 'Failed to move item to trash' }),
     restoreFile: (fileId) => post('/files/restore', { file_id: fileId }, { fallback: 'Failed to restore item from trash' }),

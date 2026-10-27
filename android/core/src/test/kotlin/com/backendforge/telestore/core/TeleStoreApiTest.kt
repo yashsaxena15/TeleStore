@@ -115,6 +115,16 @@ class TeleStoreApiTest {
     }
 
     @Test
+    fun `photos can be limited to one folder`() = runTest {
+        server.enqueue(json("""{"files":[]}"""))
+        server.enqueue(json("""{"files":[]}"""))
+        api.listFiles(path = "all", mediaOnly = true, under = "/Home/Phone Backup")
+        assertEquals("/Home/Phone Backup", server.takeRequest().requestUrl!!.queryParameter("under"))
+        api.listFiles(path = "all", mediaOnly = true, under = " ")
+        assertNull(server.takeRequest().requestUrl!!.queryParameter("under"))
+    }
+
+    @Test
     fun `no search text means no q`() = runTest {
         server.enqueue(json("""{"files":[]}"""))
         api.listFiles(query = "   ")

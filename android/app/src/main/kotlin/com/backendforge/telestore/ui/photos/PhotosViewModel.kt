@@ -61,7 +61,11 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
         _state.update { it.copy(loading = true, error = null) }
         job = viewModelScope.launch {
             try {
-                val page = container.api().listFiles(path = "all", page = s.page + 1, pageSize = 200, sortBy = SortBy.TAKEN, ascending = false, mediaOnly = true)
+                // Only the phone backup folder (and its album folders), not every photo in the account
+                val page = container.api().listFiles(
+                    path = "all", page = s.page + 1, pageSize = 200, sortBy = SortBy.TAKEN, ascending = false,
+                    mediaOnly = true, under = container.backup.settings.value.destination,
+                )
                 if (gen != generation) return@launch
                 _state.update {
                     // Page 1 replaces the list (a refresh); later pages add to it, never twice the same photo
