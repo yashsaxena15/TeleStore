@@ -74,9 +74,9 @@ jobs:
         run: |
           for f in "$RUNNER_TEMP/build.log" app/build/reports/lint-results-debug.txt; do
             [ -f "$f" ] || continue
-            grep -E "^e: |error:|Error:|What went wrong|^> |FAILED|Lint found" "$f" | head -40 | sed 's/%/%25/g' | while IFS= read -r line; do
-              echo "::error::${line:0:900}"
-            done
+            # One annotation with the lines joined (GitHub shows only 10 per step); task names left out
+            lines=$(grep -E "^e: |error:|Error:|What went wrong|^> |FAILED|Lint found" "$f" | grep -v "^> Task " | head -40 | cut -c1-400 | sed 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')
+            [ -n "$lines" ] && echo "::error::$lines"
           done
 
       - name: Name the APK
