@@ -2,4 +2,6 @@
 <!-- Files fetched to open in another app or to share; nothing else is exposed -->
 <paths>
     <cache-path name="open" path="open/" />
+    <!-- Files kept offline, handed to the players, viewers and "Open with" -->
+    <files-path name="offline" path="offline/" />
 </paths>

@@ -1,5 +1,13 @@
 package com.backendforge.telestore.ui
 
+import kotlinx.coroutines.delay
+import androidx.lifecycle.repeatOnLifecycle
+import com.backendforge.telestore.ui.components.formatBytes
+import com.backendforge.telestore.core.OfflineSync
+import com.backendforge.telestore.transfers.OfflineFiles
+import com.backendforge.telestore.notify.Checks
+import com.backendforge.telestore.ui.notify.OfflineScreen
+import com.backendforge.telestore.ui.notify.NotificationsScreen
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
@@ -131,6 +139,8 @@ import com.backendforge.telestore.ui.transfers.TransfersScreen
 
 private const val ROUTE_VIDEO = "video"
 private const val ROUTE_PLAYLISTS = "playlists"
+private const val ROUTE_NOTIFICATIONS = "notifications"
+private const val ROUTE_OFFLINE = "offline"
 private const val ROUTE_PLAYLIST = "playlist"
 private const val ROUTE_PHOTOS = "photos"
 private const val ROUTE_NOW_PLAYING = "now_playing"
@@ -260,6 +270,7 @@ fun MainScreen(
     }
     val transferItems by container.transfers.store.items.collectAsStateWithLifecycle()
     val offlineIds = remember(transferItems) { container.transfers.store.offlineIds() }
+    val offlineFolders by container.offlineFolders.paths.collectAsStateWithLifecycle()
     val pendingShare by container.pendingShare.collectAsStateWithLifecycle()
 
     // Android 13+ asks before showing the progress notification (transfers run either way)
@@ -308,6 +319,44 @@ fun MainScreen(
             container.transfers.download(item)
             transferMessage = "Downloading ${item.name}. See Transfers."
         }
+    }
+
+    /** Keeps a file or folder on the phone for offline use, or removes the copy. */
+    fun toggleOffline(item: FileItem) {
+        if (item.isFolder) {
+            val path = FolderPaths.childPath(item)
+            if (path in offlineFolders) {
+                container.offlineFolders.drop(path)
+                transferMessage = "${item.name} is no longer kept offline."
+            } else {
+                askForNotifications()
+                scope.launch {
+                    transferMessage = try {
+                        val count = container.offlineFolders.keep(container.api(), path)
+                        if (count == 0) "${item.name} is kept offline; it has no files yet." else "Saving $count files from ${item.name} for offline."
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        (e as? ApiException)?.message ?: "Couldn't read the folder."
+                    }
+                }
+            }
+            return
+        }
+        val kept = container.transfers.store.items.value.any { it.offline && it.fileId == item.id }
+        if (kept) {
+            container.transfers.removeOffline(setOf(item.id))
+            transferMessage = "Removed the offline copy of ${item.name}."
+            return
+        }
+        val free = OfflineFiles.freeBytes(context)
+        if (!OfflineSync.fits(item.size ?: 0, free)) {
+            transferMessage = "Not enough space on this phone: ${item.name} needs ${formatBytes(item.size)}, ${formatBytes(free)} free."
+            return
+        }
+        askForNotifications()
+        container.transfers.saveOffline(listOf(item))
+        transferMessage = "Saving ${item.name} for offline."
     }
 
     fun navigateToFolder(prefix: String, path: String) {
@@ -413,6 +462,30 @@ fun MainScreen(
             "link" -> navController.navigate("add_link")
             "photos" -> navigateToTab(MainTab.PHOTOS)
             "search" -> navController.navigate("search")
+        }
+    }
+    // A tapped notification (or one in the Notifications list) opens where it points
+    val target by container.pendingTarget.collectAsStateWithLifecycle()
+    LaunchedEffect(target, appLocked) {
+        val t = target?.takeIf { !appLocked } ?: return@LaunchedEffect
+        container.pendingTarget.value = null
+        when (t.type) {
+            "transfers" -> navigateToTab(MainTab.TRANSFERS)
+            "folder", "file" -> t.path?.let { navigateToFolder("files", it) } ?: navigateToTab(MainTab.FILES)
+            "offline" -> navController.navigate(ROUTE_OFFLINE)
+            "playlists" -> navController.navigate(ROUTE_PLAYLISTS)
+            "backup" -> navController.navigate("photos_backup")
+            "settings" -> navController.navigate("settings_account")
+            else -> navController.navigate(ROUTE_NOTIFICATIONS) { launchSingleTop = true }
+        }
+    }
+    // While the app is on screen, new server notifications show within 30 seconds
+    LaunchedEffect(session.token) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                runCatching { Checks.notifications(container) }
+                delay(30_000)
+            }
         }
     }
     val sharedLink by container.pendingLink.collectAsStateWithLifecycle()
@@ -548,6 +621,8 @@ fun MainScreen(
                             onUpload = ::upload,
                             onDownload = ::download,
                             offlineIds = offlineIds,
+                            offlineFolders = offlineFolders,
+                            onToggleOffline = ::toggleOffline,
                             onCopyToDrive = { copyToDrive = listOf(it) },
                             onShare = elsewhere::share,
                             onOpenWith = elsewhere::openWith,
@@ -592,6 +667,8 @@ fun MainScreen(
                             onUpload = ::upload,
                             onDownload = ::download,
                             offlineIds = offlineIds,
+                            offlineFolders = offlineFolders,
+                            onToggleOffline = ::toggleOffline,
                             onCopyToDrive = { copyToDrive = listOf(it) },
                             onShare = elsewhere::share,
                             onOpenWith = elsewhere::openWith,
@@ -617,6 +694,8 @@ fun MainScreen(
                             onUpload = ::upload,
                             onDownload = ::download,
                             offlineIds = offlineIds,
+                            offlineFolders = offlineFolders,
+                            onToggleOffline = ::toggleOffline,
                             onCopyToDrive = { copyToDrive = listOf(it) },
                             onShare = elsewhere::share,
                             onOpenWith = elsewhere::openWith,
@@ -650,6 +729,8 @@ fun MainScreen(
                             onNavigateInbox = { navigateToFolder("more", "inbox") },
                             onNavigateStarred = { navigateToFolder("more", "starred") },
                             onNavigatePlaylists = { navController.navigate(ROUTE_PLAYLISTS) },
+                            onNavigateNotifications = { navController.navigate(ROUTE_NOTIFICATIONS) },
+                            onNavigateOffline = { navController.navigate(ROUTE_OFFLINE) },
                             onNavigateRecent = { navigateToFolder("more", "all") },
                             onNavigateVault = { navController.navigate(ROUTE_VAULT) },
                             onNavigateDrive = { navController.navigate("drive") },
@@ -684,6 +765,8 @@ fun MainScreen(
                             onUpload = ::upload,
                             onDownload = ::download,
                             offlineIds = offlineIds,
+                            offlineFolders = offlineFolders,
+                            onToggleOffline = ::toggleOffline,
                             onCopyToDrive = { copyToDrive = listOf(it) },
                             onShare = elsewhere::share,
                             onOpenWith = elsewhere::openWith,
@@ -751,6 +834,17 @@ fun MainScreen(
                     VaultScreen(vm, container, onBack = { navController.popBackStack() }, onOpenFile = ::openFile, onDownload = ::download)
                 }
 
+                composable(ROUTE_NOTIFICATIONS) {
+                    NotificationsScreen(container, onBack = { navController.popBackStack() }, onOpen = { container.pendingTarget.value = it })
+                }
+                composable(ROUTE_OFFLINE) {
+                    OfflineScreen(
+                        container,
+                        onBack = { navController.popBackStack() },
+                        onOpenFile = { item, siblings -> openFile(item, siblings) },
+                        onOpenFolder = { navigateToFolder("more", it) },
+                    )
+                }
                 composable(ROUTE_PLAYLISTS) {
                     PlaylistsScreen(container, onBack = { navController.popBackStack() }, onOpen = { navController.navigate("$ROUTE_PLAYLIST/${it.id}") })
                 }

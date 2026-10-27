@@ -1,5 +1,8 @@
 package com.backendforge.telestore.ui.more
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
@@ -66,6 +69,8 @@ fun MoreScreen(
     onNavigateInbox: () -> Unit,
     onNavigateStarred: () -> Unit = {},
     onNavigatePlaylists: () -> Unit = {},
+    onNavigateNotifications: () -> Unit = {},
+    onNavigateOffline: () -> Unit = {},
     onNavigateRecent: () -> Unit = {},
     onNavigateVault: () -> Unit = {},
     onNavigateDrive: () -> Unit = {},
@@ -171,6 +176,11 @@ fun MoreScreen(
                     MoreNavRow(icon = Icons.Default.Cloud, label = "Google Drive", onClick = onNavigateDrive)
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
                     MoreNavRow(icon = Icons.Default.Lan, label = "WebDAV (use in other apps)", onClick = onNavigateWebDav)
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
+                    val unread by container.unreadNotifications.collectAsStateWithLifecycle()
+                    MoreNavRow(icon = Icons.Default.Notifications, label = if (unread > 0) "Notifications · $unread new" else "Notifications", onClick = onNavigateNotifications)
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
+                    MoreNavRow(icon = Icons.Default.CloudDone, label = "Offline files", onClick = onNavigateOffline)
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
                     MoreNavRow(icon = Icons.AutoMirrored.Filled.QueueMusic, label = "Playlists", onClick = onNavigatePlaylists)
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))

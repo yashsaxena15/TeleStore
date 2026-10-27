@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { HardDrive, Images, ListMusic, User, Settings, Users, LogOut, Laptop, ArrowUpDown, Lock, Cloud, Unlink, Plus, Search, PanelLeftClose, PanelLeftOpen, ChevronsUpDown } from "lucide-react";
+import { HardDrive, HardDriveDownload, Images, ListMusic, User, Settings, Users, LogOut, Laptop, ArrowUpDown, Lock, Cloud, Unlink, Plus, Search, PanelLeftClose, PanelLeftOpen, ChevronsUpDown } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useTransferManager } from "@/features/transfers/useTransferManager";
@@ -16,6 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { NotificationBell } from "@/features/notifications/NotificationsPanel";
 import { NewMenu } from "./NewMenu";
 import { LIBRARY } from "./shellActions";
 
@@ -159,6 +160,11 @@ export const Sidebar = ({ selectedFilter, activeView = "files", onNavigateView, 
           {!collapsed && <span className="truncate">Playlists</span>}
         </button>
 
+        <button onClick={() => onNavigateView("offline")} className={navClass(activeView === "offline", collapsed)} title={collapsed ? "Offline" : undefined} aria-label="Offline">
+          <HardDriveDownload className="w-4 h-4 shrink-0"/>
+          {!collapsed && <span className="truncate">Offline</span>}
+        </button>
+
         <SectionLabel collapsed={collapsed} action={<button onClick={() => onAction("connect-drive")} className="text-[11px] text-primary hover:underline font-medium" aria-label="Connect cloud drive">+ Connect</button>}>
           Cloud drives
         </SectionLabel>
@@ -168,6 +174,7 @@ export const Sidebar = ({ selectedFilter, activeView = "files", onNavigateView, 
           </button>)}
 
         <SectionLabel collapsed={collapsed}>Activity</SectionLabel>
+        <NotificationBell collapsed={collapsed} className={navClass(false, collapsed)} onNavigateView={onNavigateView}/>
         <button onClick={() => onNavigateView("transfers")} className={`${navClass(activeView === "transfers", collapsed)} relative`} title={collapsed ? "Transfers" : undefined} aria-label="Transfers">
           <ArrowUpDown className="w-4 h-4 shrink-0"/>
           {!collapsed && <span className="truncate">Transfers</span>}

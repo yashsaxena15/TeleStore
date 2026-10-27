@@ -201,7 +201,8 @@ export const DocumentReaderModal = ({ url, fileName, fileExtension, onClose, }) 
             setIsFullscreen(false);
         }
     };
-    const downloadUrl = `${url}&download=1`;
+    // A saved offline copy (blob:) downloads as it is
+    const downloadUrl = url.startsWith("blob:") ? url : `${url}&download=1`;
     return (<div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="doc-reader-title" className="fixed inset-0 z-50 bg-black/90 flex flex-col backdrop-blur-sm animate-in fade-in duration-200">
       {/* Top Navigation Bar */}
       <header className="h-14 bg-zinc-900/90 border-b border-zinc-800 px-4 flex items-center justify-between select-none shrink-0 z-20">

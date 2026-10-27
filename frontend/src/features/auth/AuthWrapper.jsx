@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { getApiBaseUrl, fetchWithTimeout } from "@/lib/api";
+import { toast } from "sonner";
 import logger from "@/lib/logger";
 import authService from "./authService";
 import { useError } from "@/contexts/ErrorHandlerContext";
@@ -20,7 +21,8 @@ const checkOnce = async () => {
  * Shows the app once the server confirms the sign-in. The check runs when the app opens (and
  * after signing in), not on every page change: moving between pages keeps the user signed in.
  * A request that later finds the session gone is handled where it is made.
- * A dropped connection is retried and never signs the user out.
+ * A dropped connection is retried and never signs the user out; with no internet at all the
+ * app opens anyway (for offline files).
  */
 export const AuthWrapper = ({ children }) => {
     const [isAuthenticated, setIsAuthenticated] = useState(null);
@@ -45,6 +47,14 @@ export const AuthWrapper = ({ children }) => {
             }
         }
         if (!result) {
+            // No internet (or the Offline page asked for): open the app anyway, so saved
+            // offline files can be used; other pages show that the server can't be reached
+            if ((typeof navigator !== "undefined" && navigator.onLine === false) || window.location.pathname === "/offline") {
+                setIsAuthenticated(true);
+                if (window.location.pathname !== "/offline")
+                    toast.info("You're offline", { description: "Files you saved offline still open.", action: { label: "Offline files", onClick: () => navigateRef.current("/offline") } });
+                return;
+            }
             // The server didn't answer: keep the sign-in and offer to try again
             showErrorRef.current("Connection Error", "Couldn't reach TeleStore. Check your internet connection and try again.", "network", () => checkAuth());
             return;

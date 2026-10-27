@@ -79,6 +79,20 @@ const ROUTES = {
     ] },
 };
 
+// Notifications for the bell: one unread (a finished transfer), two already read
+const NOTIFICATIONS = [];
+const resetNotifications = () => {
+    NOTIFICATIONS.length = 0;
+    const ago = (min) => new Date(Date.now() - min * 60_000).toISOString().replace(/\.\d+Z$/, "");
+    NOTIFICATIONS.push(
+        { id: "n3", kind: "transfer", title: "Transfer finished", body: "ubuntu-24.04.1-desktop-amd64.iso is saved.", target: { type: "transfers" }, created_at: ago(5), read: false },
+        { id: "n2", kind: "inbox", title: "New file in Telegram Inbox", body: "scan.pdf", target: { type: "folder", path: "/Telegram Inbox" }, created_at: ago(90), read: true },
+        { id: "n1", kind: "sign_in", title: "New sign-in", body: "Chrome on Windows", target: { type: "settings" }, created_at: ago(60 * 30), read: true },
+    );
+};
+resetNotifications();
+const notificationsJson = () => ({ items: NOTIFICATIONS, unread: NOTIFICATIONS.filter((n) => !n.read).length, latest: NOTIFICATIONS[0]?.id || null });
+
 const requests = [];
 const uploadState = { sentOne: false };
 
@@ -175,6 +189,11 @@ const serveMedia = (req, res, name) => {
 
 const mutation = (req, res, url, body) => {
     requests.push({ method: req.method, path: url.pathname, body });
+    if (url.pathname === "/user/notifications/read") {
+        const data = JSON.parse(body || "{}");
+        NOTIFICATIONS.forEach((n) => { if (data.all || (data.ids || []).includes(n.id)) n.read = true; });
+        return send(res, 200, { unread: notificationsJson().unread });
+    }
     if (url.pathname === "/auth/login") {
         return body.includes('"password":"wrong"') ? send(res, 401, { detail: "Incorrect username or password" }) : send(res, 200, { message: "Login successful", username: "admin", auth_token: "test-token" });
     }
@@ -261,6 +280,7 @@ http.createServer((req, res) => {
             if (req.method === "DELETE") {
                 requests.length = 0;
                 resetPlaylists();
+                resetNotifications();
             }
             return send(res, 200, requests);
         }
@@ -271,6 +291,7 @@ http.createServer((req, res) => {
         if (req.method !== "GET" && req.method !== "HEAD") return mutation(req, res, url, body);
         if (ROUTES[url.pathname]) return send(res, 200, ROUTES[url.pathname]);
         if (url.pathname === "/files") return send(res, 200, listFiles(url));
+        if (url.pathname === "/user/notifications") return send(res, 200, notificationsJson());
         if (/^\/files\/(preview|thumbnail)\//.test(url.pathname)) {
             requests.push({ method: req.method, path: url.pathname, body: "" });
             return send(res, 200, PIXEL, "image/png");
@@ -286,6 +307,11 @@ http.createServer((req, res) => {
         }
         const ext = path.extname(url.pathname).toLowerCase();
         if (MEDIA[ext] && !url.pathname.startsWith("/assets/")) return serveMedia(req, res, url.pathname);
+        // Documents and archives: a small stand-in body (saving offline reads it)
+        if (url.pathname.startsWith("/dl/") && /\.(pdf|txt|zip)$/i.test(decodeURIComponent(url.pathname))) {
+            requests.push({ method: req.method, path: url.pathname, body: url.search });
+            return send(res, 200, Buffer.from("TeleStore stand-in file\n".repeat(64)), "application/pdf");
+        }
         const filePath = path.join(DIST, decodeURIComponent(url.pathname));
         if (filePath.startsWith(DIST) && url.pathname !== "/" && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
             const types = { ".js": "text/javascript", ".css": "text/css", ".html": "text/html", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".json": "application/json", ".woff2": "font/woff2", ".mjs": "text/javascript" };

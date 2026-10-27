@@ -1,5 +1,7 @@
 // The right-click / ⋯ menu for an item or for empty space in the file grid.
 import { canAddToPlaylist, requestAddToPlaylist } from "@/features/playlists/playlists";
+import { canSaveOffline, makeAvailableOffline, offlineSupported, removeOffline } from "@/features/offline/offlineStore";
+import { folderPathOf } from "@/features/offline/offlineIndex";
 import { toast } from "sonner";
 import { api, fetchWithTimeout, getApiBaseUrl } from "@/lib/api";
 import { copyStreamUrl } from "@/lib/utils";
@@ -8,7 +10,7 @@ import { ContextMenu } from "../ContextMenu";
 import { isVideoItem } from "../fileTypes";
 import { getItemKey, isItemStarred } from "../lib/fileCardHelpers";
 
-export const GridContextMenu = ({ cloudAccountId, cloudFolderId, contextMenu, currentApiPath, currentPath, handleItemOpen, hasClipboard, isClipboardPasted, isCloudMode, isRestrictedEmptyArea, isTrashMode, isVaultMode, items, onCopy, onCut, onDelete, onDownload, onMoveToHome, onMoveToVault, onNewFolder, onPaste, onRefresh, onRename, onRestoreItem, onSelectionAction, onToggleStar, openDetails, selectedItems, setArchiveInspect, setCompressDialog, setContextMenu, triggerDirectoryUpload, triggerFileUpload }) => {
+export const GridContextMenu = ({ offlineIndex, cloudAccountId, cloudFolderId, contextMenu, currentApiPath, currentPath, handleItemOpen, hasClipboard, isClipboardPasted, isCloudMode, isRestrictedEmptyArea, isTrashMode, isVaultMode, items, onCopy, onCut, onDelete, onDownload, onMoveToHome, onMoveToVault, onNewFolder, onPaste, onRefresh, onRename, onRestoreItem, onSelectionAction, onToggleStar, openDetails, selectedItems, setArchiveInspect, setCompressDialog, setContextMenu, triggerDirectoryUpload, triggerFileUpload }) => {
     // Right-clicking one of several selected items acts on all of them (the menu shows the count)
     const onSelection = Boolean(contextMenu.item && selectedItems.size > 1 && selectedItems.has(getItemKey(contextMenu.item)) && onSelectionAction);
     const forSelection = (id, single) => () => {
@@ -24,7 +26,13 @@ export const GridContextMenu = ({ cloudAccountId, cloudFolderId, contextMenu, cu
     const isVideo = contextMenu.item ? isVideoItem(contextMenu.item) : false;
     const selectedCount = selectedItems.size > 0 ? selectedItems.size : 1;
     // Music and videos (all of the selection when right-clicking one of it) can go in a playlist
-    const addTargets = !contextMenu.item ? [] : (onSelection ? items.filter((it) => selectedItems.has(getItemKey(it))) : [contextMenu.item]).filter(canAddToPlaylist);
+    const targets = !contextMenu.item ? [] : (onSelection ? items.filter((it) => selectedItems.has(getItemKey(it))) : [contextMenu.item]);
+    const addTargets = targets.filter(canAddToPlaylist);
+    // Available offline: offer to save what isn't saved yet, and to remove what is
+    const offlineTargets = offlineSupported() && !isTrashMode && !isCloudMode && !isVaultMode ? targets.filter(canSaveOffline) : [];
+    const isOffline = (it) => (it.type === "folder" ? Boolean(offlineIndex?.folders?.[folderPathOf(it)]) : Boolean(offlineIndex?.files?.[it.id]));
+    const toSave = offlineTargets.filter((it) => !isOffline(it));
+    const toRemove = offlineTargets.filter(isOffline);
     return (<ContextMenu x={contextMenu.x} y={contextMenu.y} itemType={contextMenu.itemType} itemName={contextMenu.itemName} isVideo={isVideo} onCopyStreamUrl={() => {
             if (!contextMenu.item)
                 return;
@@ -100,5 +108,5 @@ export const GridContextMenu = ({ cloudAccountId, cloudFolderId, contextMenu, cu
             }
         }} onCompress={() => {
             setCompressDialog(true);
-        }} isStarred={isItemStarred(contextMenu.item)} onToggleStar={() => contextMenu.item && onToggleStar?.(contextMenu.item)} isTrashMode={isTrashMode || cloudFolderId === "trash" || Boolean(contextMenu.item?.is_trashed)} onRestore={forSelection("restore", (item) => onRestoreItem?.(item))} isCloudMode={isCloudMode} isVirtualFolder={Boolean(contextMenu.item?.is_virtual)} isRestrictedEmptyArea={isRestrictedEmptyArea} onRefresh={onRefresh} onAddToPlaylist={addTargets.length > 0 && !isTrashMode ? () => requestAddToPlaylist(addTargets) : undefined}/>);
+        }} isStarred={isItemStarred(contextMenu.item)} onToggleStar={() => contextMenu.item && onToggleStar?.(contextMenu.item)} isTrashMode={isTrashMode || cloudFolderId === "trash" || Boolean(contextMenu.item?.is_trashed)} onRestore={forSelection("restore", (item) => onRestoreItem?.(item))} isCloudMode={isCloudMode} isVirtualFolder={Boolean(contextMenu.item?.is_virtual)} isRestrictedEmptyArea={isRestrictedEmptyArea} onRefresh={onRefresh} onAddToPlaylist={addTargets.length > 0 && !isTrashMode ? () => requestAddToPlaylist(addTargets) : undefined} onMakeOffline={toSave.length ? () => makeAvailableOffline(toSave) : undefined} onRemoveOffline={toRemove.length ? () => removeOffline(toRemove) : undefined}/>);
 };

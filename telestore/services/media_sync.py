@@ -111,6 +111,8 @@ async def check(doc: dict) -> int:
     if new:
         remote_transfer_manager.enqueue_media(doc["user_id"], {**info, "title": f"{info.get('title') or 'Playlist'} (new)"}, new, doc["choice"], doc["destination"], doc.get("chat_id"))
         logger.info(f"[SYNC] {len(new)} new video(s) from '{info.get('title')}' for user {doc['user_id']}")
+        from telestore.services import event_service
+        event_service.playlist_sync(doc["user_id"], doc.get("title") or info.get("title") or "Playlist", len(new))
     _coll().update_one({"sync_id": doc["sync_id"]}, {
         "$set": {"last_checked": now, "last_new_count": len(new), "last_error": None},
         "$addToSet": {"seen_urls": {"$each": [e["url"] for e in new]}},

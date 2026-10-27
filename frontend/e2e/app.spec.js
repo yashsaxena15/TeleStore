@@ -795,3 +795,79 @@ test.describe("playlists", () => {
         expect(JSON.parse(like.body)).toEqual({ file_id: "f3001", liked: false });
     });
 });
+
+test.describe("notifications", () => {
+    test("the bell shows the unread count; a notification opens Transfers and is marked read", async ({ page, request }) => {
+        await page.goto("/");
+        const bell = page.getByRole("complementary").first().getByRole("button", { name: /^Notifications/ });
+        await expect(bell.getByTestId("notification-badge")).toHaveText("1");
+        await bell.click();
+        await expect(page.getByText("New file in Telegram Inbox")).toBeVisible();
+        await expect(page.getByText("5 min ago")).toBeVisible();
+        await page.getByRole("button", { name: /Transfer finished/ }).click();
+        await expect(page).toHaveURL(/\/transfers$/);
+        await expect.poll(async () => (await mutations(request)).filter((r) => r.path === "/user/notifications/read").map((r) => JSON.parse(r.body))).toEqual([{ ids: ["n3"] }]);
+        await expect(bell.getByTestId("notification-badge")).toHaveCount(0);
+    });
+
+    test("@phone Notifications and Offline are in the More sheet", async ({ page }) => {
+        await page.goto("/");
+        await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "More" }).click();
+        await expect(page.getByRole("button", { name: /^Offline/ })).toBeVisible();
+        await page.getByRole("button", { name: /^Notifications/ }).click();
+        await expect(page.getByRole("button", { name: /Transfer finished/ })).toBeVisible();
+        await page.getByRole("button", { name: "Mark all as read" }).click();
+        await expect(page.getByRole("button", { name: "Mark all as read" })).toBeDisabled();
+    });
+});
+
+test.describe("offline files", () => {
+    test("make a file available offline from its menu, see it on the Offline page, then remove it", async ({ page }) => {
+        await page.goto("/");
+        await row(page, "Q3-report.pdf").click({ button: "right" });
+        await page.getByRole("menuitem", { name: "Make available offline" }).click();
+        await expect(page.getByText("“Q3-report.pdf” is available offline")).toBeVisible();
+        await expect(row(page, "Q3-report.pdf").getByTestId("offline-mark").first()).toBeAttached();
+        // The menu now offers to remove it
+        await row(page, "Q3-report.pdf").click({ button: "right" });
+        await expect(page.getByRole("menuitem", { name: "Remove offline copy" })).toBeVisible();
+        await page.keyboard.press("Escape");
+
+        await page.getByRole("complementary").first().getByRole("button", { name: "Offline" }).click();
+        await expect(page).toHaveURL(/\/offline$/);
+        const list = page.getByRole("list", { name: "Offline files" });
+        await expect(list.getByRole("button", { name: "Open Q3-report.pdf" })).toBeVisible();
+        await expect(page.getByText(/1 file · .* used/)).toBeVisible();
+        // It opens from the copy saved in this browser, not from the server
+        await list.getByRole("button", { name: "Open Q3-report.pdf" }).click();
+        await expect(page.locator("iframe[title='Q3-report.pdf']")).toHaveAttribute("src", /^blob:/);
+        await page.getByRole("button", { name: "Close document reader" }).click();
+        await expect(page.locator("iframe[title='Q3-report.pdf']")).toHaveCount(0);
+        await list.getByRole("button", { name: "Remove Q3-report.pdf" }).click();
+        await expect(page.getByText(/Nothing saved yet/)).toBeVisible();
+    });
+
+    test.describe("without internet", () => {
+        test.use({ serviceWorkers: "allow" });
+        test("the site and the Offline page open with no connection", async ({ page, context }) => {
+            await page.goto("/offline");
+            await expect(page.getByRole("heading", { level: 1, name: "Offline" })).toBeVisible();
+            await page.evaluate(async () => {
+                await navigator.serviceWorker.ready;
+                // Wait until the worker controls the page and has kept the built files
+                for (let i = 0; i < 50 && !navigator.serviceWorker.controller; i++) await new Promise((r) => setTimeout(r, 100));
+                for (let i = 0; i < 50; i++) {
+                    const cache = await caches.open("telestore-shell-v1");
+                    const keys = (await cache.keys()).map((r) => new URL(r.url).pathname);
+                    if (keys.includes("/index.html") && keys.some((k) => /OfflinePage/.test(k))) return;
+                    await new Promise((r) => setTimeout(r, 200));
+                }
+            });
+            await context.setOffline(true);
+            await page.reload();
+            await expect(page.getByRole("heading", { level: 1, name: "Offline" })).toBeVisible({ timeout: 15000 });
+            await expect(page.getByText(/You're offline/)).toBeVisible();
+            await context.setOffline(false);
+        });
+    });
+});

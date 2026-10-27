@@ -1,7 +1,9 @@
 // Opening an item: folders navigate, video and audio go to the player (with the folder's other
 // videos or tracks as a playlist), images to the viewer, documents to the reader, archives to the
-// inspector, anything else downloads. Builds the stream URLs for Telegram and Google Drive files.
+// inspector, anything else downloads. Builds the stream URLs for Telegram and Google Drive files;
+// a file saved offline plays from its copy in this browser instead (faster, and works offline).
 import { api, getApiBaseUrl } from "@/lib/api";
+import { isSavedOffline, offlineUrlSync, prepareOfflineUrls } from "@/features/offline/offlineStore";
 import { getItemKey } from "../lib/fileCardHelpers";
 
 export function createOpenItem({ cloudAccountId, items, lastOpenTimeRef, onDownload, onNavigate, playMedia, setArchiveInspect, setDocumentReader, setImageViewer, setIsSelectionMode, setLastSelectedIndex, setSelectedItems }) {
@@ -10,6 +12,15 @@ const handleItemOpen = (item) => {
     if (now - lastOpenTimeRef.current < 250)
         return;
     lastOpenTimeRef.current = now;
+    // Saved copies need a blob: address first (a moment's work); make them for the whole folder at once
+    const saved = item.type === "folder" ? [] : [item, ...items].filter((it) => !it.is_cloud && isSavedOffline(it.id));
+    if (saved.some((it) => !offlineUrlSync(it.id))) {
+        prepareOfflineUrls(saved).finally(() => openNow(item));
+        return;
+    }
+    openNow(item);
+};
+const openNow = (item) => {
     const ext = (item.extension || item.name.split('.').pop() || '').toLowerCase();
     const PHOTO_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico', 'heic', 'avif', 'tiff'];
     const VIDEO_EXTS = ['mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv', 'm4v', '3gp', 'ts'];
@@ -31,6 +42,14 @@ const handleItemOpen = (item) => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
     const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
     const sep = tokenParam ? '&' : '?';
+    // A Telegram file's stream: the saved offline copy when there is one, else the server
+    const fileUrl = (it) => {
+        const local = offlineUrlSync(it.id);
+        if (local) return local;
+        const fId = it.id ? `&file_id=${encodeURIComponent(it.id)}` : '';
+        const fPath = it.file_path ? `&path=${encodeURIComponent(it.file_path)}` : '';
+        return `${baseUrl ? baseUrl : ''}/dl/${encodeURIComponent(it.name)}${tokenParam}${sep}inline=1${fId}${fPath}`;
+    };
     if (item.type === "folder") {
         setSelectedItems(new Set());
         setLastSelectedIndex(null);
@@ -41,17 +60,8 @@ const handleItemOpen = (item) => {
         const photoItems = items.filter((it) => it.type !== "folder" &&
             (it.fileType === "photo" ||
                 PHOTO_EXTS.includes((it.extension || it.name.split('.').pop() || '').toLowerCase())));
-        const allImages = photoItems.map((it) => {
-            const fId = it.id ? `&file_id=${encodeURIComponent(it.id)}` : '';
-            const fPath = it.file_path ? `&path=${encodeURIComponent(it.file_path)}` : '';
-            return {
-                url: `${baseUrl ? baseUrl : ''}/dl/${encodeURIComponent(it.name)}${tokenParam}${sep}inline=1${fId}${fPath}`,
-                fileName: it.name,
-            };
-        });
+        const allImages = photoItems.map((it) => ({ url: fileUrl(it), fileName: it.name }));
         const currentIdx = allImages.findIndex((img) => img.fileName === item.name);
-        const itemFId = item.id ? `&file_id=${encodeURIComponent(item.id)}` : '';
-        const itemFPath = item.file_path ? `&path=${encodeURIComponent(item.file_path)}` : '';
         if (item.is_cloud) {
             const photoUrl = api.getCloudStreamUrl(cloudAccountId || item.cloud_account_id, item.cloud_file_id || item.id);
             setImageViewer({
@@ -62,7 +72,7 @@ const handleItemOpen = (item) => {
         else {
             setImageViewer({
                 images: allImages.length > 0 ? allImages : [{
-                        url: `${baseUrl ? baseUrl : ''}/dl/${encodeURIComponent(item.name)}${tokenParam}${sep}inline=1${itemFId}${itemFPath}`,
+                        url: fileUrl(item),
                         fileName: item.name,
                     }],
                 initialIndex: Math.max(0, currentIdx),
@@ -76,9 +86,7 @@ const handleItemOpen = (item) => {
             mediaUrl = api.getCloudStreamUrl(cloudAccountId || item.cloud_account_id, item.cloud_file_id || item.id);
         }
         else {
-            const itemFId = item.id ? `&file_id=${encodeURIComponent(item.id)}` : '';
-            const itemFPath = item.file_path ? `&path=${encodeURIComponent(item.file_path)}` : '';
-            mediaUrl = `${baseUrl ? baseUrl : ''}/dl/${encodeURIComponent(item.name)}${tokenParam}${sep}inline=1${itemFId}${itemFPath}`;
+            mediaUrl = fileUrl(item);
         }
         // If audio or video, construct a full playlist of items in current folder/view
         let folderMediaPlaylist;
@@ -96,9 +104,7 @@ const handleItemOpen = (item) => {
                     trackUrl = api.getCloudStreamUrl(cloudAccountId || it.cloud_account_id, it.cloud_file_id || it.id);
                 }
                 else {
-                    const itFId = it.id ? `&file_id=${encodeURIComponent(it.id)}` : '';
-                    const itFPath = it.file_path ? `&path=${encodeURIComponent(it.file_path)}` : '';
-                    trackUrl = `${baseUrl ? baseUrl : ''}/dl/${encodeURIComponent(it.name)}${tokenParam}${sep}inline=1${itFId}${itFPath}`;
+                    trackUrl = fileUrl(it);
                 }
                 return {
                     id: it.id || it.name,
@@ -125,9 +131,7 @@ const handleItemOpen = (item) => {
                     trackUrl = api.getCloudStreamUrl(cloudAccountId || it.cloud_account_id, it.cloud_file_id || it.id);
                 }
                 else {
-                    const itFId = it.id ? `&file_id=${encodeURIComponent(it.id)}` : '';
-                    const itFPath = it.file_path ? `&path=${encodeURIComponent(it.file_path)}` : '';
-                    trackUrl = `${baseUrl ? baseUrl : ''}/dl/${encodeURIComponent(it.name)}${tokenParam}${sep}inline=1${itFId}${itFPath}`;
+                    trackUrl = fileUrl(it);
                 }
                 return {
                     id: it.id || it.name,
@@ -153,9 +157,7 @@ const handleItemOpen = (item) => {
             docUrl = api.getCloudStreamUrl(cloudAccountId || item.cloud_account_id, item.cloud_file_id || item.id);
         }
         else {
-            const itemFId = item.id ? `&file_id=${encodeURIComponent(item.id)}` : '';
-            const itemFPath = item.file_path ? `&path=${encodeURIComponent(item.file_path)}` : '';
-            docUrl = `${baseUrl ? baseUrl : ''}/dl/${encodeURIComponent(item.name)}${tokenParam}${sep}inline=1${itemFId}${itemFPath}`;
+            docUrl = fileUrl(item);
         }
         setDocumentReader({
             url: docUrl,

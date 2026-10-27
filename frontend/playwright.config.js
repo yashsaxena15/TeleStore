@@ -15,6 +15,8 @@ export default defineConfig({
         baseURL: `http://127.0.0.1:${PORT}`,
         trace: "retain-on-failure",
         screenshot: "only-on-failure",
+        // The site's service worker (offline use) stays out of the way except in the test for it
+        serviceWorkers: "block",
     },
     projects: [
         { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } }, grepInvert: /@phone/ },

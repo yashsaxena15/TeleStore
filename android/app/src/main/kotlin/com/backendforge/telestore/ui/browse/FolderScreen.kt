@@ -105,6 +105,10 @@ fun FolderScreen(
     onUpload: ((folderPath: String) -> Unit)? = null,
     onDownload: ((FileItem) -> Unit)? = null,
     offlineIds: Set<String> = emptySet(),
+    /** Folders kept offline (their paths). */
+    offlineFolders: Set<String> = emptySet(),
+    /** Makes a file or folder available offline, or removes its copy; null hides it. */
+    onToggleOffline: ((FileItem) -> Unit)? = null,
     onCopyToDrive: ((FileItem) -> Unit)? = null,
     /** Sends the file to another app (WhatsApp, Gmail…). */
     onShare: ((FileItem) -> Unit)? = null,
@@ -559,6 +563,8 @@ fun FolderScreen(
             onOpenWith = onOpenWith,
             onCompress = { compressItems = listOf(it) },
             onAddToPlaylist = onAddToPlaylist?.let { add -> { item: FileItem -> add(listOf(item)) } },
+            isOffline = if (target.isFolder) FolderPaths.childPath(target) in offlineFolders else target.id in offlineIds,
+            onToggleOffline = onToggleOffline,
             onDismiss = { actionItem = null },
         )
     }

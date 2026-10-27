@@ -43,6 +43,10 @@ data class PhoneTransfer(
     val localUri: String? = null,
     val etag: String? = null,
     val speedBps: Long = 0,
+    /** Kept for offline inside the app (not in Downloads); deleted on sign-out. */
+    val offline: Boolean = false,
+    /** The folder kept offline that brought this file, so it goes when the file leaves that folder. */
+    val offlineFolder: String? = null,
 ) {
     val progress: Float get() = if (size > 0) (done.toFloat() / size).coerceIn(0f, 1f) else 0f
 }
@@ -86,7 +90,8 @@ class TransferStore(context: Context) {
     /** A finished download of this server file, if its local copy still exists. */
     fun offlineCopy(context: Context, fileId: String): Uri? {
         val item = _items.value.lastOrNull { it.fileId == fileId && it.remotePath == null && it.status == TransferStatus.DONE && it.localUri != null } ?: return null
-        val uri = Uri.parse(item.localUri)
+        // A copy inside the app is handed out through the app's FileProvider (players, viewers, other apps)
+        val uri = if (item.offline) OfflineFiles.shareable(context, Uri.parse(item.localUri)) ?: return null else Uri.parse(item.localUri)
         val exists = runCatching { context.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false }.getOrDefault(false)
         return if (exists) uri else null
     }

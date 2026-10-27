@@ -1,5 +1,8 @@
 package com.backendforge.telestore.backup
 
+import com.backendforge.telestore.core.NotificationKind
+import com.backendforge.telestore.core.NotificationTarget
+import com.backendforge.telestore.notify.PhoneNotifications
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -52,7 +55,7 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val settings = store.settings.value
         if (!settings.enabled || container.session.state.value == null) return Result.success()
         if (!PhoneMedia.canRead(applicationContext)) {
-            store.status { it.copy(running = false, message = "Allow TeleStore to see your photos to back them up.") }
+            problem("Allow TeleStore to see your photos to back them up.")
             return Result.success()
         }
         val albums = settings.albums.ifEmpty {
@@ -94,14 +97,23 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             store.status { it.copy(running = false, current = null, message = "Paused · ${todo.size - done} left") }
             throw e
         } catch (e: UnauthorizedException) {
-            store.status { it.copy(running = false, current = null, message = "Signed out. Sign in to continue the backup.") }
+            problem("Signed out. Sign in to continue the backup.")
             Result.success()
         } catch (e: NetworkException) {
             store.status { it.copy(running = false, current = null, message = "Waiting for the connection · ${todo.size - done} left") }
             Result.retry()
         } catch (e: Exception) {
-            store.status { it.copy(running = false, current = null, message = (e as? ApiException)?.message ?: "Backup stopped: ${e.message}") }
+            problem((e as? ApiException)?.message ?: "Backup stopped: ${e.message}")
             Result.retry()
+        }
+    }
+
+    /** Shows the problem in Backup, and as a notification when it's new (not every retry). */
+    private fun problem(message: String) {
+        val before = store.status.value.message
+        store.status { it.copy(running = false, current = null, message = message) }
+        if (message != before) {
+            PhoneNotifications.show(applicationContext, NotificationKind.BACKUP, "Photo backup stopped", message, key = "backup-problem", target = NotificationTarget("backup"))
         }
     }
 

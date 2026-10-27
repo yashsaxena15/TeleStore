@@ -43,6 +43,15 @@ class AppContainer(val context: Context) {
     /** A home-screen widget button that opened the app: "upload", "link", "photos" or "search". */
     val pendingAction = MutableStateFlow<String?>(null)
 
+    /** Where a tapped notification should open ("transfers", "folder", "offline"…), until MainScreen goes there. */
+    val pendingTarget = MutableStateFlow<com.backendforge.telestore.core.NotificationTarget?>(null)
+
+    /** Unread server notifications (the badge on More › Notifications). */
+    val unreadNotifications = MutableStateFlow(0)
+
+    /** Folders kept offline, synced by the background check. */
+    val offlineFolders by lazy { com.backendforge.telestore.transfers.OfflineFolders(context.applicationContext, transfers) }
+
     /** Files fetched to show in a viewer, share or open in another app. */
     val files: FileCache by lazy { FileCache(context.applicationContext, { api() }) { transfers.store.offlineCopy(context, it) } }
 
@@ -68,6 +77,11 @@ class AppContainer(val context: Context) {
                     }
                     files.clear()
                     playlists.clear()
+                    // Offline copies belong to the account; a new sign-in starts its notifications afresh
+                    offlineFolders.clear()
+                    transfers.clearOffline()
+                    settings.lastNotificationSeen = null
+                    unreadNotifications.value = 0
                 }
             }
         }

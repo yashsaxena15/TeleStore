@@ -1,4 +1,4 @@
-import { X, Download, FolderInput, Copy, Scissors, Star, StarOff, Package, ShieldCheck, House, Info, Trash2, RotateCcw, MoreHorizontal, ListPlus } from "lucide-react";
+import { X, CloudOff, HardDriveDownload, Download, FolderInput, Copy, Scissors, Star, StarOff, Package, ShieldCheck, House, Info, Trash2, RotateCcw, MoreHorizontal, ListPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
@@ -10,6 +10,8 @@ const ACTION_META = {
     cut: { label: "Cut", icon: Scissors, hint: "Ctrl+X" },
     star: { label: "Star", icon: Star },
     playlist: { label: "Add to playlist", icon: ListPlus },
+    offline: { label: "Offline", icon: HardDriveDownload },
+    "offline-remove": { label: "Remove offline", icon: CloudOff },
     unstar: { label: "Unstar", icon: StarOff },
     compress: { label: "Compress", icon: Package },
     "to-vault": { label: "To vault", icon: ShieldCheck },
