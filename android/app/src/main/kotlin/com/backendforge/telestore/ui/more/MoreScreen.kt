@@ -215,6 +215,7 @@ fun MoreScreen(
             }
 
             AppearanceSection(container)
+            SecuritySection(container)
             AboutSection(container)
 
             Spacer(modifier = Modifier.height(8.dp))

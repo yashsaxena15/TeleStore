@@ -16,6 +16,9 @@ class PlaybackQueue {
     var photoIndex: Int = 0
         private set
 
+    /** The document or archive being viewed. */
+    var document: FileItem? = null
+
     fun openVideos(items: List<FileItem>, index: Int) {
         videos = items
         videoIndex = index

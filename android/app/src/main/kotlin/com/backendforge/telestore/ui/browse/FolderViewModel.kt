@@ -322,6 +322,21 @@ class FolderViewModel(
         }
     }
 
+    /** Packs [items] into one ZIP in this folder; the server does it, progress shows in Transfers. */
+    fun compress(items: List<FileItem>, zipName: String) {
+        viewModelScope.launch {
+            try {
+                api.compress(items, _state.value.path, zipName)
+                clearSelection()
+                _state.update { it.copy(snackbarMessage = "Making $zipName. Progress is in Transfers.") }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(snackbarMessage = (e as? ApiException)?.message ?: "Couldn't make the ZIP.") }
+            }
+        }
+    }
+
     fun emptyTrash() {
         viewModelScope.launch {
             try {

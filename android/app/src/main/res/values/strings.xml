@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">TeleStore</string>
+    <string name="widget_description">Upload, add a link, open Photos or search, and see your storage.</string>
 </resources>

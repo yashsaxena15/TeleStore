@@ -59,6 +59,29 @@
             </intent-filter>
         </activity>
 
+        <!-- Home-screen widget: quick actions and storage used -->
+        <receiver
+            android:name=".widget.QuickWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_quick_info" />
+        </receiver>
+
+        <!-- Hands a fetched file to another app (Share, Open with) without exposing anything else -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- WorkManager's foreground service, declared for long uploads and downloads (Android 14+) -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"

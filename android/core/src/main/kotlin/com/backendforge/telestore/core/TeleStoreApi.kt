@@ -315,6 +315,30 @@ class TeleStoreApi(
         post(url("transfers/remote/instagram/session/browser"), buildJsonObject { put("sessionid", sessionId.trim()) })
     suspend fun instagramLogout(): InstagramSession = call(Request.Builder().url(url("transfers/remote/instagram/session")).delete().build())
 
+    // ── Archives ────────────────────────────────────────────────────────────────
+    /** What's inside a ZIP, RAR, 7z or TAR. The server reads the archive, so this can take a while. */
+    suspend fun inspectArchive(item: FileItem): ArchiveContents =
+        get(url("archive/inspect").newBuilder().addPathSegment(item.id).build())
+
+    /** Unpacks the archive into [folder] on the server; progress in [archiveTasks]. */
+    suspend fun extractArchive(item: FileItem, folder: String): MessageReply =
+        post(url("archive/extract"), buildJsonObject {
+            put("file_id", item.id)
+            put("target_path", folder)
+        })
+
+    /** Packs [items] into one ZIP saved in [folder]. */
+    suspend fun compress(items: List<FileItem>, folder: String, zipName: String): MessageReply =
+        post(url("archive/compress"), buildJsonObject {
+            put("item_ids", JsonArray(items.map { JsonPrimitive(it.id) }))
+            put("destination_path", folder)
+            put("zip_name", zipName.trim())
+        })
+
+    suspend fun archiveTasks(): ArchiveTasks = get(url("archive/tasks"))
+    suspend fun cancelArchiveTask(id: String): MessageReply =
+        post(url("archive/tasks").newBuilder().addPathSegment(id).addPathSegment("cancel").build(), buildJsonObject { })
+
     // ── Account ─────────────────────────────────────────────────────────────────
     /** How much the account stores, out of its quota. */
     suspend fun storage(): StorageStats = get(url("files/analytics"))

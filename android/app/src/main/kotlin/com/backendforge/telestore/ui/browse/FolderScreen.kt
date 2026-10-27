@@ -1,5 +1,7 @@
 package com.backendforge.telestore.ui.browse
 
+import com.backendforge.telestore.ui.components.CompressDialog
+import androidx.compose.material.icons.filled.FolderZip
 import com.backendforge.telestore.ui.components.rememberHaptics
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
@@ -102,9 +104,14 @@ fun FolderScreen(
     onDownload: ((FileItem) -> Unit)? = null,
     offlineIds: Set<String> = emptySet(),
     onCopyToDrive: ((FileItem) -> Unit)? = null,
+    /** Sends the file to another app (WhatsApp, Gmail…). */
+    onShare: ((FileItem) -> Unit)? = null,
+    /** Opens the file in another app on the phone. */
+    onOpenWith: ((FileItem) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    var compressItems by remember { mutableStateOf<List<FileItem>?>(null) }
     val haptics = rememberHaptics()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -282,6 +289,13 @@ fun FolderScreen(
                             onClick = { folderPickerTarget = selected to FolderPickerMode.COPY },
                             icon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
                             label = { Text("Copy") },
+                            enabled = selected.isNotEmpty(),
+                        )
+                        NavigationBarItem(
+                            selected = false,
+                            onClick = { compressItems = selected },
+                            icon = { Icon(Icons.Default.FolderZip, contentDescription = null) },
+                            label = { Text("ZIP") },
                             enabled = selected.isNotEmpty(),
                         )
                         NavigationBarItem(
@@ -527,7 +541,21 @@ fun FolderScreen(
             onDownload = onDownload,
             onMoveToVault = { vm.moveToVault(it) },
             onCopyToDrive = onCopyToDrive,
+            onShare = onShare,
+            onOpenWith = onOpenWith,
+            onCompress = { compressItems = listOf(it) },
             onDismiss = { actionItem = null },
+        )
+    }
+
+    compressItems?.let { items ->
+        CompressDialog(
+            items = items,
+            onDismiss = { compressItems = null },
+            onConfirm = { name ->
+                compressItems = null
+                vm.compress(items, name)
+            },
         )
     }
 

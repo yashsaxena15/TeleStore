@@ -575,6 +575,8 @@ async def execute_task_compress(task_id: str, payload: Dict[str, Any], manager: 
     4. Uploads archive to Telegram (multi-part split with backpressure if > 1.95 GB).
     """
     item_ids = payload["item_ids"]
+    # The route checked these are the caller's; folders must not pull in other users' files
+    owner_filter = {"owner_id": {"$in": payload["owner_ids"]}} if payload.get("owner_ids") else {}
     destination_path = payload["destination_path"]
     zip_name = payload["zip_name"]
     user_id = payload["user_id"]
@@ -605,11 +607,9 @@ async def execute_task_compress(task_id: str, payload: Dict[str, Any], manager: 
     for item_id in item_ids:
         doc = None
         try:
-            doc = database.Files.find_one({"_id": ObjectId(item_id)})
+            doc = database.Files.find_one({"_id": ObjectId(item_id), **owner_filter})
         except Exception:
             pass
-        if not doc:
-            doc = database.Files.find_one({"$or": [{"file_unique_id": item_id}, {"file_name": item_id}]})
         if not doc:
             continue
 
@@ -621,7 +621,8 @@ async def execute_task_compress(task_id: str, payload: Dict[str, Any], manager: 
             child_files = list(database.Files.find({
                 "file_path": {"$regex": regex_pattern},
                 "file_type": {"$ne": "folder"},
-                "trashed": {"$ne": True}
+                "trashed": {"$ne": True},
+                **owner_filter,
             }))
             for cf in child_files:
                 cf_path = cf.get("file_path", "").lstrip("/")

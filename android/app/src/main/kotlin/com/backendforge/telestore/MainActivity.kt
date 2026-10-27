@@ -1,5 +1,10 @@
 package com.backendforge.telestore
 
+import com.backendforge.telestore.widget.QuickWidget
+import com.backendforge.telestore.security.LockScreen
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
 import android.app.PictureInPictureParams
 import android.content.Intent
 import android.net.Uri
@@ -7,7 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Rational
 import android.graphics.Color
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -26,7 +31,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class MainActivity : ComponentActivity() {
+/** A FragmentActivity (still a ComponentActivity) because the fingerprint prompt needs one. */
+class MainActivity : FragmentActivity() {
     private val _inPictureInPicture = MutableStateFlow(false)
     /** True while the video plays in the small floating window. */
     val inPictureInPicture: StateFlow<Boolean> = _inPictureInPicture.asStateFlow()
@@ -58,10 +64,26 @@ class MainActivity : ComponentActivity() {
                 if (current == null) {
                     SignInScreen(container)
                 } else {
-                    MainScreen(container, current)
+                    val locked by container.appLock.locked.collectAsStateWithLifecycle()
+                    Box(Modifier.fillMaxSize()) {
+                        MainScreen(container, current)
+                        // Covers the app (and takes every touch) until unlocked
+                        if (locked) LockScreen(container.appLock, this@MainActivity)
+                    }
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        (application as TeleStoreApplication).container.appLock.onShown()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Turning the phone or the floating video window isn't leaving the app
+        if (!isChangingConfigurations && !isInPictureInPictureMode) (application as TeleStoreApplication).container.appLock.onHidden()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -71,6 +93,11 @@ class MainActivity : ComponentActivity() {
 
     /** Files shared into TeleStore from another app wait for the user to choose a folder. */
     private fun receiveShared(intent: Intent?) {
+        // A home-screen widget button: Upload, Add link, Photos or Search
+        intent?.action?.takeIf { it.startsWith(QuickWidget.ACTION_PREFIX) }?.let {
+            (application as TeleStoreApplication).container.pendingAction.value = it.removePrefix(QuickWidget.ACTION_PREFIX)
+            return
+        }
         val uris: List<Uri> = when (intent?.action) {
             Intent.ACTION_SEND -> listOfNotNull(IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java))
             Intent.ACTION_SEND_MULTIPLE -> IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java).orEmpty()

@@ -36,6 +36,21 @@ class AppSettings(context: Context) {
         get() = prefs.getBoolean(KEY_HAPTICS, true)
         set(value) = prefs.edit().putBoolean(KEY_HAPTICS, value).apply()
 
+    /** Ask for fingerprint, face or the phone's PIN when coming back to the app. */
+    var appLock: Boolean
+        get() = prefs.getBoolean(KEY_APP_LOCK, false)
+        set(value) = prefs.edit().putBoolean(KEY_APP_LOCK, value).apply()
+
+    /** How long the app may stay in the background before it locks. */
+    var appLockAfterSeconds: Int
+        get() = prefs.getInt(KEY_APP_LOCK_AFTER, 30)
+        set(value) = prefs.edit().putInt(KEY_APP_LOCK_AFTER, value).apply()
+
+    /** Storage used, as last seen (for the home-screen widget). */
+    var lastStorageLine: String?
+        get() = prefs.getString(KEY_STORAGE_LINE, null)
+        set(value) = prefs.edit().putString(KEY_STORAGE_LINE, value).apply()
+
     /** When the app last looked for an update (it checks at most once a day by itself). */
     var lastUpdateCheck: Long
         get() = prefs.getLong(KEY_UPDATE_CHECK, 0)
@@ -47,5 +62,8 @@ class AppSettings(context: Context) {
         const val KEY_BG_PLAY = "video_background_play"
         const val KEY_ONLINE_LYRICS = "online_lyrics"
         const val KEY_HAPTICS = "haptics"
+        const val KEY_APP_LOCK = "app_lock"
+        const val KEY_APP_LOCK_AFTER = "app_lock_after"
+        const val KEY_STORAGE_LINE = "storage_line"
     }
 }
