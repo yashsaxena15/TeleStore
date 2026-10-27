@@ -13,6 +13,7 @@ describe("explorer routes", () => {
         expect(viewFromPathname("/playlists")).toBe("playlists");
         expect(viewFromPathname("/playlists/liked")).toBe("playlists");
         expect(viewFromPathname("/downloads")).toBe("transfers");
+        expect(viewFromPathname("/offline")).toBe("offline");
     });
     it("round-trips folder paths", () => {
         for (const path of [["Home"], ["Home", "Movies"], ["Home", "My Films", "2024"], ["Home", "Telegram Inbox"], ["Private Vault"], ["Private Vault", "Tax"]]) {

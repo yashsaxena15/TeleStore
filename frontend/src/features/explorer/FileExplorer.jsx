@@ -29,6 +29,8 @@ import { createBatchActions } from "./actions/batchActions";
 import { useVaultSession } from "./hooks/useVaultSession";
 import { createItemActions } from "./actions/itemActions";
 import { useExplorerHistory } from "./hooks/useExplorerHistory";
+import { followTarget, useMarkNotificationsRead, useNotificationPoller } from "@/features/notifications/useNotifications";
+import { loadOffline, offlineSupported, syncOfflineFolders } from "@/features/offline/offlineStore";
 
 // Pages fade in (same feel as before, without a motion library)
 const PAGE_CLASS = "flex-1 flex flex-col h-full min-h-0 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300";
@@ -49,6 +51,7 @@ const SettingsContent = lazy(() => import("@/features/settings/SettingsContent")
 const PlaylistsPage = lazy(() => import("@/features/playlists/PlaylistsPage").then((m) => ({ default: m.PlaylistsPage })));
 const AddToPlaylistDialog = lazy(() => import("@/features/playlists/AddToPlaylistDialog").then((m) => ({ default: m.AddToPlaylistDialog })));
 const PhotosPage = lazy(() => import("@/features/photos/PhotosPage").then((m) => ({ default: m.PhotosPage })));
+const OfflinePage = lazy(() => import("@/features/offline/OfflinePage").then((m) => ({ default: m.OfflinePage })));
 const StorageAnalyticsContent = lazy(() => import("@/features/storage/StorageAnalyticsContent").then((m) => ({ default: m.StorageAnalyticsContent })));
 const PanelLoading = () => (<div className="flex flex-1 items-center justify-center p-10 text-sm text-muted-foreground">Loading…</div>);
 export const FileExplorer = () => {
@@ -595,12 +598,26 @@ export const FileExplorer = () => {
         else if (target === 'transfers' || target === 'downloads') {
             navigate('/transfers');
         }
+        else if (target === 'offline') {
+            navigate('/offline');
+        }
         else {
             if (filter)
                 handleFilterChange(filter);
             showFiles();
         }
     };
+    // Notifications: one poller for the bell; a clicked browser pop-up marks its notification read and follows it
+    const markNotificationsRead = useMarkNotificationsRead();
+    useNotificationPoller((n) => {
+        markNotificationsRead([n.id]);
+        followTarget(n.target, handleNavigateView);
+    });
+    // Saved offline folders catch up with the server when the app opens
+    useEffect(() => {
+        if (offlineSupported())
+            loadOffline().then(() => syncOfflineFolders()).catch(() => { });
+    }, []);
     // Places where nothing can be added (uploads, new folders); returns why, or null when allowed
     const newItemBlockedReason = () => {
         if (isInboxMode)
@@ -689,6 +706,10 @@ export const FileExplorer = () => {
           </div>) : view === "playlists" ? (<div key="playlists" className={PAGE_CLASS}>
             <Suspense fallback={<PanelLoading />}>
               <PlaylistsPage />
+            </Suspense>
+          </div>) : view === "offline" ? (<div key="offline" className={PAGE_CLASS}>
+            <Suspense fallback={<PanelLoading />}>
+              <OfflinePage onShowInFolder={openFolderPath}/>
             </Suspense>
           </div>) : view === "photos" ? (<div key="photos" className={PAGE_CLASS}>
             <Suspense fallback={<PanelLoading />}>

@@ -1,8 +1,11 @@
 import { useState } from "react";
-import { Folder, Images, Inbox, ListMusic, ArrowUpDown, LayoutGrid, Plus, Star, ShieldCheck, Trash2, HardDrive, Cloud, User, Settings, Users, Laptop, LogOut } from "lucide-react";
+import { Bell, Folder, HardDriveDownload, Images, Inbox, ListMusic, ArrowUpDown, LayoutGrid, Plus, Star, ShieldCheck, Trash2, HardDrive, Cloud, User, Settings, Users, Laptop, LogOut } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useTransferManager } from "@/features/transfers/useTransferManager";
 import { useCloudAccounts, useIsOwner, useUserProfile, displayName } from "@/hooks/useShellData";
+import { NotificationsPanel } from "@/features/notifications/NotificationsPanel";
+import { useNotifications } from "@/features/notifications/useNotifications";
+import { badgeText } from "@/features/notifications/notificationHelpers";
 import { NewMenu } from "./NewMenu";
 
 const Tab = ({ icon: Icon, label, active, onClick, badge }) => (<button onClick={onClick} className={`relative flex flex-col items-center justify-center gap-1 text-[10.5px] ${active ? "text-foreground" : "text-muted-foreground"}`} aria-current={active ? "page" : undefined}>
@@ -20,6 +23,8 @@ const SheetRow = ({ icon: Icon, label, onClick, danger, hint }) => (<button onCl
 // Phone navigation: bottom tabs, a + button for the New menu, and a More sheet.
 export const MobileNav = ({ selectedFilter, activeView, onNavigateView, onAction }) => {
     const [moreOpen, setMoreOpen] = useState(false);
+    const [notificationsOpen, setNotificationsOpen] = useState(false);
+    const { unread } = useNotifications();
     const { totalActiveCount } = useTransferManager();
     const cloudAccounts = useCloudAccounts();
     const isOwner = useIsOwner();
@@ -41,7 +46,7 @@ export const MobileNav = ({ selectedFilter, activeView, onNavigateView, onAction
           </NewMenu>
         </div>
         <Tab icon={ArrowUpDown} label="Transfers" active={activeView === "transfers"} onClick={() => go("transfers")} badge={totalActiveCount}/>
-        <Tab icon={LayoutGrid} label="More" active={moreActive} onClick={() => setMoreOpen(true)}/>
+        <Tab icon={LayoutGrid} label="More" active={moreActive} onClick={() => setMoreOpen(true)} badge={unread}/>
       </nav>
 
       <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
@@ -50,8 +55,10 @@ export const MobileNav = ({ selectedFilter, activeView, onNavigateView, onAction
             <SheetTitle className="text-base">{displayName(profile)}</SheetTitle>
           </SheetHeader>
           <div className="grid gap-0.5">
+            <SheetRow icon={Bell} label="Notifications" hint={badgeText(unread) ? `${badgeText(unread)} new` : undefined} onClick={() => { setMoreOpen(false); setNotificationsOpen(true); }}/>
             <SheetRow icon={Images} label="Photos" onClick={() => go("photos")}/>
             <SheetRow icon={ListMusic} label="Playlists" onClick={() => go("playlists")}/>
+            <SheetRow icon={HardDriveDownload} label="Offline" onClick={() => go("offline")}/>
             <SheetRow icon={Star} label="Starred" onClick={() => go("files", "starred")}/>
             <SheetRow icon={ShieldCheck} label="Private Vault" onClick={() => go("files", "vault")}/>
             <SheetRow icon={Trash2} label="Trash" onClick={() => go("files", "trash")}/>
@@ -70,6 +77,15 @@ export const MobileNav = ({ selectedFilter, activeView, onNavigateView, onAction
             <SheetRow icon={Laptop} label="Mount as drive (WebDAV)" onClick={() => act("webdav")}/>
             <SheetRow icon={LogOut} label="Log out" danger onClick={() => act("logout")}/>
           </div>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={notificationsOpen} onOpenChange={setNotificationsOpen}>
+        <SheetContent side="bottom" className="rounded-t-2xl max-h-[85vh] p-0 pb-[env(safe-area-inset-bottom,0px)] overflow-hidden flex flex-col" aria-describedby={undefined}>
+          <SheetHeader className="sr-only">
+            <SheetTitle>Notifications</SheetTitle>
+          </SheetHeader>
+          <NotificationsPanel inSheet onNavigateView={onNavigateView} onDone={() => setNotificationsOpen(false)}/>
         </SheetContent>
       </Sheet>
     </>);

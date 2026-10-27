@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { ArrowUpDown, HardDrive, Images, ListMusic, User, Settings, Users, Cloud, RefreshCw, Laptop, Moon, Sun, Monitor, LogOut, Plug, ShieldCheck } from "lucide-react";
+import { ArrowUpDown, HardDrive, HardDriveDownload, Images, ListMusic, User, Settings, Users, Cloud, RefreshCw, Laptop, Moon, Sun, Monitor, LogOut, Plug, ShieldCheck } from "lucide-react";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator, CommandShortcut } from "@/components/ui/command";
 import { useCloudAccounts, useIsOwner } from "@/hooks/useShellData";
 import { setTheme } from "@/lib/theme";
@@ -36,6 +36,7 @@ export const CommandPalette = ({ open, onOpenChange, onNavigateView, onAction })
           <Item icon={ArrowUpDown} label="Transfers" keywords={["downloads", "uploads", "leech"]} onSelect={() => onNavigateView("transfers")}/>
           <Item icon={ListMusic} label="Playlists" keywords={["music", "liked", "songs", "queue"]} onSelect={() => onNavigateView("playlists")}/>
           <Item icon={Images} label="Photos" keywords={["gallery", "backup", "camera", "pictures"]} onSelect={() => onNavigateView("photos")}/>
+          <Item icon={HardDriveDownload} label="Offline files" keywords={["available offline", "saved", "no internet"]} onSelect={() => onNavigateView("offline")}/>
           <Item icon={HardDrive} label="Storage" keywords={["analytics", "usage", "cache"]} onSelect={() => onNavigateView("storage")}/>
           <Item icon={User} label="Account" keywords={["profile", "telegram", "password"]} onSelect={() => onNavigateView("settings", "account")}/>
           <Item icon={Settings} label="Settings" keywords={["preferences"]} onSelect={() => onNavigateView("settings")}/>

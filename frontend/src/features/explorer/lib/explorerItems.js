@@ -60,10 +60,12 @@ export function getSection({ isTrash = false, isVault = false, isInbox = false, 
  * Selection bar actions for a section, in display order.
  * `primary` actions stay visible on phones; the rest go into the ⋯ menu there.
  */
-export function getSelectionActions(section, { count = 0, allStarred = false, playable = false } = {}) {
+export function getSelectionActions(section, { count = 0, allStarred = false, playable = false, offline = null } = {}) {
     const star = { id: allStarred ? "unstar" : "star", primary: false };
     // Only music and videos selected: they can go in a playlist
     const playlist = playable ? [{ id: "playlist", primary: false }] : [];
+    // offline: "save" (some not saved yet) or "remove" (all saved); null when the browser can't
+    const offlineAction = offline === "save" ? [{ id: "offline", primary: false }] : offline === "remove" ? [{ id: "offline-remove", primary: false }] : [];
     const details = count === 1 ? [{ id: "details", primary: false }] : [];
     switch (section) {
         case "trash":
@@ -74,11 +76,11 @@ export function getSelectionActions(section, { count = 0, allStarred = false, pl
         case "vault":
             return [{ id: "download", primary: true }, { id: "move-to", primary: true }, { id: "to-home", primary: false }, ...details, { id: "delete", primary: true }];
         case "starred":
-            return [{ id: "download", primary: true }, { id: "move-to", primary: true }, { id: "unstar", primary: false }, ...playlist, { id: "compress", primary: false }, ...details, { id: "delete", primary: true }];
+            return [{ id: "download", primary: true }, { id: "move-to", primary: true }, { id: "unstar", primary: false }, ...playlist, ...offlineAction, { id: "compress", primary: false }, ...details, { id: "delete", primary: true }];
         case "drive":
             return [{ id: "download", primary: true }, { id: "copy", primary: true }, { id: "cut", primary: false }, star, ...details, { id: "delete", primary: true }];
         default:
-            return [{ id: "download", primary: true }, { id: "move-to", primary: true }, { id: "copy", primary: false }, { id: "cut", primary: false }, star, ...playlist, { id: "compress", primary: false }, { id: "to-vault", primary: false }, ...details, { id: "delete", primary: true }];
+            return [{ id: "download", primary: true }, { id: "move-to", primary: true }, { id: "copy", primary: false }, { id: "cut", primary: false }, star, ...playlist, ...offlineAction, { id: "compress", primary: false }, { id: "to-vault", primary: false }, ...details, { id: "delete", primary: true }];
     }
 }
 

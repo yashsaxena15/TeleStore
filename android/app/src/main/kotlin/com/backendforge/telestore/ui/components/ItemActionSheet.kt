@@ -1,5 +1,7 @@
 package com.backendforge.telestore.ui.components
 
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -72,6 +74,9 @@ fun ItemActionSheet(
     onCompress: ((FileItem) -> Unit)? = null,
     /** Music and videos: opens "Add to playlist". */
     onAddToPlaylist: ((FileItem) -> Unit)? = null,
+    /** Kept on this phone already (file or folder): the row then removes the copy. */
+    isOffline: Boolean = false,
+    onToggleOffline: ((FileItem) -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -183,6 +188,13 @@ fun ItemActionSheet(
                         label = "Info",
                         onClick = { onDismiss(); onInfo(item) },
                     )
+                    if (onToggleOffline != null && !item.isVault) {
+                        ActionRow(
+                            icon = if (isOffline) Icons.Default.CloudOff else Icons.Default.CloudDownload,
+                            label = if (isOffline) "Remove offline copy" else "Make available offline",
+                            onClick = { onDismiss(); onToggleOffline(item) },
+                        )
+                    }
                     if (onAddToPlaylist != null && PlaylistStore.canAdd(item)) {
                         ActionRow(
                             icon = Icons.AutoMirrored.Filled.PlaylistAdd,

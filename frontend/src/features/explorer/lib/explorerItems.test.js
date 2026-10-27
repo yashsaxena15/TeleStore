@@ -54,6 +54,12 @@ describe("getSelectionActions", () => {
         expect(ids(getSelectionActions("home", { count: 2, playable: true }))).toContain("playlist");
         expect(ids(getSelectionActions("trash", { count: 2, playable: true }))).not.toContain("playlist");
     });
+    it("offers Offline in Home and Starred only, and Remove offline when all are saved", () => {
+        expect(ids(getSelectionActions("home", { count: 2, offline: "save" }))).toContain("offline");
+        expect(ids(getSelectionActions("starred", { count: 2, offline: "remove" }))).toContain("offline-remove");
+        expect(ids(getSelectionActions("vault", { count: 2, offline: "save" }))).not.toContain("offline");
+        expect(ids(getSelectionActions("drive", { count: 2, offline: "save" }))).not.toContain("offline");
+    });
     it("shows details only for a single item and unstar when all are starred", () => {
         const a = ids(getSelectionActions("home", { count: 1, allStarred: true }));
         expect(a).toContain("details");

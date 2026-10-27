@@ -195,6 +195,8 @@ async def auto_channel_file_listener(client: Client, message: Message):
                 file_path="/Telegram Inbox",
                 owner_id=owner_id
             )
+            from telestore.services import event_service
+            event_service.inbox_file(owner_id, media_info["file_name"], chat_id, msg_id)
     except Exception as e:
         logger.error(f"[CHANNEL_LISTENER] Error in auto_channel_file_listener: {e}", exc_info=True)
 

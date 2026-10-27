@@ -532,6 +532,38 @@ class TeleStoreApi(
 
     private fun fileIds(items: List<FileItem>) = kotlinx.serialization.json.JsonArray(items.map { kotlinx.serialization.json.JsonPrimitive(it.id) })
 
+    // ── Notifications ───────────────────────────────────────────────────────────
+    /** The newest notifications, or with [after] only those newer than that id. */
+    suspend fun notifications(after: String? = null, limit: Int = 30): NotificationList = get(
+        url("user/notifications").newBuilder()
+            .apply { after?.let { addQueryParameter("after", it) } }
+            .addQueryParameter("limit", limit.coerceIn(1, 100).toString())
+            .build()
+    )
+
+    /** Marks [ids] read, or every one with [all]; returns how many are still unread. */
+    suspend fun markNotificationsRead(ids: List<String> = emptyList(), all: Boolean = false): Int = post<UnreadReply>(url("user/notifications/read"), buildJsonObject {
+        put("ids", kotlinx.serialization.json.JsonArray(ids.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+        put("all", all)
+    }).unread
+
+    /** Every file in [folderPath] and its subfolders (for folders kept offline). */
+    suspend fun filesUnder(folderPath: String, max: Int = 5000): List<FileItem> {
+        val found = mutableListOf<FileItem>()
+        val folders = ArrayDeque(listOf(folderPath))
+        while (folders.isNotEmpty() && found.size < max) {
+            val path = folders.removeFirst()
+            var page = 1
+            while (true) {
+                val result = listFiles(path, page = page, pageSize = 500)
+                result.files.forEach { if (it.isFolder) folders += FolderPaths.childPath(it) else found += it }
+                if (result.pagination?.hasNext != true) break
+                page++
+            }
+        }
+        return found.take(max)
+    }
+
     // ── Plumbing ────────────────────────────────────────────────────────────────
     fun url(path: String): HttpUrl = baseUrl.newBuilder().addPathSegments(path).build()
 

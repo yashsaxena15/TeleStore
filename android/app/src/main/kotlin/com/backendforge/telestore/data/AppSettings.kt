@@ -56,7 +56,31 @@ class AppSettings(context: Context) {
         get() = prefs.getLong(KEY_UPDATE_CHECK, 0)
         set(value) = prefs.edit().putLong(KEY_UPDATE_CHECK, value).apply()
 
+    private val _notificationsOff = MutableStateFlow(prefs.getStringSet(KEY_NOTIFICATIONS_OFF, null)?.toSet() ?: emptySet())
+    /** Notification kinds (NotificationKind.wire) the user switched off. */
+    val notificationsOffFlow: StateFlow<Set<String>> = _notificationsOff.asStateFlow()
+    val notificationsOff: Set<String> get() = _notificationsOff.value
+
+    fun setNotification(kind: String, on: Boolean) {
+        val next = if (on) notificationsOff - kind else notificationsOff + kind
+        prefs.edit().putStringSet(KEY_NOTIFICATIONS_OFF, next).apply()
+        _notificationsOff.value = next
+    }
+
+    /** The newest server notification already shown (or skipped); null before the first check. */
+    var lastNotificationSeen: String?
+        get() = prefs.getString(KEY_NOTIFICATION_SEEN, null)
+        set(value) = prefs.edit().putString(KEY_NOTIFICATION_SEEN, value).apply()
+
+    /** When the phone last warned about low free space (at most once a day). */
+    var lastLowSpaceWarning: Long
+        get() = prefs.getLong(KEY_LOW_SPACE, 0)
+        set(value) = prefs.edit().putLong(KEY_LOW_SPACE, value).apply()
+
     private companion object {
+        const val KEY_NOTIFICATIONS_OFF = "notifications_off"
+        const val KEY_NOTIFICATION_SEEN = "notification_seen"
+        const val KEY_LOW_SPACE = "low_space_warning"
         const val KEY_THEME = "theme"
         const val KEY_UPDATE_CHECK = "last_update_check"
         const val KEY_BG_PLAY = "video_background_play"

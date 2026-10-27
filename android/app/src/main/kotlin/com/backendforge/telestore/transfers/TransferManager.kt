@@ -46,6 +46,36 @@ class TransferManager(private val context: Context) {
         enqueue(transfer)
     }
 
+    /**
+     * Keeps [items] on the phone for offline use (inside the app, not in Downloads); [folder] is the
+     * folder kept offline that they belong to. Files already kept are skipped. Returns how many were queued.
+     */
+    fun saveOffline(items: List<FileItem>, folder: String? = null): Int {
+        val kept = store.items.value.filter { it.offline && (it.status == TransferStatus.DONE || !it.status.finished) }.mapNotNull { it.fileId }.toSet()
+        val transfers = items.filter { !it.isFolder && it.id !in kept }.map {
+            PhoneTransfer(direction = Direction.DOWNLOAD, name = it.name, size = it.size ?: 0, fileId = it.id, offline = true, offlineFolder = folder)
+        }
+        store.add(transfers)
+        transfers.forEach { enqueue(it) }
+        return transfers.size
+    }
+
+    /** Deletes the offline copies of these server files (and stops ones still downloading). */
+    fun removeOffline(fileIds: Set<String>) {
+        val rows = store.items.value.filter { it.offline && it.fileId in fileIds }
+        rows.forEach { row ->
+            work.cancelUniqueWork(workName(row.id))
+            row.localUri?.let { OfflineFiles.delete(Uri.parse(it)) }
+        }
+        store.remove(rows.map { it.id }.toSet())
+    }
+
+    /** Every offline copy goes (signing out). */
+    fun clearOffline() {
+        removeOffline(store.items.value.filter { it.offline }.mapNotNull { it.fileId }.toSet())
+        OfflineFiles.clear(context)
+    }
+
     /** Any file the server offers at [remotePath] (e.g. a Google Drive file it fetches for us). */
     fun downloadRemote(name: String, size: Long, remotePath: String) {
         val transfer = PhoneTransfer(direction = Direction.DOWNLOAD, name = name, size = size, remotePath = remotePath)
@@ -85,6 +115,8 @@ class TransferManager(private val context: Context) {
         if (t.direction == Direction.DOWNLOAD && t.status != TransferStatus.DONE) {
             t.localUri?.let { DownloadFiles.delete(context, Uri.parse(it)) }
         }
+        // A cancelled offline save leaves nothing behind
+        if (t.offline) store.remove(setOf(id))
     }
 
     /** Removes finished rows from the list (downloaded files stay in Downloads). */

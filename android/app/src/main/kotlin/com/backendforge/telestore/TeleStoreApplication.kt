@@ -18,6 +18,9 @@ class TeleStoreApplication : Application(), SingletonImageLoader.Factory {
         CrashReporter.install(this)
         container = AppContainer(this)
         TransferNotifications.createChannel(this)
+        com.backendforge.telestore.notify.PhoneNotifications.createChannels(this)
+        // Server notifications, offline folders and the low-space warning, every 15 minutes
+        com.backendforge.telestore.notify.CheckWorker.schedule(this)
         // A vault file left from the last run (the app was closed while it was open)
         container.files.forgetVault()
         // Keep the photo backup scheduled (after an update or a restart)

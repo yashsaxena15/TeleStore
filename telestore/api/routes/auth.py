@@ -1,5 +1,6 @@
 # telestore/api/routes/auth.py
 
+from telestore.services import event_service
 from fastapi import APIRouter, Request, HTTPException, status
 from pydantic import BaseModel
 import secrets
@@ -54,6 +55,7 @@ async def login_post_route(request: Request, login_data: LoginRequest):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNT_DISABLED)
     _start_session(request, account, "local")
     logger.info(f"Login successful for user: {account}")
+    event_service.sign_in(account, request.headers.get("user-agent", ""), login_data.device)
     return {"message": "Login successful", "username": account, "auth_token": _issue_token(account, "local", user_data, login_data.device)}
 
 
@@ -122,6 +124,7 @@ async def google_login_route(request: Request, login_data: GoogleLoginRequest):
     if not account_flags(account, user_data)[0]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNT_DISABLED)
     _start_session(request, account, "google", user_email=user_info["email"], user_picture=user_info["picture"])
+    event_service.sign_in(account, request.headers.get("user-agent", ""), login_data.device, method="google")
     return {"message": "Login successful", "user": {**user_info, "username": account}, "auth_token": _issue_token(account, "google", user_data, login_data.device)}
 
 

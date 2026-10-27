@@ -7,6 +7,7 @@ import shutil
 import asyncio
 import secrets
 import threading
+from telestore.services import event_service
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
 import urllib.parse
@@ -522,6 +523,7 @@ class RemoteTransferManager:
                         "updated_at": datetime.now(timezone.utc)
                     }}
                 )
+                event_service.task_finished(disc_task_id)
         except Exception as e:
             logger.error(f"[ASYNC_DISCOVERY] Failed to resolve GDrive folder: {e}", exc_info=True)
             err_msg = str(e)
@@ -536,6 +538,7 @@ class RemoteTransferManager:
                     "updated_at": datetime.now(timezone.utc)
                 }}
             )
+            event_service.task_finished(disc_task_id)
         finally:
             shutil.rmtree(resolve_output_dir, ignore_errors=True)
 
@@ -1407,6 +1410,7 @@ class RemoteTransferManager:
                 }
             }
         )
+        event_service.task_finished(task_id)
 
         logger.info(f"[MULTI_RANGE] Part {part_index}/{total_parts} for '{filename}' completed locally on master-vm1")
         if group_id:
@@ -2255,6 +2259,9 @@ class RemoteTransferManager:
             coll.update_one({"task_id": task_id}, {"$set": updates})
         except Exception as e:
             logger.warning(f"Failed to update remote transfer {task_id}: {e}")
+            return
+        if updates.get("status") in ("completed", "failed"):
+            event_service.task_finished(task_id)
 
     def cancel_task(self, task_id: str, user_id: str) -> bool:
         coll = get_remote_db()["RemoteTransfers"]

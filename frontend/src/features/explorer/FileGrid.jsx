@@ -10,6 +10,8 @@ import { IndexChatDialog } from "@/features/explorer/dialogs/IndexChatDialog"; /
 import { FolderPickerModal } from "@/features/explorer/dialogs/FolderPickerModal";
 import { SelectionBar } from "./SelectionBar";
 import { canAddToPlaylist, requestAddToPlaylist } from "@/features/playlists/playlists";
+import { canSaveOffline, makeAvailableOffline, offlineSupported, removeOffline, useOfflineIndex } from "@/features/offline/offlineStore";
+import { folderPathOf } from "@/features/offline/offlineIndex";
 import { GridTile, ListHeader, ListRow, GRID_CLASS } from "./items/FileItems";
 import { VirtualItems } from "./items/VirtualItems";
 import { shouldVirtualize } from "./lib/virtualLayout";
@@ -49,6 +51,8 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
     const isStarredView = currentFolder === "Starred" || currentApiPath === "/starred";
     const section = getSection({ isTrash: Boolean(isTrashMode || cloudFolderId === "trash"), isVault: isVaultMode, isInbox: isEffectiveInboxMode, isStarred: isStarredView, isCloud: isCloudMode });
     const [contextMenu, setContextMenu] = useState(null);
+    const offlineIndex = useOfflineIndex();
+    const isOffline = (it) => (it.type === "folder" ? Boolean(offlineIndex.folders[folderPathOf(it)]) : Boolean(it.id && offlineIndex.files[it.id]));
     const [draggedItem, setDraggedItem] = useState(null);
     const [imageViewer, setImageViewer] = useState(null);
     const [documentReader, setDocumentReader] = useState(null);
@@ -449,6 +453,11 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             setBatchBusy(false);
         }
     };
+    // The selection bar's offline action: save what isn't saved, or remove when all of it is
+    const offlineChoice = () => {
+        if (!offlineSupported() || isCloudMode || !selectedList.length || !selectedList.every(canSaveOffline)) return null;
+        return selectedList.every(isOffline) ? "remove" : "save";
+    };
     const handleSelectionAction = (id) => {
         const list = selectedList;
         switch (id) {
@@ -461,6 +470,8 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             case "unstar": return runBatch((l) => onBatch.setStarred?.(l, false), list);
             case "compress": return setCompressDialog(true);
             case "playlist": return requestAddToPlaylist(list);
+            case "offline": return makeAvailableOffline(list.filter((it) => !isOffline(it)));
+            case "offline-remove": return removeOffline(list);
             case "to-vault": return runBatch(onBatch.toVault, list);
             case "to-home": return runBatch(onBatch.toHome, list);
             case "restore": return runBatch(onBatch.restore, list);
@@ -470,7 +481,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             default: return undefined;
         }
     };
-    const selectionActions = getSelectionActions(section, { count: selectedList.length, allStarred: selectedList.length > 0 && selectedList.every(isItemStarred), playable: selectedList.length > 0 && selectedList.every(canAddToPlaylist) });
+    const selectionActions = getSelectionActions(section, { count: selectedList.length, allStarred: selectedList.length > 0 && selectedList.every(isItemStarred), playable: selectedList.length > 0 && selectedList.every(canAddToPlaylist), offline: offlineChoice() });
     const locationPath = currentApiPath || (currentPath && currentPath.length > 0 ? `/${currentPath.join("/")}` : "/Home");
     const pickerStartPath = /^\/(Home|Vault)(\/|$)/.test(locationPath) ? locationPath : "/Home";
     // Keep stateRef fresh for capture-phase keyboard navigation
@@ -594,6 +605,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             isFocused: index === focusedIndex,
             isDropTarget: Boolean(item.type === "folder" && draggedItem && draggedItem.name !== item.name),
             starred: isItemStarred(item),
+            offline: !isCloudMode && isOffline(item),
         };
     };
     // Focus, keyboard, drag and drop, touch and click wiring for one item
@@ -768,7 +780,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
       </div>
 
       {/* Context Menu */}
-      {contextMenu && <GridContextMenu onSelectionAction={handleSelectionAction} cloudAccountId={cloudAccountId} cloudFolderId={cloudFolderId} contextMenu={contextMenu} currentApiPath={currentApiPath} currentPath={currentPath} handleItemOpen={handleItemOpen} hasClipboard={hasClipboard} isClipboardPasted={isClipboardPasted} isCloudMode={isCloudMode} isRestrictedEmptyArea={isRestrictedEmptyArea} isTrashMode={isTrashMode} isVaultMode={isVaultMode} items={items} onCopy={onCopy} onCut={onCut} onDelete={onDelete} onDownload={onDownload} onMoveToHome={onMoveToHome} onMoveToVault={onMoveToVault} onNewFolder={onNewFolder} onPaste={onPaste} onRefresh={onRefresh} onRename={onRename} onRestoreItem={onRestoreItem} onToggleStar={onToggleStar} openDetails={openDetails} selectedItems={selectedItems} setArchiveInspect={setArchiveInspect} setCompressDialog={setCompressDialog} setContextMenu={setContextMenu} triggerDirectoryUpload={triggerDirectoryUpload} triggerFileUpload={triggerFileUpload}/>}
+      {contextMenu && <GridContextMenu offlineIndex={offlineIndex} onSelectionAction={handleSelectionAction} cloudAccountId={cloudAccountId} cloudFolderId={cloudFolderId} contextMenu={contextMenu} currentApiPath={currentApiPath} currentPath={currentPath} handleItemOpen={handleItemOpen} hasClipboard={hasClipboard} isClipboardPasted={isClipboardPasted} isCloudMode={isCloudMode} isRestrictedEmptyArea={isRestrictedEmptyArea} isTrashMode={isTrashMode} isVaultMode={isVaultMode} items={items} onCopy={onCopy} onCut={onCut} onDelete={onDelete} onDownload={onDownload} onMoveToHome={onMoveToHome} onMoveToVault={onMoveToVault} onNewFolder={onNewFolder} onPaste={onPaste} onRefresh={onRefresh} onRename={onRename} onRestoreItem={onRestoreItem} onToggleStar={onToggleStar} openDetails={openDetails} selectedItems={selectedItems} setArchiveInspect={setArchiveInspect} setCompressDialog={setCompressDialog} setContextMenu={setContextMenu} triggerDirectoryUpload={triggerDirectoryUpload} triggerFileUpload={triggerFileUpload}/>}
 
       {/* Image Viewer */}
       <Suspense fallback={null}>

@@ -10,7 +10,11 @@ import com.backendforge.telestore.core.ApiException
 import com.backendforge.telestore.core.ChunkedUploader
 import com.backendforge.telestore.core.NetworkException
 import com.backendforge.telestore.core.ResumableDownloader
+import com.backendforge.telestore.core.NotificationKind
+import com.backendforge.telestore.core.NotificationTarget
+import com.backendforge.telestore.core.OfflineSync
 import com.backendforge.telestore.core.UnauthorizedException
+import com.backendforge.telestore.notify.PhoneNotifications
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -42,6 +46,7 @@ abstract class TransferWorker(context: Context, params: WorkerParameters) : Coro
                 val current = store.get(transferId) ?: return@withPermit
                 tracked { run(current) }
             }
+            store.get(transferId)?.takeIf { it.status == TransferStatus.DONE }?.let { finished(it, failed = false) }
             Result.success()
         } catch (e: CancellationException) {
             // Paused or cancelled by the user (already recorded), or stopped by Android: then it runs again later
@@ -64,7 +69,31 @@ abstract class TransferWorker(context: Context, params: WorkerParameters) : Coro
 
     private fun fail(message: String): Result {
         store.update(transferId) { it.copy(status = TransferStatus.FAILED, error = message, speedBps = 0) }
+        store.get(transferId)?.let { finished(it, failed = true) }
         return Result.failure()
+    }
+
+    /** "Uploaded", "Downloaded", "Available offline" or what went wrong, as a phone notification. */
+    private fun finished(t: PhoneTransfer, failed: Boolean) {
+        val kind = if (t.offline) NotificationKind.OFFLINE else NotificationKind.PHONE_TRANSFERS
+        // A folder kept offline brings many files: one quiet line per file would be too much
+        if (t.offlineFolder != null && !failed) return
+        val title = when {
+            failed && t.offline -> "Couldn't save for offline"
+            failed && t.direction == Direction.UPLOAD -> "Upload failed"
+            failed -> "Download failed"
+            t.offline -> "Available offline"
+            t.direction == Direction.UPLOAD -> "Uploaded"
+            else -> "Downloaded"
+        }
+        val body = if (failed) "${t.name}: ${t.error ?: "something went wrong"}" else t.name
+        val target = when {
+            failed -> NotificationTarget("transfers")
+            t.offline -> NotificationTarget("offline")
+            t.direction == Direction.UPLOAD -> NotificationTarget("folder", path = t.folder)
+            else -> NotificationTarget("transfers")
+        }
+        PhoneNotifications.show(applicationContext, kind, title, body, key = "transfer-${t.id}", target = target)
     }
 
     /**
@@ -138,7 +167,13 @@ class DownloadWorker(context: Context, params: WorkerParameters) : TransferWorke
             else -> null
         } ?: throw ApiException(0, "Nothing to download.")
 
-        val localUri = transfer.localUri?.let(Uri::parse) ?: DownloadFiles.create(applicationContext, transfer.name, mimeOf(transfer.name)).also { created ->
+        if (transfer.offline && !OfflineSync.fits((transfer.size - transfer.done).coerceAtLeast(0), OfflineFiles.freeBytes(applicationContext))) {
+            throw ApiException(0, "Not enough space on this phone.")
+        }
+        val localUri = transfer.localUri?.let(Uri::parse) ?: (
+            if (transfer.offline) OfflineFiles.create(applicationContext, transfer.fileId ?: transfer.id, transfer.name)
+            else DownloadFiles.create(applicationContext, transfer.name, mimeOf(transfer.name))
+        ).also { created ->
             store.update(transferId) { it.copy(localUri = created.toString()) }
         }
         val result = ResumableDownloader(api.http).download(
@@ -149,7 +184,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : TransferWorke
             onEtag = { tag -> store.update(transferId) { it.copy(etag = tag) } },
         )
         store.update(transferId) { it.copy(etag = result.etag) }
-        DownloadFiles.publish(applicationContext, localUri)
+        if (!transfer.offline) DownloadFiles.publish(applicationContext, localUri)
         store.update(transferId) { it.copy(status = TransferStatus.DONE, done = result.totalBytes, size = result.totalBytes, speedBps = 0) }
     }
 

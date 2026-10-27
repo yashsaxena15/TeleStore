@@ -1,5 +1,6 @@
 # telestore/api/routes/worker.py
 
+from telestore.services import event_service
 from fastapi import APIRouter, Request, HTTPException, Header, Depends, status
 from telestore.security.credentials import require_admin
 from pydantic import BaseModel
@@ -272,6 +273,7 @@ async def complete_task(
             from telestore.services.remote_transfer_manager import finalize_multipart_group_if_ready
             await finalize_multipart_group_if_ready(group_id, task_doc)
 
+        event_service.task_finished(body.task_id)
         logger.info(f"[WORKER_COMPLETE] Range part task {body.task_id} completed via {body.worker_id}")
         return {"status": "ok"}
 
@@ -328,6 +330,7 @@ async def complete_task(
         }
     )
 
+    event_service.task_finished(body.task_id)
     logger.info(f"[WORKER_COMPLETE] Task {body.task_id} ('{body.file_name}') successfully completed via {body.worker_id}")
     return {"status": "ok"}
 
@@ -371,6 +374,7 @@ async def fail_task(
                 }
             }
         )
+        event_service.task_finished(body.task_id)
         logger.error(f"[WORKER_FAIL] Task {body.task_id} failed on {body.worker_id}: {body.error_message}")
 
     return {"status": "ok"}

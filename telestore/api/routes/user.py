@@ -539,3 +539,26 @@ async def update_user_index_chat(request: Request, update_request: UpdateIndexCh
     except Exception as e:
         logger.error(f"Error updating user index chat: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ── Notifications (the app's phone notifications and the website's bell) ─────
+
+class NotificationsRead(BaseModel):
+    ids: Optional[List[str]] = None
+    all: bool = False
+
+
+def _event_owners(user: User) -> list:
+    return [i for i in {user.username, str(user.telegram_user_id) if user.telegram_user_id else None} if i]
+
+
+@router.get("/notifications")
+def list_notifications(after: Optional[str] = None, limit: int = 30, user: User = Depends(require_auth)):
+    """Newest first; with [after], only the ones newer than that id (what the app checks for)."""
+    from telestore.services import event_service
+    return event_service.listing(_event_owners(user), after=after, limit=limit)
+
+
+@router.post("/notifications/read")
+def read_notifications(body: NotificationsRead, user: User = Depends(require_auth)):
+    from telestore.services import event_service
+    return {"unread": event_service.mark_read(_event_owners(user), body.ids, everything=body.all)}

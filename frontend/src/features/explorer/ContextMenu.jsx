@@ -1,12 +1,12 @@
 import { useEffect, useRef } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { ListPlus, FolderOpen, Pencil, Trash2, Copy, Scissors, Clipboard, Info, Download, Share2, Eye, Star, RefreshCw, Upload, RotateCcw, Archive, Link, ShieldCheck, } from "lucide-react";
+import { CloudOff, HardDriveDownload, ListPlus, FolderOpen, Pencil, Trash2, Copy, Scissors, Clipboard, Info, Download, Share2, Eye, Star, RefreshCw, Upload, RotateCcw, Archive, Link, ShieldCheck, } from "lucide-react";
 export const ContextMenu = ({ x, y, onClose, onRefresh, itemType, itemName, onOpen, onCopy, onCut, onPaste, onDelete, onRename, onNewFolder, onDownload, onUploadFiles, // Destructure the new prop
 onUploadFolder, // Destructure the new prop
 isClipboardPasted, // Destructure the new prop
 hasClipboard, // Destructure the new prop
 disableDelete = false, // Destructure the new prop with default value
-onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false, isVideo = false, onCopyStreamUrl, selectedCount = 1, isStarred = false, onToggleStar, isTrashMode = false, onRestore, isVaultMode = false, onMoveToVault, onMoveToHome, isCloudMode = false, isVirtualFolder = false, isRestrictedEmptyArea = false, onAddToPlaylist, }) => {
+onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false, isVideo = false, onCopyStreamUrl, selectedCount = 1, isStarred = false, onToggleStar, isTrashMode = false, onRestore, isVaultMode = false, onMoveToVault, onMoveToHome, isCloudMode = false, isVirtualFolder = false, isRestrictedEmptyArea = false, onAddToPlaylist, onMakeOffline, onRemoveOffline, }) => {
     const menuRef = useRef(null);
     const isMobile = useIsMobile();
 
@@ -79,6 +79,14 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                 break;
             case "add_to_playlist":
                 onAddToPlaylist?.();
+                onClose();
+                break;
+            case "make_offline":
+                onMakeOffline?.();
+                onClose();
+                break;
+            case "remove_offline":
+                onRemoveOffline?.();
                 onClose();
                 break;
             case "restore":
@@ -365,6 +373,12 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                             label: "Download",
                             action: "download",
                         },
+                        ...(onMakeOffline
+                            ? [{ icon: HardDriveDownload, label: "Make available offline", action: "make_offline" }]
+                            : []),
+                        ...(onRemoveOffline
+                            ? [{ icon: CloudOff, label: "Remove offline copy", action: "remove_offline" }]
+                            : []),
                         ...(isArchive
                             ? [
                                 { divider: true, label: "", action: "" },

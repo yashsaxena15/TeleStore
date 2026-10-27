@@ -1,6 +1,6 @@
 // How one file or folder looks in the grid and in the list. FileGrid owns the behaviour
 // (selection, focus, drag and drop, menus) and passes it in as `ctx`.
-import { Folder, MoreVertical, Check, Star } from "lucide-react";
+import { Folder, MoreVertical, Check, CircleCheck, Star } from "lucide-react";
 import { cn, formatBytes } from "@/lib/utils";
 import { isVideoItem } from "../fileTypes";
 import { RenameInput } from "../RenameInput";
@@ -11,6 +11,9 @@ import { getItemDuration } from "../lib/fileCardHelpers";
 // Grid and list layout, shared by the plain and the virtualized lists
 export const GRID_CLASS = "grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2 sm:gap-2.5";
 export const LIST_COLUMNS = "grid-cols-[18px_minmax(0,1fr)_64px_84px_92px_84px]";
+
+// Saved in this browser (see features/offline)
+const OfflineMark = ({ className }) => (<CircleCheck data-testid="offline-mark" role="img" aria-label="Available offline" className={cn("w-3 h-3 shrink-0 text-success pointer-events-none", className)}/>);
 
 export const GridTile = ({ item, index, ctx }) => {
     const { getItemState, itemRowProps, checkbox, starOrRestore, openItemContextMenu, loadedThumbnails, loadingStates, onRenameConfirm, onRenameCancel } = ctx;
@@ -38,7 +41,7 @@ export const GridTile = ({ item, index, ctx }) => {
           <RenameInput initialName={item.name} onSave={onRenameConfirm} onCancel={onRenameCancel}/>
         </div>) : (<div className="px-0.5 pointer-events-none">
           <p className={cn("mt-1.5 text-[12.5px] font-medium truncate", s.isSelected && "text-primary")} title={item.name}>{item.name}</p>
-          <p className="text-[10.5px] font-mono text-muted-foreground truncate mt-0.5">{meta}</p>
+          <p className="flex items-center gap-1 text-[10.5px] font-mono text-muted-foreground mt-0.5">{s.offline && <OfflineMark />}<span className="truncate">{meta}</span></p>
         </div>)}
       </div>
     </div>);
@@ -73,6 +76,7 @@ export const ListRow = ({ item, index, ctx }) => {
                 <RenameInput initialName={item.name} onSave={onRenameConfirm} onCancel={onRenameCancel}/>
               </div>) : (<span className={cn("truncate pointer-events-none", s.isSelected && "text-primary font-medium")} title={item.name}>{item.name}</span>)}
             {s.starred && !s.isRenaming && <Star className="w-3 h-3 shrink-0 fill-warning text-warning pointer-events-none" aria-label="Starred"/>}
+            {s.offline && !s.isRenaming && <OfflineMark />}
           </div>
           <div role="gridcell" className="pointer-events-none">
             {item.type === "folder" ? <span className="text-muted-foreground">Folder</span> : typeInfo.label && <span className={cn("px-1.5 py-0.5 rounded text-[9.5px] font-mono font-semibold tracking-wide", TYPE_TONE[typeInfo.kind])}>{typeInfo.label}</span>}
@@ -92,7 +96,7 @@ export const ListRow = ({ item, index, ctx }) => {
                 <RenameInput initialName={item.name} onSave={onRenameConfirm} onCancel={onRenameCancel}/>
               </div>) : (<>
                 <p className={cn("text-sm font-medium truncate", s.isSelected && "text-primary")}>{item.name}</p>
-                <p className="text-[11px] font-mono text-muted-foreground truncate">{item.type === "folder" ? (date || "Folder") : [typeInfo.label, size, date].filter(Boolean).join(" · ")}</p>
+                <p className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground">{s.offline && <OfflineMark />}<span className="truncate">{item.type === "folder" ? (date || "Folder") : [typeInfo.label, size, date].filter(Boolean).join(" · ")}</span></p>
               </>)}
           </div>
           {!s.isRenaming && (<div className="flex items-center shrink-0">

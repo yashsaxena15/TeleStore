@@ -217,6 +217,8 @@ export const mapUser = (user) => ({
 export const api = {
     // ── Files and folders ──────────────────────────────────────────────
     fetchFiles: (path = '/', page, pageSize, sortBy, sortOrder) => request('/files', { query: { path, page, page_size: pageSize, sort_by: sortBy, sort_order: sortOrder }, timeout: 5000, fallback: 'Failed to fetch files' }),
+    // Everything in one folder (no pages), for saving it offline; big folders take a while
+    fetchWholeFolder: (path) => request('/files', { query: { path }, timeout: 60000, fallback: "Couldn't read the folder" }),
     createFolder: (folderName, currentPath) => post('/folders/create', { folderName, currentPath }, { timeout: 3000, fallback: 'Failed to create folder' }),
     createFolderPath: (fullPath) => post('/folders/create-path', { fullPath }, { timeout: 3000, fallback: 'Failed to create folder path' }),
     // Playlists (the same ones as in the Android app); "liked" is Liked music
@@ -275,6 +277,9 @@ export const api = {
     },
     changeUserPassword: (userId, passwordData) => put(`/user/${userId}/password`, passwordData, { timeout: 5000, fallback: 'Failed to change password' }),
     getUserIndexChat: () => request('/user/index-chat', { timeout: 3000, fallback: 'Failed to fetch index chat' }),
+    // Notifications (the bell): newest first, with the unread count
+    fetchNotifications: (after, limit = 30) => request('/user/notifications', { query: { after, limit }, timeout: 15000, fallback: "Couldn't load notifications" }),
+    markNotificationsRead: (ids) => post('/user/notifications/read', ids === 'all' ? { all: true } : { ids }, { fallback: "Couldn't mark as read" }),
     updateUserIndexChat: (indexChatData) => put('/user/index-chat', indexChatData, { timeout: 3000, fallback: 'Failed to update index chat' }),
 
     // ── Private Vault ──────────────────────────────────────────────────

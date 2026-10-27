@@ -22,7 +22,11 @@ import androidx.compose.runtime.getValue
 import com.backendforge.telestore.data.ThemeMode
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import com.backendforge.telestore.core.LinkKind
+import com.backendforge.telestore.core.NotificationTarget
+import com.backendforge.telestore.notify.PhoneNotifications
+import kotlinx.coroutines.launch
 import com.backendforge.telestore.transfers.describe
 import com.backendforge.telestore.ui.MainScreen
 import com.backendforge.telestore.ui.signin.SignInScreen
@@ -93,6 +97,16 @@ class MainActivity : FragmentActivity() {
 
     /** Files shared into TeleStore from another app wait for the user to choose a folder. */
     private fun receiveShared(intent: Intent?) {
+        // A tapped notification: open where it points, and mark it read on the server
+        intent?.getStringExtra(PhoneNotifications.EXTRA_TARGET_TYPE)?.let { type ->
+            val container = (application as TeleStoreApplication).container
+            container.pendingTarget.value = NotificationTarget(type, path = intent.getStringExtra(PhoneNotifications.EXTRA_TARGET_PATH))
+            intent.getStringExtra(PhoneNotifications.EXTRA_SERVER_ID)?.let { id ->
+                lifecycleScope.launch { runCatching { container.unreadNotifications.value = container.api().markNotificationsRead(listOf(id)) } }
+            }
+            intent.removeExtra(PhoneNotifications.EXTRA_TARGET_TYPE)
+            return
+        }
         // A home-screen widget button: Upload, Add link, Photos or Search
         intent?.action?.takeIf { it.startsWith(QuickWidget.ACTION_PREFIX) }?.let {
             (application as TeleStoreApplication).container.pendingAction.value = it.removePrefix(QuickWidget.ACTION_PREFIX)
