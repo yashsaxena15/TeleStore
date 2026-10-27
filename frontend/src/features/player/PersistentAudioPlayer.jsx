@@ -212,9 +212,9 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
                     album: activeTrack.fileItem?.file_path?.replace(/^\//, "") || "Music Playlist",
                     artwork: [
                         {
-                            src: "/logo.jpg",
-                            sizes: "192x192",
-                            type: "image/jpeg",
+                            src: "/logo.png",
+                            sizes: "1024x1024",
+                            type: "image/png",
                         },
                     ],
                 });

@@ -1,5 +1,9 @@
 package com.backendforge.telestore.ui.home
 
+import com.backendforge.telestore.R
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.Image
 import com.backendforge.telestore.ui.components.rememberHaptics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,7 +32,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Link
@@ -183,7 +186,7 @@ private fun Header(username: String, onAccount: () -> Unit) {
         else -> "Good evening"
     }
     Row(Modifier.statusBarsPadding().padding(top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        AppLogo(36)
+        AppLogo(30)
         Column(Modifier.weight(1f).padding(start = 12.dp)) {
             Text(greeting, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(username.substringBefore('@').ifEmpty { "Welcome" }, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -197,16 +200,19 @@ private fun Header(username: String, onAccount: () -> Unit) {
     }
 }
 
-/** The app's mark. Replaced by the owner's logo file when it arrives. */
+/** TeleStore's mark: the cloud, infinity loop and paper plane ([sizeDp] high, wider than tall). */
 @Composable
 fun AppLogo(sizeDp: Int) {
-    Box(
-        Modifier.size(sizeDp.dp).clip(RoundedCornerShape((sizeDp * 0.28f).dp)).background(MaterialTheme.colorScheme.primaryContainer),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(Icons.Filled.Cloud, contentDescription = "TeleStore", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size((sizeDp * 0.55f).dp))
-    }
+    Image(
+        painter = painterResource(R.drawable.logo_symbol),
+        contentDescription = "TeleStore",
+        contentScale = ContentScale.Fit,
+        modifier = Modifier.height(sizeDp.dp).aspectRatio(LOGO_RATIO),
+    )
 }
+
+/** The logo's width to height. */
+const val LOGO_RATIO = 381f / 220f
 
 @Composable
 private fun SearchBar(onSearch: () -> Unit) {

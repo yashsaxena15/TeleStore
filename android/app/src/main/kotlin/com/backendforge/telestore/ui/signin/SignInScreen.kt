@@ -1,5 +1,7 @@
 package com.backendforge.telestore.ui.signin
 
+import androidx.compose.ui.unit.sp
+import com.backendforge.telestore.ui.home.AppLogo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,7 +22,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -79,12 +80,13 @@ fun SignInScreen(container: AppContainer) {
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Box(
-                        Modifier.size(72.dp).background(Color(0xFF4F46E5), RoundedCornerShape(20.dp)),
-                        contentAlignment = Alignment.Center,
-                    ) { Icon(Icons.Filled.Cloud, contentDescription = null, tint = Color.White, modifier = Modifier.size(36.dp)) }
-                    Text("TeleStore", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                    Text("Sign in to your cloud storage", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    AppLogo(84)
+                    Text("TELESTORE", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
+                    Text(
+                        "UNLIMITED TELEGRAM CLOUD STORAGE",
+                        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, letterSpacing = 0.5.sp,
+                    )
                 }
                 Spacer(Modifier.height(8.dp))
 

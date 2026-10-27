@@ -119,7 +119,7 @@ export const Sidebar = ({ selectedFilter, activeView = "files", onNavigateView, 
       {/* Brand + collapse */}
       <div className={`flex items-center gap-2.5 h-12 shrink-0 ${collapsed ? "justify-center px-2" : "px-3"}`}>
         {!collapsed && (<button onClick={() => onNavigateView("files", "all")} className="flex items-center gap-2.5 min-w-0 flex-1 text-left" title="Home">
-            <img src="/logo.jpg" alt="" className="w-7 h-7 rounded-lg object-cover border border-border"/>
+            <img src="/logo-symbol.svg" alt="" className="w-8 h-8 shrink-0"/>
             <span className="font-semibold text-[14px] tracking-tight truncate text-sidebar-foreground">TeleStore</span>
           </button>)}
         <button onClick={onToggleCollapse} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/60" title={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
