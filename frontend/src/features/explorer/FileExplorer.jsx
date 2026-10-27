@@ -46,6 +46,8 @@ const InstagramImportDialog = lazy(() => import("@/features/cloud/InstagramImpor
 // Mounts a lazy dialog only while it is open
 const WhenOpen = ({ open, children }) => (open ? <Suspense fallback={null}>{children}</Suspense> : null);
 const SettingsContent = lazy(() => import("@/features/settings/SettingsContent").then((m) => ({ default: m.SettingsContent })));
+const PlaylistsPage = lazy(() => import("@/features/playlists/PlaylistsPage").then((m) => ({ default: m.PlaylistsPage })));
+const AddToPlaylistDialog = lazy(() => import("@/features/playlists/AddToPlaylistDialog").then((m) => ({ default: m.AddToPlaylistDialog })));
 const PhotosPage = lazy(() => import("@/features/photos/PhotosPage").then((m) => ({ default: m.PhotosPage })));
 const StorageAnalyticsContent = lazy(() => import("@/features/storage/StorageAnalyticsContent").then((m) => ({ default: m.StorageAnalyticsContent })));
 const PanelLoading = () => (<div className="flex flex-1 items-center justify-center p-10 text-sm text-muted-foreground">Loading…</div>);
@@ -587,6 +589,9 @@ export const FileExplorer = () => {
         else if (target === 'photos') {
             navigate('/photos');
         }
+        else if (target === 'playlists') {
+            navigate('/playlists');
+        }
         else if (target === 'transfers' || target === 'downloads') {
             navigate('/transfers');
         }
@@ -681,6 +686,10 @@ export const FileExplorer = () => {
                 showFiles();
             }} onShowInFolder={openFolderPath}/>
             </Suspense>
+          </div>) : view === "playlists" ? (<div key="playlists" className={PAGE_CLASS}>
+            <Suspense fallback={<PanelLoading />}>
+              <PlaylistsPage />
+            </Suspense>
           </div>) : view === "photos" ? (<div key="photos" className={PAGE_CLASS}>
             <Suspense fallback={<PanelLoading />}>
               <PhotosPage />
@@ -721,6 +730,7 @@ export const FileExplorer = () => {
       <MobileNav selectedFilter={selectedFilter} activeView={activeView} onNavigateView={handleNavigateView} onAction={runShellAction}/>
       </div>
 
+      <Suspense fallback={null}><AddToPlaylistDialog /></Suspense>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} onNavigateView={handleNavigateView} onAction={runShellAction}/>
       <WhenOpen open={connectDriveOpen}><ConnectCloudModal open={connectDriveOpen} onOpenChange={setConnectDriveOpen} onSuccess={() => window.dispatchEvent(new Event("cloudAccountsChanged"))}/></WhenOpen>
 

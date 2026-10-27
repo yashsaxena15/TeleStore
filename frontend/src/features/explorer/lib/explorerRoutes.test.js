@@ -10,6 +10,8 @@ describe("explorer routes", () => {
         expect(viewFromPathname("/settings")).toBe("settings");
         expect(viewFromPathname("/storage")).toBe("storage");
         expect(viewFromPathname("/photos")).toBe("photos");
+        expect(viewFromPathname("/playlists")).toBe("playlists");
+        expect(viewFromPathname("/playlists/liked")).toBe("playlists");
         expect(viewFromPathname("/downloads")).toBe("transfers");
     });
     it("round-trips folder paths", () => {

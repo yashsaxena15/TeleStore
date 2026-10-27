@@ -94,6 +94,54 @@ const PHOTOS = [
     { id: "ph2", file_name: "VID_0002.mp4", file_type: "document", file_size: 9_400_000, file_path: "/Home/Phone Backup/Camera", taken_at: new Date().toISOString(), modified_date: new Date().toISOString() },
     { id: "ph3", file_name: "IMG_0001.jpg", file_type: "photo", thumbnail: "THUMB1", file_size: 2_000_000, file_path: "/Home/Phone Backup/Camera", taken_at: "2025-01-03T10:00:00", modified_date: "2026-10-01T10:00:00" },
 ];
+// Playlists: Liked music plus one of the user's, holding songs from /Home/Music
+const songById = (id) => FOLDERS["/Home/Music"].find((f) => String(f.id) === String(id));
+const PLAYLISTS = [];
+const resetPlaylists = () => {
+    PLAYLISTS.length = 0;
+    PLAYLISTS.push({ id: "liked", name: "Liked music", kind: "liked", items: ["f3001"] }, { id: "pl1", name: "Road trip", kind: "user", items: ["f3000", "f3002", "f3003"] });
+};
+resetPlaylists();
+const playlistJson = (p, withItems = false) => {
+    const files = p.items.map(songById).filter(Boolean);
+    return { id: p.id, name: p.name, kind: p.kind, count: p.items.length, file_ids: [...p.items], cover: files[0] || null, ...(withItems ? { items: files } : {}) };
+};
+const playlistRoute = (req, res, url, body) => {
+    const parts = url.pathname.split("/").slice(3); // after /files/playlists
+    const data = body ? JSON.parse(body) : {};
+    if (!parts.length) {
+        if (req.method === "GET") return send(res, 200, { playlists: PLAYLISTS.map((p) => playlistJson(p)) });
+        const made = { id: `pl${PLAYLISTS.length + 1}`, name: data.name, kind: "user", items: [...(data.file_ids || [])] };
+        PLAYLISTS.push(made);
+        return send(res, 200, { ...playlistJson(made), added: made.items.length });
+    }
+    if (parts[0] === "like") {
+        const liked = PLAYLISTS[0];
+        liked.items = data.liked ? [data.file_id, ...liked.items.filter((i) => i !== data.file_id)] : liked.items.filter((i) => i !== data.file_id);
+        return send(res, 200, { liked: Boolean(data.liked) });
+    }
+    const p = PLAYLISTS.find((x) => x.id === parts[0]);
+    if (!p) return send(res, 404, { detail: "Playlist not found" });
+    if (parts.length === 1) {
+        if (req.method === "GET") return send(res, 200, playlistJson(p, true));
+        if (req.method === "DELETE") {
+            if (p.kind === "liked") return send(res, 400, { detail: "“Liked music” can't be deleted" });
+            PLAYLISTS.splice(PLAYLISTS.indexOf(p), 1);
+            return send(res, 200, { deleted: true });
+        }
+        p.name = data.name;
+        return send(res, 200, playlistJson(p));
+    }
+    if (parts[1] === "items" && parts[2] === "remove") p.items = p.items.filter((i) => !data.file_ids.includes(i));
+    else if (parts[1] === "items") {
+        const fresh = data.file_ids.filter((i) => !p.items.includes(i));
+        p.items.push(...fresh);
+        return send(res, 200, { ...playlistJson(p), added: fresh.length });
+    }
+    else if (parts[1] === "order") p.items = [...data.file_ids];
+    return send(res, 200, playlistJson(p));
+};
+
 // A 1×1 PNG for thumbnails and previews
 const PIXEL = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
 
@@ -210,8 +258,15 @@ http.createServer((req, res) => {
     req.on("data", (c) => { body += c; });
     req.on("end", () => {
         if (url.pathname === "/__requests") {
-            if (req.method === "DELETE") requests.length = 0;
+            if (req.method === "DELETE") {
+                requests.length = 0;
+                resetPlaylists();
+            }
             return send(res, 200, requests);
+        }
+        if (url.pathname.startsWith("/files/playlists")) {
+            if (req.method !== "GET") requests.push({ method: req.method, path: url.pathname, body });
+            return playlistRoute(req, res, url, body);
         }
         if (req.method !== "GET" && req.method !== "HEAD") return mutation(req, res, url, body);
         if (ROUTES[url.pathname]) return send(res, 200, ROUTES[url.pathname]);

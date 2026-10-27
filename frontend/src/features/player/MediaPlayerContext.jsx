@@ -139,6 +139,7 @@ export const MediaPlayerProvider = ({ children }) => {
         <MediaPlayer
           key={currentMedia.url + (currentMedia.id || currentVideoIndex)}
           mediaUrl={currentMedia.url}
+          fileItem={currentMedia.fileItem}
           fileName={currentMedia.fileName || currentMedia.name}
           fileType={currentMedia.fileType}
           playlist={videoPlaylist}

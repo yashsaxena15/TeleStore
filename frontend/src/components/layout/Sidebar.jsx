@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { HardDrive, Images, User, Settings, Users, LogOut, Laptop, ArrowUpDown, Lock, Cloud, Unlink, Plus, Search, PanelLeftClose, PanelLeftOpen, ChevronsUpDown } from "lucide-react";
+import { HardDrive, Images, ListMusic, User, Settings, Users, LogOut, Laptop, ArrowUpDown, Lock, Cloud, Unlink, Plus, Search, PanelLeftClose, PanelLeftOpen, ChevronsUpDown } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useTransferManager } from "@/features/transfers/useTransferManager";
@@ -152,6 +152,11 @@ export const Sidebar = ({ selectedFilter, activeView = "files", onNavigateView, 
         <button onClick={() => onNavigateView("photos")} className={navClass(activeView === "photos", collapsed)} title={collapsed ? "Photos" : undefined} aria-label="Photos">
           <Images className="w-4 h-4 shrink-0"/>
           {!collapsed && <span className="truncate">Photos</span>}
+        </button>
+
+        <button onClick={() => onNavigateView("playlists")} className={navClass(activeView === "playlists", collapsed)} title={collapsed ? "Playlists" : undefined} aria-label="Playlists">
+          <ListMusic className="w-4 h-4 shrink-0"/>
+          {!collapsed && <span className="truncate">Playlists</span>}
         </button>
 
         <SectionLabel collapsed={collapsed} action={<button onClick={() => onAction("connect-drive")} className="text-[11px] text-primary hover:underline font-medium" aria-label="Connect cloud drive">+ Connect</button>}>
