@@ -76,7 +76,7 @@ import com.backendforge.telestore.ui.components.NewFolderDialog
 import java.util.Calendar
 
 /** Places Home links to, besides files and folders. */
-enum class HomeShortcut(val label: String) { STARRED("Starred"), RECENT("Recent"), VAULT("Vault"), TRASH("Trash") }
+enum class HomeShortcut(val label: String) { PLAYLISTS("Playlists"), STARRED("Starred"), RECENT("Recent"), VAULT("Vault"), TRASH("Trash") }
 
 @kotlin.OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable

@@ -1,4 +1,5 @@
 // The right-click / ⋯ menu for an item or for empty space in the file grid.
+import { canAddToPlaylist, requestAddToPlaylist } from "@/features/playlists/playlists";
 import { toast } from "sonner";
 import { api, fetchWithTimeout, getApiBaseUrl } from "@/lib/api";
 import { copyStreamUrl } from "@/lib/utils";
@@ -22,6 +23,8 @@ export const GridContextMenu = ({ cloudAccountId, cloudFolderId, contextMenu, cu
     const isArchiveItem = ['zip', 'tar', 'gz', 'bz2', 'xz', 'rar', '7z'].includes(cmExt);
     const isVideo = contextMenu.item ? isVideoItem(contextMenu.item) : false;
     const selectedCount = selectedItems.size > 0 ? selectedItems.size : 1;
+    // Music and videos (all of the selection when right-clicking one of it) can go in a playlist
+    const addTargets = !contextMenu.item ? [] : (onSelection ? items.filter((it) => selectedItems.has(getItemKey(it))) : [contextMenu.item]).filter(canAddToPlaylist);
     return (<ContextMenu x={contextMenu.x} y={contextMenu.y} itemType={contextMenu.itemType} itemName={contextMenu.itemName} isVideo={isVideo} onCopyStreamUrl={() => {
             if (!contextMenu.item)
                 return;
@@ -97,5 +100,5 @@ export const GridContextMenu = ({ cloudAccountId, cloudFolderId, contextMenu, cu
             }
         }} onCompress={() => {
             setCompressDialog(true);
-        }} isStarred={isItemStarred(contextMenu.item)} onToggleStar={() => contextMenu.item && onToggleStar?.(contextMenu.item)} isTrashMode={isTrashMode || cloudFolderId === "trash" || Boolean(contextMenu.item?.is_trashed)} onRestore={forSelection("restore", (item) => onRestoreItem?.(item))} isCloudMode={isCloudMode} isVirtualFolder={Boolean(contextMenu.item?.is_virtual)} isRestrictedEmptyArea={isRestrictedEmptyArea} onRefresh={onRefresh}/>);
+        }} isStarred={isItemStarred(contextMenu.item)} onToggleStar={() => contextMenu.item && onToggleStar?.(contextMenu.item)} isTrashMode={isTrashMode || cloudFolderId === "trash" || Boolean(contextMenu.item?.is_trashed)} onRestore={forSelection("restore", (item) => onRestoreItem?.(item))} isCloudMode={isCloudMode} isVirtualFolder={Boolean(contextMenu.item?.is_virtual)} isRestrictedEmptyArea={isRestrictedEmptyArea} onRefresh={onRefresh} onAddToPlaylist={addTargets.length > 0 && !isTrashMode ? () => requestAddToPlaylist(addTargets) : undefined}/>);
 };

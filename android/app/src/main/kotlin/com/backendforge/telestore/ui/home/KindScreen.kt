@@ -44,6 +44,7 @@ import com.backendforge.telestore.core.FileItem
 import com.backendforge.telestore.core.FileKind
 import com.backendforge.telestore.core.SortBy
 import com.backendforge.telestore.data.AppContainer
+import com.backendforge.telestore.ui.playlists.PlaylistStore
 import com.backendforge.telestore.ui.components.FileRow
 import com.backendforge.telestore.ui.components.FileThumbnail
 import kotlinx.coroutines.CancellationException
@@ -158,7 +159,10 @@ fun KindScreen(
                         items(state.items, key = { it.id }) { item ->
                             FileRow(
                                 item = item, api = api, isSelectionMode = false, isSelected = false, onToggleSelect = {},
-                                onClick = { onOpenFile(item, state.items) }, onLongClick = {}, onOpenActions = { onOpenFile(item, state.items) },
+                                onClick = { onOpenFile(item, state.items) },
+                                // Music and videos: ⋮ or a long press adds to a playlist
+                                onLongClick = { if (PlaylistStore.canAdd(item)) { haptics.longPress(); container.playlists.requestAdd(listOf(item)) } },
+                                onOpenActions = { if (PlaylistStore.canAdd(item)) container.playlists.requestAdd(listOf(item)) else onOpenFile(item, state.items) },
                                 offline = item.id in offline,
                             )
                         }

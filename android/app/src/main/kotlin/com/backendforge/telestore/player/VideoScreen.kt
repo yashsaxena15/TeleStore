@@ -40,6 +40,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AspectRatio
@@ -105,6 +106,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -148,7 +150,7 @@ private enum class SheetPage { MAIN, QUALITY, CAPTIONS, AUDIO, SPEED, SLEEP, MOR
 @androidx.annotation.OptIn(UnstableApi::class)
 @kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun VideoScreen(vm: VideoViewModel, api: TeleStoreApi, onBack: () -> Unit, onDownload: (FileItem) -> Unit) {
+fun VideoScreen(vm: VideoViewModel, api: TeleStoreApi, onBack: () -> Unit, onDownload: (FileItem) -> Unit, onSaveToPlaylist: (FileItem) -> Unit = {}) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val activity = context.findActivity() as? MainActivity
@@ -165,8 +167,10 @@ fun VideoScreen(vm: VideoViewModel, api: TeleStoreApi, onBack: () -> Unit, onDow
     var sheet by remember { mutableStateOf<SheetPage?>(null) }
     var info by remember { mutableStateOf<FileItem?>(null) }
     val haptics = rememberHaptics()
-    // Pulling the video down shrinks it to the mini player (portrait only; full screen keeps brightness and volume)
-    val pull = rememberPullDownState(onBack)
+    // Pulling the video down shrinks it to the mini player, a swipe up goes full screen (portrait
+    // only; full screen keeps brightness and volume at the sides, and a swipe down in the middle leaves it)
+    var fullscreenRequest by remember { mutableIntStateOf(0) }
+    val pull = rememberPullDownState(onBack, onPullUp = { fullscreenRequest++ })
 
     if (state.item == null) {
         LaunchedEffect(Unit) { onBack() }
@@ -241,6 +245,12 @@ fun VideoScreen(vm: VideoViewModel, api: TeleStoreApi, onBack: () -> Unit, onDow
             fullscreen = true
         }
     }
+    LaunchedEffect(fullscreenRequest) {
+        if (fullscreenRequest > 0 && !fullscreen && !landscape) {
+            haptics.click()
+            fullscreen = true
+        }
+    }
 
     val video: @Composable (Modifier) -> Unit = { modifier ->
         Box(modifier.background(Color.Black)) {
@@ -268,6 +278,7 @@ fun VideoScreen(vm: VideoViewModel, api: TeleStoreApi, onBack: () -> Unit, onDow
                 GestureLayer(
                     enabled = !locked,
                     pull = if (immersive) null else pull,
+                    onSwipeDownMiddle = { if (immersive && !inPip) toggleFullscreen() },
                     onTap = { controlsVisible = !controlsVisible; touchTick++ },
                     onDoubleTap = { forward ->
                         haptics.tick()
@@ -350,6 +361,7 @@ fun VideoScreen(vm: VideoViewModel, api: TeleStoreApi, onBack: () -> Unit, onDow
                 onPlay = vm::playAt,
                 onStar = vm::toggleStar,
                 onDownload = { state.item?.let(onDownload) },
+                onSave = { state.item?.let(onSaveToPlaylist) },
                 onInfo = { info = state.item },
                 onAutoplay = vm::setAutoplay,
             )
@@ -371,12 +383,16 @@ private object LocalOrientation {
 
 // ── Gestures (VLC-style) ───────────────────────────────────────────────────────
 
-/** Tap: show/hide controls. Double-tap a side: skip 10 s. Swipe up/down: brightness (left), volume (right). */
+/**
+ * Tap: show/hide controls. Double-tap a side: skip 10 s. Full screen: swipe up/down on the left for
+ * brightness, on the right for volume, down in the middle to leave full screen.
+ */
 @Composable
 private fun GestureLayer(
     enabled: Boolean,
-    /** Set in portrait: a vertical swipe pulls the video down to minimize it instead. */
+    /** Set in portrait: a vertical swipe pulls the video down to minimize it (or up for full screen) instead. */
     pull: PullDownState?,
+    onSwipeDownMiddle: () -> Unit,
     onTap: () -> Unit,
     onDoubleTap: (forward: Boolean) -> Unit,
     onHint: (GestureHint) -> Unit,
@@ -388,7 +404,11 @@ private fun GestureLayer(
     val doubleTap by rememberUpdatedState(onDoubleTap)
     val showHint by rememberUpdatedState(onHint)
     val active by rememberUpdatedState(enabled)
+    val swipeDownMiddle by rememberUpdatedState(onSwipeDownMiddle)
+    val exitDistance = with(LocalDensity.current) { 90.dp.toPx() }
     var leftSide by remember { mutableStateOf(true) }
+    var middle by remember { mutableStateOf(false) }
+    var travel by remember { mutableFloatStateOf(0f) }
     var level by remember { mutableFloatStateOf(0f) }
 
     Box(
@@ -404,12 +424,19 @@ private fun GestureLayer(
                 detectVerticalDragGestures(
                     onDragStart = { start ->
                         leftSide = start.x < size.width / 2
+                        middle = start.x > size.width / 3 && start.x < size.width * 2 / 3
+                        travel = 0f
                         level = if (leftSide) currentBrightness(activity) else
                             audio.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                     },
+                    onDragEnd = { if (middle && active && travel >= exitDistance) swipeDownMiddle() },
                     onVerticalDrag = { change, dragAmount ->
                         if (!active) return@detectVerticalDragGestures
                         change.consume()
+                        if (middle) {
+                            travel += dragAmount
+                            return@detectVerticalDragGestures
+                        }
                         level = (level - dragAmount / (size.height * 0.8f)).coerceIn(0f, 1f)
                         if (leftSide) {
                             activity?.window?.let { w -> w.attributes = w.attributes.apply { screenBrightness = level.coerceAtLeast(0.01f) } }
@@ -630,6 +657,7 @@ private fun Details(
     onPlay: (Int) -> Unit,
     onStar: () -> Unit,
     onDownload: () -> Unit,
+    onSave: () -> Unit,
     onInfo: () -> Unit,
     onAutoplay: (Boolean) -> Unit,
 ) {
@@ -652,6 +680,7 @@ private fun Details(
         item {
             LazyRow(contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 item { ActionChip(if (item.starred) Icons.Filled.Star else Icons.Filled.StarBorder, if (item.starred) "Starred" else "Star", onStar) }
+                item { ActionChip(Icons.AutoMirrored.Filled.PlaylistAdd, "Save", onSave) }
                 item { ActionChip(Icons.Filled.Download, "Download", onDownload) }
                 item { ActionChip(Icons.Filled.Info, "Info", onInfo) }
             }

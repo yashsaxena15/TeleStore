@@ -587,7 +587,7 @@ test.describe("player panels", () => {
         await page.getByRole("button", { name: "Close details" }).click();
         await expect(page.getByText("Media Details")).toHaveCount(0);
         // Playlist lists the folder's videos
-        await page.getByRole("button", { name: "Playlist" }).first().click();
+        await page.getByRole("button", { name: "Playlist", exact: true }).first().click();
         await expect(page.getByText("Blade.Runner.2049.mkv").first()).toBeVisible();
         await page.keyboard.press("Escape");
         // Minimize: the same video keeps playing in the dock, without a pause or a reload
@@ -728,5 +728,70 @@ test.describe("photos", () => {
         await page.getByRole("button", { name: "Photos" }).click();
         await expect(page).toHaveURL(/\/photos$/);
         await expect(page.getByTestId("photo-tile")).toHaveCount(3);
+    });
+});
+
+test.describe("playlists", () => {
+    test("@phone Playlists is in the More sheet and a playlist plays", async ({ page }) => {
+        await page.goto("/");
+        await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "More" }).click();
+        await page.getByRole("button", { name: "Playlists" }).click();
+        await expect(page).toHaveURL(/\/playlists$/);
+        await page.getByRole("button", { name: /^Road trip/ }).click();
+        await page.getByRole("button", { name: "Play", exact: true }).click();
+        await expect(page.getByRole("button", { name: "Open now playing" })).toBeVisible();
+    });
+
+    test("open, reorder, remove and play a playlist; Liked music can't be deleted", async ({ page, request }) => {
+        await page.goto("/");
+        await page.getByRole("complementary").first().getByRole("button", { name: "Playlists" }).click();
+        await expect(page).toHaveURL(/\/playlists$/);
+        await expect(page.getByRole("button", { name: /^Liked music/ })).toBeVisible();
+        await page.getByRole("button", { name: /^Road trip/ }).click();
+        await expect(page).toHaveURL(/\/playlists\/pl1$/);
+        await expect(page.getByRole("heading", { level: 1, name: "Road trip" })).toBeVisible();
+        const list = page.getByRole("list", { name: "Road trip items" });
+        await expect(list.getByRole("listitem")).toHaveCount(3);
+        await page.getByRole("button", { name: "Move Song 04.mp3 up" }).click();
+        await expect(list.getByRole("listitem").nth(1)).toContainText("Song 04");
+        await page.getByRole("button", { name: "Remove Song 01.mp3 from the playlist" }).click();
+        await expect(list.getByRole("listitem")).toHaveCount(2);
+        const sent = (await mutations(request)).filter((r) => r.path.startsWith("/files/playlists/pl1"));
+        expect(sent.map((r) => r.method)).toEqual(["PUT", "POST"]);
+        expect(JSON.parse(sent[0].body).file_ids).toEqual(["f3000", "f3003", "f3002"]);
+        await page.getByRole("button", { name: "Play", exact: true }).click();
+        await expect(page.getByText(/track 1 of 2/)).toBeVisible();
+
+        await page.getByRole("button", { name: "All playlists" }).click();
+        await page.getByRole("button", { name: /^Liked music/ }).click();
+        await expect(page.getByRole("heading", { level: 1, name: "Liked music" })).toBeVisible();
+        await expect(page.getByRole("button", { name: "Playlist options" })).toHaveCount(0);
+    });
+
+    test("add a song from its menu, make a new playlist, and the heart", async ({ page, request }) => {
+        await page.goto("/Music");
+        await row(page, "Song 05.mp3").click({ button: "right" });
+        await page.getByRole("menuitem", { name: "Add to playlist" }).click();
+        const dialog = page.getByRole("dialog", { name: "Add to playlist" });
+        await dialog.getByRole("button", { name: /^Road trip/ }).click();
+        await expect(page.getByText("Added 1 item to Road trip")).toBeVisible();
+        const added = (await mutations(request)).find((r) => r.path === "/files/playlists/pl1/items");
+        expect(JSON.parse(added.body).file_ids).toEqual(["f3004"]);
+
+        await row(page, "Song 06.mp3").click({ button: "right" });
+        await page.getByRole("menuitem", { name: "Add to playlist" }).click();
+        await dialog.getByRole("button", { name: "New playlist" }).click();
+        await dialog.getByLabel("Playlist name").fill("Gym");
+        await dialog.getByRole("button", { name: "Create" }).click();
+        await expect(page.getByText("Added to Gym")).toBeVisible();
+
+        // Song 02 is in Liked music: the heart shows it, and a click takes it out
+        await row(page, "Song 02.mp3").dblclick();
+        const heart = page.getByRole("button", { name: "Remove from Liked music" }).first();
+        await expect(heart).toHaveAttribute("aria-pressed", "true");
+        await heart.click();
+        await expect(page.getByRole("button", { name: "Add to Liked music" }).first()).toBeVisible();
+        const like = (await mutations(request)).find((r) => r.path === "/files/playlists/like");
+        expect(JSON.parse(like.body)).toEqual({ file_id: "f3001", liked: false });
     });
 });

@@ -1,12 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, Volume2, VolumeX, Volume1, ListMusic, Disc, X, Download } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, Volume2, VolumeX, Volume1, ListMusic, ListPlus, Disc, X, Download } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useDockPresence } from "@/components/layout/dock/useDock";
 import { Popover, PopoverContent, PopoverTrigger, } from "@/components/ui/popover";
 import { downloadManager } from "@/features/transfers/downloadManager";
 import { cn } from "@/lib/utils";
+import { LikeButton } from "@/features/playlists/LikeButton";
+import { requestAddToPlaylist } from "@/features/playlists/playlists";
 function formatTime(seconds) {
     if (!seconds || isNaN(seconds) || !isFinite(seconds))
         return "0:00";
@@ -343,6 +345,8 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
               <div ref={showCurrentTrack} className="max-h-72 overflow-y-auto overscroll-contain" aria-label="Queue list">{queueList(() => setIsPlaylistOpen(false))}</div>
             </PopoverContent>
           </Popover>
+          <LikeButton item={activeTrack.fileItem} className={iconBtn}/>
+          <button onClick={() => requestAddToPlaylist([activeTrack.fileItem])} className={cn(iconBtn, "hidden md:flex")} aria-label="Add to playlist" title="Add to playlist"><ListPlus className="w-4 h-4"/></button>
           <button onClick={download} className={cn(iconBtn, "hidden md:flex")} aria-label="Download this track" title="Download this track"><Download className="w-4 h-4"/></button>
           <button onClick={onClose} className={cn(iconBtn, "hover:text-destructive hover:bg-destructive/10")} aria-label="Close audio player" title="Close"><X className="w-4 h-4"/></button>
         </div>
@@ -380,6 +384,10 @@ export const PersistentAudioPlayer = ({ activeTrack, playlist, currentIndex, onT
               <Slider value={[isMuted ? 0 : volume]} min={0} max={1} step={0.01} onValueChange={(val) => { setIsMuted(false); setVolume(val[0]); }} className="flex-1" aria-label="Volume"/>
             </div>
             <button onClick={download} className="h-9 px-3 rounded-md border border-border text-xs flex items-center gap-1.5" aria-label="Download this track"><Download className="w-4 h-4"/>Download</button>
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <LikeButton item={activeTrack.fileItem} className="h-9 px-3 rounded-md border border-border flex items-center" iconClassName="w-5 h-5"/>
+            <button onClick={() => { setIsNowPlayingOpen(false); requestAddToPlaylist([activeTrack.fileItem]); }} className="h-9 px-3 rounded-md border border-border text-xs flex items-center gap-1.5" aria-label="Add to playlist"><ListPlus className="w-4 h-4"/>Add to playlist</button>
           </div>
           <div className="mt-4 rounded-lg border border-border overflow-hidden">
             {queueHeader}

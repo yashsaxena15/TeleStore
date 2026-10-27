@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { Play, Pause, SkipBack, SkipForward, ListVideo, RotateCcw, RotateCw, Minimize, Check, Download, X, ArrowLeft, Info, ExternalLink, Minimize2, Maximize2 } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, ListVideo, RotateCcw, RotateCw, Minimize, Check, Download, X, ArrowLeft, Info, ExternalLink, Minimize2, Maximize2, ListPlus } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useDockPresence } from "@/components/layout/dock/useDock";
@@ -10,8 +10,11 @@ import { shouldAutoplayOnBufferReady } from "./videoPlaylistHelpers";
 import { ALL_QUALITIES, formatTime, getFileExtension } from "./playerFormat";
 import { usePlayerKeyboard } from "./hooks/usePlayerKeyboard";
 import { PlayerControlsBar } from "./theater/PlayerControlsBar";
+import { canAddToPlaylist, requestAddToPlaylist } from "@/features/playlists/playlists";
 import { PlayerSettingsSheet } from "./theater/PlayerSettingsSheet";
 
+// How long the theater takes to shrink into the dock
+const MINIMIZE_MS = 260;
 // Holds the video for the instant between leaving the theater and the dock appearing: a video
 // taken out of the page pauses, one moved within it keeps playing
 let videoParking = null;
@@ -30,6 +33,7 @@ function parkVideoHost(host) {
 import { PlayerInfoDialogs } from "./theater/PlayerInfoDialogs";
 export const MediaPlayer = ({
     mediaUrl,
+    fileItem,
     fileName,
     fileType,
     startPosition,
@@ -305,6 +309,21 @@ export const MediaPlayer = ({
         modeSwitchRef.current = { play: isPlaying };
         setIsMini(mini);
     }, [isPlaying, setIsMini]);
+    // Minimizing first carries the theater down and shrinks it (as the Android app does when the
+    // video is pulled down), then hands the video to the dock
+    const [minimizing, setMinimizing] = useState(false);
+    const minimizeToDock = useCallback(() => {
+        const reduced = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+        if (reduced) {
+            switchPlayerMode(true);
+            return;
+        }
+        setMinimizing(true);
+        setTimeout(() => {
+            setMinimizing(false);
+            switchPlayerMode(true);
+        }, MINIMIZE_MS);
+    }, [switchPlayerMode]);
     const [videoHost] = useState(() => {
         const host = document.createElement("div");
         host.className = "w-full h-full";
@@ -887,7 +906,7 @@ export const MediaPlayer = ({
     ), videoHost);
     // Docked (minimized) video: compact controls rendered into the app dock
     if (isMini) {
-        const docked = (<div className="flex items-center gap-2.5 w-full min-w-0">
+        const docked = (<div className="flex items-center gap-2.5 w-full min-w-0 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-3 duration-300">
           <button onClick={() => switchPlayerMode(false)} className="group relative w-[84px] h-[47px] rounded-md overflow-hidden bg-black shrink-0 border border-border" title="Open in theater mode" aria-label="Open video in theater mode">
             <span ref={attachVideo} className="block w-full h-full pointer-events-none"/>
             <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity">
@@ -950,7 +969,7 @@ export const MediaPlayer = ({
             // the controls a moment before the tap itself was handled as "they're visible: hide".
             if (e.pointerType === "mouse")
                 showControls(4000);
-        }} className={`fixed inset-0 z-50 bg-[#0a0a0a] text-white flex flex-col select-none overflow-hidden ${!areControlsVisible && isPlaying ? "cursor-none" : "cursor-default"}`}>
+        }} className={`fixed inset-0 z-50 bg-[#0a0a0a] text-white flex flex-col select-none overflow-hidden origin-top motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-10 motion-safe:zoom-in-95 duration-300 ${minimizing ? "transition-[transform,opacity,border-radius] duration-[260ms] ease-in translate-y-[70%] scale-50 opacity-0 rounded-3xl pointer-events-none" : ""} ${!areControlsVisible && isPlaying ? "cursor-none" : "cursor-default"}`} data-minimizing={minimizing || undefined}>
       {/* The one video element (theater and dock share it) */}
       <div ref={attachVideo} className="w-full h-full"/>
 
@@ -1031,6 +1050,9 @@ export const MediaPlayer = ({
         }} className={`p-2 rounded-full hover:bg-white/10 text-white/90 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[40px] min-h-[40px] flex items-center justify-center ${activeMenu === "external" ? "bg-primary text-primary-foreground" : ""}`} title="Open in external player (VLC / MX Player)" aria-label="Open in external player">
             <ExternalLink className="w-5 h-5"/>
           </button>
+          {canAddToPlaylist(fileItem) && (<button onClick={() => { requestAddToPlaylist([fileItem]); showControls(5000); }} className="p-2 rounded-full hover:bg-white/10 text-white/90 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[40px] min-h-[40px] flex items-center justify-center" title="Save to playlist" aria-label="Save to playlist">
+              <ListPlus className="w-5 h-5"/>
+            </button>)}
           <button onClick={handleDownloadAction} className="p-2 rounded-full hover:bg-white/10 text-white/90 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[40px] min-h-[40px] flex items-center justify-center" title="Download file" aria-label="Download file">
             <Download className="w-5 h-5"/>
           </button>
@@ -1038,7 +1060,7 @@ export const MediaPlayer = ({
             <Info className="w-5 h-5"/>
           </button>
           <button onClick={() => {
-            switchPlayerMode(true);
+            minimizeToDock();
             showControls(3000);
         }} className="p-2 rounded-full hover:bg-white/10 text-white/90 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 touch-manipulation min-w-[40px] min-h-[40px] flex items-center justify-center" title="Minimize to dock" aria-label="Minimize to dock">
             <Minimize2 className="w-5 h-5"/>

@@ -9,6 +9,7 @@ import { TelegramVerificationDialog } from "@/features/auth/TelegramVerification
 import { IndexChatDialog } from "@/features/explorer/dialogs/IndexChatDialog"; // Add this import
 import { FolderPickerModal } from "@/features/explorer/dialogs/FolderPickerModal";
 import { SelectionBar } from "./SelectionBar";
+import { canAddToPlaylist, requestAddToPlaylist } from "@/features/playlists/playlists";
 import { GridTile, ListHeader, ListRow, GRID_CLASS } from "./items/FileItems";
 import { VirtualItems } from "./items/VirtualItems";
 import { shouldVirtualize } from "./lib/virtualLayout";
@@ -459,6 +460,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             case "star": return runBatch((l) => onBatch.setStarred?.(l, true), list);
             case "unstar": return runBatch((l) => onBatch.setStarred?.(l, false), list);
             case "compress": return setCompressDialog(true);
+            case "playlist": return requestAddToPlaylist(list);
             case "to-vault": return runBatch(onBatch.toVault, list);
             case "to-home": return runBatch(onBatch.toHome, list);
             case "restore": return runBatch(onBatch.restore, list);
@@ -468,7 +470,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             default: return undefined;
         }
     };
-    const selectionActions = getSelectionActions(section, { count: selectedList.length, allStarred: selectedList.length > 0 && selectedList.every(isItemStarred) });
+    const selectionActions = getSelectionActions(section, { count: selectedList.length, allStarred: selectedList.length > 0 && selectedList.every(isItemStarred), playable: selectedList.length > 0 && selectedList.every(canAddToPlaylist) });
     const locationPath = currentApiPath || (currentPath && currentPath.length > 0 ? `/${currentPath.join("/")}` : "/Home");
     const pickerStartPath = /^\/(Home|Vault)(\/|$)/.test(locationPath) ? locationPath : "/Home";
     // Keep stateRef fresh for capture-phase keyboard navigation

@@ -51,6 +51,8 @@ describe("getSelectionActions", () => {
     });
     it("home offers move, star, compress and vault", () => {
         expect(ids(getSelectionActions("home", { count: 2 }))).toEqual(["download", "move-to", "copy", "cut", "star", "compress", "to-vault", "delete"]);
+        expect(ids(getSelectionActions("home", { count: 2, playable: true }))).toContain("playlist");
+        expect(ids(getSelectionActions("trash", { count: 2, playable: true }))).not.toContain("playlist");
     });
     it("shows details only for a single item and unstar when all are starred", () => {
         const a = ids(getSelectionActions("home", { count: 1, allStarred: true }));

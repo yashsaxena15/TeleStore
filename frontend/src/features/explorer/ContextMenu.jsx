@@ -1,12 +1,12 @@
 import { useEffect, useRef } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { FolderOpen, Pencil, Trash2, Copy, Scissors, Clipboard, Info, Download, Share2, Eye, Star, RefreshCw, Upload, RotateCcw, Archive, Link, ShieldCheck, } from "lucide-react";
+import { ListPlus, FolderOpen, Pencil, Trash2, Copy, Scissors, Clipboard, Info, Download, Share2, Eye, Star, RefreshCw, Upload, RotateCcw, Archive, Link, ShieldCheck, } from "lucide-react";
 export const ContextMenu = ({ x, y, onClose, onRefresh, itemType, itemName, onOpen, onCopy, onCut, onPaste, onDelete, onRename, onNewFolder, onDownload, onUploadFiles, // Destructure the new prop
 onUploadFolder, // Destructure the new prop
 isClipboardPasted, // Destructure the new prop
 hasClipboard, // Destructure the new prop
 disableDelete = false, // Destructure the new prop with default value
-onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false, isVideo = false, onCopyStreamUrl, selectedCount = 1, isStarred = false, onToggleStar, isTrashMode = false, onRestore, isVaultMode = false, onMoveToVault, onMoveToHome, isCloudMode = false, isVirtualFolder = false, isRestrictedEmptyArea = false, }) => {
+onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false, isVideo = false, onCopyStreamUrl, selectedCount = 1, isStarred = false, onToggleStar, isTrashMode = false, onRestore, isVaultMode = false, onMoveToVault, onMoveToHome, isCloudMode = false, isVirtualFolder = false, isRestrictedEmptyArea = false, onAddToPlaylist, }) => {
     const menuRef = useRef(null);
     const isMobile = useIsMobile();
 
@@ -75,6 +75,10 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                 break;
             case "toggle_star":
                 onToggleStar?.();
+                onClose();
+                break;
+            case "add_to_playlist":
+                onAddToPlaylist?.();
                 onClose();
                 break;
             case "restore":
@@ -261,6 +265,9 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                                 },
                             ]
                             : []),
+                        ...(onAddToPlaylist
+                            ? [{ icon: ListPlus, label: "Add to playlist", action: "add_to_playlist" }]
+                            : []),
                         ...(itemType !== "folder"
                             ? [
                                 {
@@ -350,6 +357,9 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                             label: isStarred ? "Remove from Starred" : "Add to Starred",
                             action: "toggle_star",
                         },
+                        ...(onAddToPlaylist
+                            ? [{ icon: ListPlus, label: "Add to playlist", action: "add_to_playlist" }]
+                            : []),
                         {
                             icon: Download,
                             label: "Download",

@@ -219,6 +219,16 @@ export const api = {
     fetchFiles: (path = '/', page, pageSize, sortBy, sortOrder) => request('/files', { query: { path, page, page_size: pageSize, sort_by: sortBy, sort_order: sortOrder }, timeout: 5000, fallback: 'Failed to fetch files' }),
     createFolder: (folderName, currentPath) => post('/folders/create', { folderName, currentPath }, { timeout: 3000, fallback: 'Failed to create folder' }),
     createFolderPath: (fullPath) => post('/folders/create-path', { fullPath }, { timeout: 3000, fallback: 'Failed to create folder path' }),
+    // Playlists (the same ones as in the Android app); "liked" is Liked music
+    fetchPlaylists: () => request('/files/playlists', { timeout: 15000, fallback: 'Failed to load playlists' }),
+    fetchPlaylist: (id) => request(`/files/playlists/${encodeURIComponent(id)}`, { timeout: 15000, fallback: 'Failed to open the playlist' }),
+    createPlaylist: (name, fileIds = []) => post('/files/playlists', { name, file_ids: fileIds }, { fallback: 'Failed to create the playlist' }),
+    renamePlaylist: (id, name) => request(`/files/playlists/${encodeURIComponent(id)}`, { method: 'PATCH', body: { name }, fallback: 'Failed to rename the playlist' }),
+    deletePlaylist: (id) => request(`/files/playlists/${encodeURIComponent(id)}`, { method: 'DELETE', fallback: 'Failed to delete the playlist' }),
+    addToPlaylist: (id, fileIds) => post(`/files/playlists/${encodeURIComponent(id)}/items`, { file_ids: fileIds }, { fallback: 'Failed to add to the playlist' }),
+    removeFromPlaylist: (id, fileIds) => post(`/files/playlists/${encodeURIComponent(id)}/items/remove`, { file_ids: fileIds }, { fallback: 'Failed to remove from the playlist' }),
+    reorderPlaylist: (id, fileIds) => request(`/files/playlists/${encodeURIComponent(id)}/order`, { method: 'PUT', body: { file_ids: fileIds }, fallback: 'Failed to reorder the playlist' }),
+    setLiked: (fileId, liked) => post('/files/playlists/like', { file_id: fileId, liked }, { fallback: 'Failed to update Liked music' }),
     // Photos: photos and videos in one folder tree (the phone backup), newest taken first
     fetchMedia: (under, page, pageSize) => request('/files', { query: { path: 'all', kind: 'media', under, page, page_size: pageSize, sort_by: 'taken', sort_order: 'desc' }, timeout: 15000, fallback: 'Failed to fetch photos' }),
     toggleStar: (fileId, starred) => post('/files/star', { file_id: fileId, starred }, { fallback: 'Failed to update star status' }),
