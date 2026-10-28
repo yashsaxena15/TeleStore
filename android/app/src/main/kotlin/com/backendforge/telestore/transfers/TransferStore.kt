@@ -47,7 +47,11 @@ data class PhoneTransfer(
     val offline: Boolean = false,
     /** The folder kept offline that brought this file, so it goes when the file leaves that folder. */
     val offlineFolder: String? = null,
+    /** Cleared from the Transfers list, but its downloaded copy is still known (Offline label, playing it). */
+    val hidden: Boolean = false,
 ) {
+    /** Shown in Transfers › On this phone (finished offline saves live in Offline files instead). */
+    val listed: Boolean get() = !hidden && !(offline && status == TransferStatus.DONE)
     val progress: Float get() = if (size > 0) (done.toFloat() / size).coerceIn(0f, 1f) else 0f
 }
 

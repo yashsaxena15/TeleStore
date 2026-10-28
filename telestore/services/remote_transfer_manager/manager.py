@@ -7,6 +7,7 @@ import shutil
 import asyncio
 import secrets
 import threading
+from telestore.services.remote_transfer_manager.helpers import friendly_error
 from telestore.services import event_service
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
@@ -1416,6 +1417,19 @@ class RemoteTransferManager:
         if group_id:
             await finalize_multipart_group_if_ready(group_id, task_doc)
 
+    async def _refresh_drive_sign_in(self, task_doc: dict) -> None:
+        """Puts a fresh Google access token in this task's request headers (in memory only)."""
+        account_id = task_doc.get("cloud_account_id")
+        if not account_id or task_doc.get("source_type") == "telegram_to_gdrive":
+            return
+        from telestore.services.google_drive_manager import GoogleDriveManager
+        # The task was queued by this account's owner (checked when it was queued)
+        account = database.CloudAccounts.get_account_raw(account_id=account_id)
+        if not account:
+            raise ValueError("The Google Drive account this copy came from isn't connected any more.")
+        token = await GoogleDriveManager.get_valid_access_token(account)
+        task_doc["custom_headers"] = {**(task_doc.get("custom_headers") or {}), "Authorization": f"Bearer {token}"}
+
     async def _run_download_and_upload(self, task_doc: dict, cancel_event: threading.Event):
         if task_doc.get("source_type") == "telegram_to_gdrive":
             await self._execute_telegram_to_gdrive(task_doc, cancel_event)
@@ -1428,6 +1442,9 @@ class RemoteTransferManager:
         if task_doc.get("source_type") == "media":
             await self._execute_media(task_doc, cancel_event)
             return
+
+        # A copy from a connected Google Drive: sign in again now (a saved token lasts about an hour)
+        await self._refresh_drive_sign_in(task_doc)
 
         if task_doc.get("is_range_part"):
             await self._run_range_part_transfer(task_doc, cancel_event)
@@ -2256,6 +2273,12 @@ class RemoteTransferManager:
         try:
             coll = get_remote_db()["RemoteTransfers"]
             updates["updated_at"] = datetime.now(timezone.utc)
+            if updates.get("error_message"):
+                # Keep what really happened for the logs; the user reads one plain sentence
+                raw = updates["error_message"]
+                updates["error_message"] = friendly_error(raw)
+                if updates["error_message"] != raw:
+                    updates["error_detail"] = str(raw)[:2000]
             coll.update_one({"task_id": task_id}, {"$set": updates})
         except Exception as e:
             logger.warning(f"Failed to update remote transfer {task_id}: {e}")
@@ -2412,6 +2435,13 @@ class RemoteTransferManager:
                 d["updated_at"] = d["updated_at"].isoformat()
             if isinstance(d.get("cooldown_until"), datetime):
                 d["cooldown_until"] = d["cooldown_until"].isoformat()
+            # Sign-in headers stay on the server; older failures may still hold raw source text
+            d.pop("custom_headers", None)
+            d.pop("error_detail", None)
+            d["error_message"] = friendly_error(d.get("error_message"))
+            for part in d.get("parts") or []:
+                if isinstance(part, dict):
+                    part.pop("custom_headers", None)
 
         group_ids = sorted({d["group_id"] for d in docs if d.get("group_id")})
         return {"tasks": docs, "groups": self._group_summaries(coll, uid, group_ids)}
@@ -2438,6 +2468,11 @@ class RemoteTransferManager:
             group["filesize"] += row["filesize"]
             group["transferred_bytes"] += row["transferred"]
             group["speed_bps"] += row["speed"]
+        # Why files failed: the latest reason, so a folder doesn't just say "3 failed"
+        for group_id, group in summaries.items():
+            if group["counts"].get("failed"):
+                failed = coll.find_one({"user_id": user_id, "group_id": group_id, "status": "failed"}, {"error_message": 1}, sort=[("updated_at", -1)])
+                group["error"] = friendly_error((failed or {}).get("error_message"))
         return summaries
 
 remote_transfer_manager = RemoteTransferManager(max_concurrent=2)

@@ -201,10 +201,12 @@ class TransfersTest {
     @Test
     fun `server transfers and folder zips are read`() = runBlocking {
         server.enqueue(json("""{"tasks":[{"task_id":"t1","filename":"a.apk","status":"failed","error_message":"HTTP 404","group_id":"g1","group_name":"Drive"},
-            {"task_id":"t2","status":"downloading","progress":40.5,"speed_bps":1000000}],
-            "groups":{"g1":{"total":10,"counts":{"completed":6,"failed":1,"queued":3},"filesize":100,"transferred_bytes":60,"speed_bps":5}}}"""))
+            {"task_id":"t2","status":"paused_quota","phase":"Google Drive limit reached, resumes at 14:00","progress":40.5,"speed_bps":1000000}],
+            "groups":{"g1":{"total":10,"counts":{"completed":6,"failed":1,"queued":3},"filesize":100,"transferred_bytes":60,"speed_bps":5,"error":"Google Drive refused the download (its sign-in had expired). Tap Retry."}}}"""))
         val list = api.remoteTasks()
         assertTrue(list.tasks[0].isFailed && list.tasks[1].isActive)
+        assertEquals("Google Drive limit reached, resumes at 14:00", list.tasks[1].phase)
+        assertTrue(list.groups["g1"]!!.error!!.startsWith("Google Drive refused"))
         assertEquals(6, list.groups["g1"]!!.done)
         assertEquals(3, list.groups["g1"]!!.active)
         server.takeRequest()

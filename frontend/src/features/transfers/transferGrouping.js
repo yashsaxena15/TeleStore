@@ -103,7 +103,9 @@ export function groupRemoteTransfers(remoteTransfers) {
                 : `Leeching [${completedCount + 1}/${totalCount}]: ${activeSub?.filename || ''}`;
         }
         else if (status === 'failed') {
-            phase = `${failedCount} of ${totalCount} ${groupType === 'file' ? 'parts' : 'files'} failed`;
+            // Say why (the server sends the latest reason), not only how many
+            const reason = summary?.error || subItems.find(i => i.status === 'failed' && i.error_message)?.error_message;
+            phase = `${failedCount} of ${totalCount} ${groupType === 'file' ? 'parts' : 'files'} failed${reason ? `: ${reason}` : ''}`;
         }
         else if (status === 'cancelled') {
             phase = groupType === 'file' ? 'File transfer cancelled' : 'Folder transfer cancelled';

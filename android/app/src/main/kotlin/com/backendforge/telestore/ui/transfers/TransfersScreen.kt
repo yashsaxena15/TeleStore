@@ -66,7 +66,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun TransfersScreen(container: AppContainer, onAddLink: () -> Unit = {}) {
     val manager = container.transfers
-    val phone by manager.store.items.collectAsStateWithLifecycle()
+    val allPhone by manager.store.items.collectAsStateWithLifecycle()
+    val phone = remember(allPhone) { allPhone.filter { it.listed } }
     var server by remember { mutableStateOf<RemoteTaskList?>(null) }
     var serverError by remember { mutableStateOf<String?>(null) }
     var archives by remember { mutableStateOf<List<com.backendforge.telestore.core.ArchiveTask>>(emptyList()) }
@@ -265,6 +266,10 @@ private fun GroupRow(name: String, summary: GroupSummary, running: List<RemoteTa
                 Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
                 val failed = if (summary.failed > 0) " · ${summary.failed} failed" else ""
                 Text("${summary.done} of ${summary.total} files$failed", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // Why they failed, so a folder never just says "failed"
+                if (summary.failed > 0) {
+                    Text(summary.error ?: "The server didn't say why.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
         LinearProgressIndicator(progress = { if (summary.total > 0) summary.done.toFloat() / summary.total else 0f }, modifier = Modifier.fillMaxWidth())
@@ -273,7 +278,7 @@ private fun GroupRow(name: String, summary: GroupSummary, running: List<RemoteTa
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (summary.active == 0 && summary.done < summary.total) OutlinedButton(onClick = onResume) { Text("Resume") }
+            if (summary.active == 0 && summary.done < summary.total) OutlinedButton(onClick = onResume) { Text(if (summary.failed > 0) "Retry failed" else "Resume") }
             if (summary.active > 0) OutlinedButton(onClick = onCancel) { Text("Cancel all", color = MaterialTheme.colorScheme.error) }
         }
     }
@@ -287,12 +292,13 @@ private fun ServerRow(task: RemoteTask, onCancel: () -> Unit, onRetry: () -> Uni
             Column(Modifier.weight(1f)) {
                 Text(task.filename ?: "Transfer", maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
                 val line = when {
-                    task.isFailed -> "Failed: ${task.error ?: "unknown error"}"
+                    task.isFailed -> "Failed: ${task.error ?: "the server didn't say why"}"
                     task.status == "completed" -> "Done${task.filesize?.let { " · ${formatBytes(it)}" } ?: ""}"
                     task.status == "cancelled" -> "Cancelled"
                     task.status == "queued" -> "Waiting"
                     task.status == "discovering" -> "Looking through the folder…"
                     task.status == "uploading_tg" -> "Saving to Telegram · ${(task.progress ?: 0.0).toInt()}%"
+                    task.status == "paused_quota" -> task.phase ?: "Paused · resumes by itself"
                     else -> "${(task.progress ?: 0.0).toInt()}%${task.speed?.takeIf { it > 0 }?.let { " · ${formatBytes(it.toLong())}/s" } ?: ""}"
                 }
                 Text(line, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis,

@@ -73,6 +73,12 @@ describe("a folder leech sent as a summary", () => {
         expect(group.progress).toBe(17.9);
         expect(group.phase).toBe("Leeching [6801/38000]: now.bin");
     });
+    it("says why a folder's files failed", () => {
+        const failedSummary = { total: 3, counts: { completed: 1, failed: 2 }, filesize: 0, transferred_bytes: 0, speed_bps: 0, error: "Google Drive refused the download (its sign-in had expired). Tap Retry." };
+        const group = buildTransferItems([], [], [{ task_id: "c", id: "c", filename: "a.jpg", status: "failed", group_id: "drive", group_name: "Trip", group_summary: failedSummary }]).find((i) => i.id === "drive");
+        expect(group.status).toBe("failed");
+        expect(group.phase).toBe("2 of 3 files failed: Google Drive refused the download (its sign-in had expired). Tap Retry.");
+    });
     it("counts active, completed and failed from the summary once", () => {
         expect(countRemoteTasks([...rows, { task_id: "s", status: "queued" }])).toEqual({ active: 31002, completed: 6800, failed: 199 });
     });
