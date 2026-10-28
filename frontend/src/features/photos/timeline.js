@@ -46,3 +46,25 @@ export function groupByDay(items, today = new Date()) {
     }
     return [...groups.values()];
 }
+
+/** The folder whose photos show for a view: all of the backup, or one album (a folder in it). */
+export function photosUnder(view) {
+    return view?.kind === "album" ? `${PHOTOS_FOLDER}/${view.name}` : PHOTOS_FOLDER;
+}
+
+/** Album names (the backup's folders, one per phone album), A to Z. */
+export function albumNames(files) {
+    return (files || [])
+        .filter((f) => (f.file_type || f.type) === "folder")
+        .map((f) => f.file_name || f.name)
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b));
+}
+
+/** "Camera · 12 items", "Starred · 3 items", "120 items from your phone backup". */
+export function photosSubtitle(view, count) {
+    const items = `${count} ${count === 1 ? "item" : "items"}`;
+    if (view?.kind === "album") return `${view.name} · ${items}`;
+    if (view?.kind === "starred") return `Starred · ${items}`;
+    return `${items} from your phone backup`;
+}

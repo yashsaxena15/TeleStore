@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayLabel, groupByDay, timelineDate, PHOTOS_FOLDER } from "./timeline";
+import { albumNames, dayLabel, groupByDay, photosSubtitle, photosUnder, timelineDate, PHOTOS_FOLDER } from "./timeline";
 
 const today = new Date(2026, 9, 27, 15, 0); // Tue 27 Oct 2026, local time
 
@@ -35,5 +35,21 @@ describe("Photos timeline", () => {
 
     it("shows only the phone backup folder", () => {
         expect(PHOTOS_FOLDER).toBe("/Home/Phone Backup");
+    });
+});
+
+describe("photo views", () => {
+    it("an album is a folder inside the backup", () => {
+        expect(photosUnder({ kind: "all" })).toBe(PHOTOS_FOLDER);
+        expect(photosUnder({ kind: "starred" })).toBe(PHOTOS_FOLDER);
+        expect(photosUnder({ kind: "album", name: "Camera" })).toBe(`${PHOTOS_FOLDER}/Camera`);
+    });
+    it("albums are the backup's folders, A to Z", () => {
+        expect(albumNames([{ file_name: "WhatsApp", file_type: "folder" }, { file_name: "a.jpg", file_type: "image" }, { file_name: "Camera", file_type: "folder" }])).toEqual(["Camera", "WhatsApp"]);
+    });
+    it("says what is shown", () => {
+        expect(photosSubtitle({ kind: "all" }, 1)).toBe("1 item from your phone backup");
+        expect(photosSubtitle({ kind: "album", name: "Camera" }, 12)).toBe("Camera · 12 items");
+        expect(photosSubtitle({ kind: "starred" }, 3)).toBe("Starred · 3 items");
     });
 });

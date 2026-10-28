@@ -14,7 +14,8 @@ import { downloadManager } from "@/features/transfers/downloadManager";
 import { apiFileToFileItem } from "@/features/explorer/fileTypes";
 import { Thumbnail } from "@/features/explorer/Thumbnail";
 import { createOpenItem } from "@/features/explorer/actions/openItem";
-import { groupByDay, PHOTOS_FOLDER } from "./timeline";
+import { groupByDay, PHOTOS_FOLDER, photosSubtitle, photosUnder } from "./timeline";
+import { PhotosMenu } from "./PhotosMenu";
 
 const ImageViewer = lazy(() => import("@/features/viewers/ImageViewer").then((m) => ({ default: m.ImageViewer })));
 
@@ -57,22 +58,30 @@ export const PhotosPage = () => {
     const { playMedia } = useMediaPlayer();
     const [selected, setSelected] = useState(() => new Set());
     const [imageViewer, setImageViewer] = useState(null);
+    // All photos, starred ones, or one album (the menu at the top right)
+    const [view, setView] = useState({ kind: "all" });
+    const under = photosUnder(view);
     const lastOpenTimeRef = useRef(0);
     const sentinel = useRef(null);
 
     const query = useInfiniteQuery({
-        queryKey: ["files", "photos", PHOTOS_FOLDER],
+        queryKey: ["files", "photos", under],
         queryFn: async ({ pageParam }) => {
-            const res = await api.fetchMedia(PHOTOS_FOLDER, pageParam, PAGE_SIZE);
+            const res = await api.fetchMedia(under, pageParam, PAGE_SIZE);
             return { files: (res.files || []).map(apiFileToFileItem), pagination: res.pagination };
         },
         initialPageParam: 1,
         getNextPageParam: (last, pages) => (last.pagination?.has_next ? pages.length + 1 : undefined),
         staleTime: 1000 * 60 * 2,
     });
-    const items = useMemo(() => (query.data?.pages || []).flatMap((p) => p.files), [query.data]);
+    const loaded = useMemo(() => (query.data?.pages || []).flatMap((p) => p.files), [query.data]);
+    const items = useMemo(() => (view.kind === "starred" ? loaded.filter((i) => i.starred) : loaded), [loaded, view.kind]);
     const days = useMemo(() => groupByDay(items), [items]);
-    const total = query.data?.pages?.[0]?.pagination?.total_items ?? items.length;
+    const total = view.kind === "starred" ? items.length : (query.data?.pages?.[0]?.pagination?.total_items ?? items.length);
+    const changeView = (next) => {
+        setSelected(new Set());
+        setView(next);
+    };
 
     // Load the next page when the end of the grid comes into view
     const { hasNextPage, isFetchingNextPage, fetchNextPage } = query;
@@ -138,7 +147,7 @@ export const PhotosPage = () => {
           <Button variant="ghost" size="icon" onClick={download} title="Download" aria-label="Download"><Download className="w-4 h-4"/></Button>
           <Button variant="ghost" size="icon" onClick={() => bulk(allStarred ? "Unstarred" : "Starred", (i) => api.toggleStar(i.id, !allStarred))} title={allStarred ? "Unstar" : "Star"} aria-label={allStarred ? "Unstar" : "Star"}><Star className={cn("w-4 h-4", allStarred && "fill-warning text-warning")}/></Button>
           <Button variant="ghost" size="icon" onClick={() => bulk("Moved to Trash", (i) => api.trashFile(i.id))} title="Move to Trash" aria-label="Move to Trash"><Trash2 className="w-4 h-4"/></Button>
-        </div>) : (<PageHeader icon={Images} title="Photos" subtitle={query.isLoading ? "Loading…" : `${total} ${total === 1 ? "item" : "items"} from your phone backup`}/>)}
+        </div>) : (<PageHeader icon={Images} title="Photos" subtitle={query.isLoading ? "Loading…" : photosSubtitle(view, total)} actions={<PhotosMenu view={view} onViewChange={changeView}/>}/>)}
 
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar" data-testid="photos-scroll">
         {query.isLoading ? (<div className="h-full grid place-items-center"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground"/></div>) : query.isError ? (<div className="h-full grid place-items-center p-6 text-center">
@@ -147,11 +156,14 @@ export const PhotosPage = () => {
               <Button variant="outline" size="sm" onClick={() => query.refetch()}>Try again</Button>
             </div>
           </div>) : items.length === 0 ? (<div className="h-full grid place-items-center p-6 text-center">
-            <div className="grid gap-2 justify-items-center max-w-sm">
-              <Images className="w-12 h-12 text-primary/70"/>
-              <p className="font-medium">No backed-up photos yet</p>
-              <p className="text-sm text-muted-foreground">Turn on Backup in the TeleStore Android app. Photos and videos from your phone appear here, in “{PHOTOS_FOLDER.replace("/Home/", "")}”.</p>
-            </div>
+            {view.kind === "all" ? (<div className="grid gap-2 justify-items-center max-w-sm">
+                <Images className="w-12 h-12 text-primary/70"/>
+                <p className="font-medium">No backed-up photos yet</p>
+                <p className="text-sm text-muted-foreground">Turn on Backup in the TeleStore Android app. Photos and videos from your phone appear here, in “{PHOTOS_FOLDER.replace("/Home/", "")}”.</p>
+              </div>) : (<div className="grid gap-3 justify-items-center max-w-sm">
+                <p className="font-medium">{view.kind === "starred" ? "No starred photos" : `Nothing in ${view.name} yet`}</p>
+                <Button variant="outline" size="sm" onClick={() => changeView({ kind: "all" })}>Show all photos</Button>
+              </div>)}
           </div>) : (<div className="pb-6">
             {days.map((day) => {
                 const allSelected = day.items.every((i) => selected.has(i.id));

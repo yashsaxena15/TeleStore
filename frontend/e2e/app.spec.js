@@ -698,6 +698,23 @@ test.describe("phone @phone", () => {
 });
 
 test.describe("photos", () => {
+    test("the menu at the top shows an album or starred photos", async ({ page }) => {
+        await page.goto("/photos");
+        await expect(page.getByText("3 items from your phone backup")).toBeVisible();
+        await page.getByRole("button", { name: "Photos menu" }).click();
+        await expect(page.getByText("Backup runs in the TeleStore Android app")).toBeVisible();
+        await page.getByRole("menuitem", { name: "WhatsApp Images" }).click();
+        await expect(page.getByText("Nothing in WhatsApp Images yet")).toBeVisible();
+        await page.getByRole("button", { name: "Show all photos" }).click();
+        await page.getByRole("button", { name: "Photos menu" }).click();
+        await page.getByRole("menuitem", { name: "Camera" }).click();
+        await expect(page.getByText("Camera · 3 items")).toBeVisible();
+        await expect(page.getByTestId("photo-tile")).toHaveCount(3);
+        await page.getByRole("button", { name: "Photos menu" }).click();
+        await page.getByRole("menuitem", { name: "Starred" }).click();
+        await expect(page.getByText("No starred photos")).toBeVisible();
+    });
+
     test("shows only the phone backup, by day, with previews for files without a thumbnail", async ({ page, request }) => {
         await page.goto("/");
         await page.getByRole("complementary").first().getByRole("button", { name: "Photos" }).click();

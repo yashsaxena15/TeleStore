@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,6 +46,7 @@ fun AlbumsScreen(container: AppContainer, onBack: () -> Unit, onOpenFolder: (Str
     val settings by container.backup.settings.collectAsStateWithLifecycle()
     var folders by remember { mutableStateOf<List<FileItem>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
+    var loaded by remember { mutableStateOf(false) }
     LaunchedEffect(settings.destination) {
         folders = try {
             container.api().listFiles(path = settings.destination, pageSize = 200).files.filter { it.isFolder }
@@ -54,6 +56,7 @@ fun AlbumsScreen(container: AppContainer, onBack: () -> Unit, onOpenFolder: (Str
             error = "No backed-up albums yet."
             emptyList()
         }
+        loaded = true
     }
     Scaffold(
         topBar = {
@@ -69,7 +72,13 @@ fun AlbumsScreen(container: AppContainer, onBack: () -> Unit, onOpenFolder: (Str
         ) {
             item { Tile(Icons.Filled.Star, "Starred", "Favourites") { onOpenFolder("starred") } }
             items(folders, key = { it.id }) { folder -> Tile(Icons.Filled.PhotoAlbum, folder.name, "From your phone") { onOpenFolder(FolderPaths.childPath(folder)) } }
-            if (folders.isEmpty() && error != null) item { Text(error ?: "", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            if (folders.isEmpty() && loaded) item(span = { GridItemSpan(maxLineSpan) }) {
+                Text(
+                    error ?: "Each phone album you back up gets its own album here.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
         }
     }
 }

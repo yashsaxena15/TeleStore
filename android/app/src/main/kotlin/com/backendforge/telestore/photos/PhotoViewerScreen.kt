@@ -46,15 +46,19 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.SubcomposeAsyncImage
 import com.backendforge.telestore.core.FileItem
 import com.backendforge.telestore.core.TeleStoreApi
+import com.backendforge.telestore.data.PhotoSource
 import com.backendforge.telestore.ui.components.FileInfoSheet
 import com.backendforge.telestore.ui.components.pullDownOffset
 import com.backendforge.telestore.ui.components.pullDownToClose
 import com.backendforge.telestore.ui.components.rememberPullDownState
 
-/** Swipe through the folder's photos; pinch or double-tap to zoom, drag to look around, pull down to close. */
+/**
+ * Swipe through the folder's photos; pinch or double-tap to zoom, drag to look around, pull down to close.
+ * A photo on this phone shows from there; one only in TeleStore from the server.
+ */
 @Composable
 fun PhotoViewerScreen(
-    photos: List<FileItem>,
+    photos: List<PhotoSource>,
     startIndex: Int,
     api: TeleStoreApi,
     onBack: () -> Unit,
@@ -78,7 +82,7 @@ fun PhotoViewerScreen(
             modifier = Modifier.fillMaxSize().pullDownOffset(pull),
         ) { page ->
             ZoomableImage(
-                url = remember(page) { offlineCopy(photos[page])?.toString() ?: api.media.file(photos[page]).toString() },
+                url = remember(page) { photoUrl(photos[page], api, offlineCopy) },
                 active = page == pager.currentPage,
                 onZoomChanged = { if (page == pager.currentPage) zoomed = it },
                 onTap = { chrome = !chrome },
@@ -95,12 +99,21 @@ fun PhotoViewerScreen(
                     Text(current.name, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                     Text("${pager.currentPage + 1} of ${photos.size}", color = Color(0xFFD4D4D8), style = MaterialTheme.typography.bodySmall)
                 }
-                IconButton(onClick = { info = current }) { Icon(Icons.Outlined.Info, contentDescription = "Info", tint = Color.White) }
+                // Details come from the server: a photo only on this phone has none to show
+                current.item?.let { item ->
+                    IconButton(onClick = { info = item }) { Icon(Icons.Outlined.Info, contentDescription = "Info", tint = Color.White) }
+                }
             }
         }
     }
     info?.let { FileInfoSheet(item = it, api = api, onDismiss = { info = null }) }
 }
+
+/** The phone's copy first, then a downloaded one, then the server. */
+private fun photoUrl(source: PhotoSource, api: TeleStoreApi, offlineCopy: (FileItem) -> android.net.Uri?): String =
+    source.localUri?.toString()
+        ?: source.item?.let { offlineCopy(it)?.toString() ?: api.media.file(it).toString() }
+        ?: ""
 
 @Composable
 private fun ZoomableImage(url: String, active: Boolean, onZoomChanged: (Boolean) -> Unit, onTap: () -> Unit) {
