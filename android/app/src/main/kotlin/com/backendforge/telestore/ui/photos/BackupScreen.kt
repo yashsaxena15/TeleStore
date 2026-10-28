@@ -73,11 +73,11 @@ fun BackupScreen(container: AppContainer, onBack: () -> Unit) {
         BackupWorker.schedule(context, store.settings.value)
     }
 
-    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        canRead = PhoneMedia.canRead(context)
+    val askAccess = rememberPhotoAccessRequest { granted ->
+        canRead = granted
         partial = PhoneMedia.partialAccess(context)
         refresh++
-        if (canRead) apply { it.copy(enabled = true) }
+        if (granted) apply { it.copy(enabled = true) }
     }
     val deleteRequest = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) refresh++
@@ -116,7 +116,7 @@ fun BackupScreen(container: AppContainer, onBack: () -> Unit) {
                             )
                         }
                         Switch(checked = settings.enabled, onCheckedChange = { on ->
-                            if (on && !canRead) permission.launch(PhoneMedia.permissions()) else apply { it.copy(enabled = on) }
+                            if (on && !canRead) askAccess() else apply { it.copy(enabled = on) }
                         })
                     }
                 }
@@ -145,7 +145,7 @@ fun BackupScreen(container: AppContainer, onBack: () -> Unit) {
             if (partial) item {
                 Card {
                     Text("TeleStore can see only the photos you picked.", style = MaterialTheme.typography.bodyMedium)
-                    OutlinedButton(onClick = { permission.launch(PhoneMedia.permissions()) }, modifier = Modifier.padding(top = 8.dp)) { Text("Allow all photos") }
+                    OutlinedButton(onClick = { askAccess() }, modifier = Modifier.padding(top = 8.dp)) { Text("Allow all photos") }
                 }
             }
 
@@ -181,7 +181,7 @@ fun BackupScreen(container: AppContainer, onBack: () -> Unit) {
                 item {
                     Card {
                         Text("TeleStore needs to see your photos and videos to back them up.", style = MaterialTheme.typography.bodyMedium)
-                        Button(onClick = { permission.launch(PhoneMedia.permissions()) }, modifier = Modifier.padding(top = 8.dp)) { Text("Allow access") }
+                        Button(onClick = { askAccess() }, modifier = Modifier.padding(top = 8.dp)) { Text("Allow access") }
                     }
                 }
             }

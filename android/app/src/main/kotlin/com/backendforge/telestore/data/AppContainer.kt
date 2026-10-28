@@ -3,6 +3,7 @@ package com.backendforge.telestore.data
 import android.content.Context
 import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import coil3.video.VideoFrameDecoder
 import com.backendforge.telestore.core.ServerAddress
 import com.backendforge.telestore.core.TeleStoreApi
 import com.backendforge.telestore.backup.BackupStore
@@ -102,6 +103,8 @@ class AppContainer(val context: Context) {
         ImageLoader.Builder(context)
             .components {
                 add(OkHttpNetworkFetcherFactory(callFactory = { api().http }))
+                // A frame of each video on the phone, for its tile in Photos
+                add(VideoFrameDecoder.Factory())
             }
             .build()
     }

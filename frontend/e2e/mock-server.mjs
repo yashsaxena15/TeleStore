@@ -162,7 +162,10 @@ const PIXEL = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQ
 const listFiles = (url) => {
     const p = (url.searchParams.get("path") || "/Home").replace(/\/+$/, "") || "/Home";
     const under = url.searchParams.get("under");
-    const all = p === "all" && under === "/Home/Phone Backup" ? PHOTOS : (FOLDERS[p] || []);
+    // Photos: the backup, or one album (a folder in it); the backup folder itself lists its albums
+    const all = p === "all" && under?.startsWith("/Home/Phone Backup") ? PHOTOS.filter((f) => `${f.file_path}/`.startsWith(`${under}/`))
+        : p === "/Home/Phone Backup" ? [{ id: "alb1", file_name: "Camera", file_type: "folder", file_path: "/Home/Phone Backup" }, { id: "alb2", file_name: "WhatsApp Images", file_type: "folder", file_path: "/Home/Phone Backup" }]
+            : (FOLDERS[p] || []);
     const page = Number(url.searchParams.get("page") || 1);
     // No page size means "All" in the pagination menu
     const size = url.searchParams.has("page_size") ? Number(url.searchParams.get("page_size")) : all.length || 1;

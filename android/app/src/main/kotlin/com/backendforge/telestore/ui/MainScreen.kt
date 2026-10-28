@@ -642,6 +642,10 @@ fun MainScreen(
                             vm = vm,
                             container = container,
                             onOpenFile = ::openFile,
+                            onOpenPhotos = { sources, index ->
+                                container.playback.openPhotoSources(sources, index)
+                                navController.navigate(ROUTE_PHOTOS)
+                            },
                             onAlbums = { navController.navigate("photos_albums") },
                             onBackup = { navController.navigate("photos_backup") },
                         )

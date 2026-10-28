@@ -2,29 +2,49 @@ package com.backendforge.telestore.ui.photos
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.backendforge.telestore.backup.BackupWorker
+import com.backendforge.telestore.backup.PhoneMedia
 import com.backendforge.telestore.core.ApiException
 import com.backendforge.telestore.core.FileItem
+import com.backendforge.telestore.core.LocalPhoto
 import com.backendforge.telestore.core.Memory
+import com.backendforge.telestore.core.PhotoDay
+import com.backendforge.telestore.core.PhotoEntry
+import com.backendforge.telestore.core.PhotoMerge
 import com.backendforge.telestore.core.SortBy
 import com.backendforge.telestore.core.Timeline
-import com.backendforge.telestore.core.TimelineDay
 import com.backendforge.telestore.data.AppContainer
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class PhotosState(
+    /** The backed-up photos loaded so far (server pages). */
     val items: List<FileItem> = emptyList(),
-    val days: List<TimelineDay> = emptyList(),
+    /** Every photo and video on this phone (empty without the permission). */
+    val local: List<LocalPhoto> = emptyList(),
+    /** Phone and server together, newest first. */
+    val entries: List<PhotoEntry> = emptyList(),
+    val days: List<PhotoDay> = emptyList(),
     val memories: List<Memory> = emptyList(),
     val page: Int = 0,
     val hasNext: Boolean = true,
     val loading: Boolean = false,
     val error: String? = null,
+    /** TeleStore may read the phone's photos. */
+    val canReadPhone: Boolean = true,
+    /** Photos and videos on this phone that are safely backed up ("Free up space" can remove them here). */
+    val freeable: Int = 0,
+    /** Entry ids ([PhotoEntry.id]): the server id, or "local:<key>" for a photo only on the phone. */
     val selected: Set<String> = emptySet(),
     val columns: Int = 4,
     val message: String? = null,
@@ -32,26 +52,42 @@ data class PhotosState(
     val selecting: Boolean get() = selected.isNotEmpty()
 }
 
-/** The Photos timeline: every photo and video in the account, newest taken first, grouped by day. */
+/**
+ * The Photos timeline: every photo and video on this phone and in the backup, newest taken first,
+ * grouped by day. Server pages load as you scroll; the phone is read all at once.
+ */
 class PhotosViewModel(private val container: AppContainer) : ViewModel() {
     private val _state = MutableStateFlow(PhotosState())
     val state: StateFlow<PhotosState> = _state.asStateFlow()
     private var job: Job? = null
+    private var scanJob: Job? = null
+    private var mergeJob: Job? = null
     /** Bumped by refresh: a reply for an older load is dropped. */
     private var generation = 0
+    /** The phone items the backup has done, so they get the cloud mark before their server copy loads. */
+    private var backedUpKeys: Set<String> = emptySet()
 
     init {
         loadMore()
+        scanPhone()
         // A finished backup or upload shows up straight away
         viewModelScope.launch { container.transfers.store.uploaded.collect { refresh() } }
+        // Each photo the backup finishes gets its cloud mark
+        viewModelScope.launch {
+            container.backup.status.map { it.done to it.running }.distinctUntilChanged().drop(1).collect {
+                backedUpKeys = withContext(Dispatchers.IO) { container.backup.backedUpKeys() }
+                remerge()
+            }
+        }
     }
 
     /** Reloads from the newest; what's on screen stays until the new list arrives. */
     fun refresh() {
         job?.cancel()
         generation++
-        _state.update { it.copy(page = 0, hasNext = true, loading = false, selected = emptySet()) }
+        _state.update { it.copy(page = 0, hasNext = true, loading = false, error = null, selected = emptySet()) }
         loadMore()
+        scanPhone()
     }
 
     fun loadMore() {
@@ -71,15 +107,63 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
                     // Page 1 replaces the list (a refresh); later pages add to it, never twice the same photo
                     val items = (if (s.page == 0) page.files else it.items + page.files).distinctBy { f -> f.id }
                     it.copy(
-                        items = items, days = Timeline.days(items),
+                        items = items,
                         memories = if (s.page == 0) Timeline.memories(items) else it.memories,
                         page = s.page + 1, hasNext = page.pagination?.hasNext ?: false, loading = false,
                     )
                 }
+                remerge()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                if (gen == generation) _state.update { it.copy(loading = false, error = (e as? ApiException)?.message ?: "Couldn't load your photos.") }
+                if (gen == generation) {
+                    _state.update { it.copy(loading = false, error = (e as? ApiException)?.message ?: "Couldn't load your backed-up photos.") }
+                    // The phone's photos still show
+                    remerge()
+                }
+            }
+        }
+    }
+
+    /** Reads the phone's photos and videos again (on load, refresh, and when the screen comes back). */
+    fun scanPhone() {
+        scanJob?.cancel()
+        scanJob = viewModelScope.launch {
+            val context = container.context
+            val (canRead, local, keys) = withContext(Dispatchers.IO) {
+                if (!PhoneMedia.canRead(context)) Triple(false, emptyList<LocalPhoto>(), emptySet<String>())
+                else Triple(
+                    true,
+                    PhoneMedia.scan(context).map { p ->
+                        LocalPhoto(
+                            key = p.key, name = p.name, size = p.size, takenAtMillis = p.takenAt, video = p.video,
+                            uri = p.uri.toString(), bucketId = p.bucketId, bucket = p.bucket,
+                        )
+                    },
+                    container.backup.backedUpKeys(),
+                )
+            }
+            backedUpKeys = keys
+            _state.update { it.copy(local = local, canReadPhone = canRead) }
+            remerge()
+        }
+    }
+
+    /** Puts the phone and server lists together again, off the main thread; the newest call wins. */
+    private fun remerge() {
+        mergeJob?.cancel()
+        mergeJob = viewModelScope.launch {
+            val s = _state.value
+            val keys = backedUpKeys
+            val (entries, days) = withContext(Dispatchers.Default) {
+                // After a failed page all phone photos show: retrying re-sorts them anyway
+                val merged = PhotoMerge.merge(s.items, s.local, keys, serverHasMore = s.hasNext && s.error == null)
+                merged to PhotoMerge.days(merged)
+            }
+            val freeable = s.local.count { it.key in keys }
+            _state.update {
+                val ids = entries.mapTo(HashSet()) { e -> e.id }
+                it.copy(entries = entries, days = days, freeable = freeable, selected = it.selected.filterTo(HashSet()) { id -> id in ids })
             }
         }
     }
@@ -91,19 +175,22 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
         it.copy(columns = steps[(if (bigger) i - 1 else i + 1).coerceIn(0, steps.lastIndex)])
     }
 
-    fun toggle(item: FileItem) = _state.update {
-        it.copy(selected = if (item.id in it.selected) it.selected - item.id else it.selected + item.id)
+    fun toggle(entry: PhotoEntry) = _state.update {
+        it.copy(selected = if (entry.id in it.selected) it.selected - entry.id else it.selected + entry.id)
     }
 
-    fun toggleDay(day: TimelineDay) = _state.update {
-        val ids = day.items.map { f -> f.id }.toSet()
+    fun toggleDay(day: PhotoDay) = _state.update {
+        val ids = day.entries.map { e -> e.id }.toSet()
         it.copy(selected = if (it.selected.containsAll(ids)) it.selected - ids else it.selected + ids)
     }
 
     fun clearSelection() = _state.update { it.copy(selected = emptySet()) }
     fun dismissMessage() = _state.update { it.copy(message = null) }
 
-    private fun selectedItems() = _state.value.items.filter { it.id in _state.value.selected }
+    private fun selectedEntries() = _state.value.entries.filter { it.id in _state.value.selected }
+
+    /** The selected photos that are in TeleStore: the server actions only apply to them. */
+    private fun selectedItems() = selectedEntries().mapNotNull { it.server }
 
     fun downloadSelected() {
         val items = selectedItems()
@@ -114,6 +201,27 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
     fun starSelected() = bulk("Starred") { container.api().setStarred(it, true) }
 
     fun trashSelected() = bulk("Moved to Trash", removeOnSuccess = true) { container.api().trash(it) }
+
+    /**
+     * Runs the backup now for selected photos that are only on the phone. False when backup is
+     * off: the caller opens Backup settings instead (nothing is turned on from here).
+     */
+    fun backUpSelected(): Boolean {
+        val settings = container.backup.settings.value
+        if (!settings.enabled) return false
+        val phoneOnly = selectedEntries().mapNotNull { e -> e.local?.takeIf { e.phoneOnly } }
+        // Only the albums chosen in Backup settings are backed up (none chosen yet = the camera)
+        val outside = if (settings.albums.isEmpty()) 0 else phoneOnly.count { it.bucketId !in settings.albums }
+        BackupWorker.runNow(container.context, settings)
+        _state.update {
+            it.copy(
+                selected = emptySet(),
+                message = if (outside > 0) "Backing up now. $outside of them are in albums that aren't backed up: choose them in Backup settings."
+                else "Backing up now",
+            )
+        }
+        return true
+    }
 
     private fun bulk(verb: String, removeOnSuccess: Boolean = false, action: suspend (FileItem) -> Any) {
         val items = selectedItems()
@@ -134,10 +242,11 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
             _state.update {
                 val left = if (removeOnSuccess) it.items.filterNot { f -> f.id in ok } else it.items
                 it.copy(
-                    items = left, days = Timeline.days(left),
+                    items = left,
                     message = if (error == null) "$verb ${ok.size} item${if (ok.size != 1) "s" else ""}" else "${ok.size} done, ${items.size - ok.size} failed: $error",
                 )
             }
+            remerge()
         }
     }
 }
