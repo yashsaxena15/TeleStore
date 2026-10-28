@@ -82,6 +82,7 @@ import com.backendforge.telestore.ui.components.ConfirmDialog
 import com.backendforge.telestore.ui.components.FileGridCard
 import com.backendforge.telestore.ui.components.FileInfoSheet
 import com.backendforge.telestore.ui.components.FileRow
+import com.backendforge.telestore.ui.components.FolderColorDialog
 import com.backendforge.telestore.ui.components.FolderPickerSheet
 import com.backendforge.telestore.ui.components.ItemActionSheet
 import com.backendforge.telestore.ui.components.NewFolderDialog
@@ -134,6 +135,8 @@ fun FolderScreen(
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var showEmptyTrashDialog by remember { mutableStateOf(false) }
     var deleteForeverItems by remember { mutableStateOf<List<FileItem>?>(null) }
+    var unprotectItem by remember { mutableStateOf<FileItem?>(null) }
+    var colorItem by remember { mutableStateOf<FileItem?>(null) }
     var folderPickerTarget by remember { mutableStateOf<Pair<List<FileItem>, FolderPickerMode>?>(null) }
 
     LaunchedEffect(state.snackbarMessage) {
@@ -565,6 +568,8 @@ fun FolderScreen(
             onAddToPlaylist = onAddToPlaylist?.let { add -> { item: FileItem -> add(listOf(item)) } },
             isOffline = if (target.isFolder) FolderPaths.childPath(target) in offlineFolders else target.id in offlineIds,
             onToggleOffline = onToggleOffline,
+            onToggleProtected = { if (it.protected) { unprotectItem = it } else { vm.setProtected(it, true) } },
+            onFolderColor = { colorItem = it },
             onDismiss = { actionItem = null },
         )
     }
@@ -621,6 +626,31 @@ fun FolderScreen(
                 showEmptyTrashDialog = false
                 vm.emptyTrash()
             },
+        )
+    }
+
+    unprotectItem?.let { target ->
+        ConfirmDialog(
+            title = "Remove protection?",
+            message = "'${target.name}' can then be moved to the trash or deleted without your password.",
+            confirmText = "Remove protection",
+            isDestructive = true,
+            onDismiss = { unprotectItem = null },
+            onConfirm = {
+                unprotectItem = null
+                vm.setProtected(target, false)
+            },
+        )
+    }
+
+    colorItem?.let { target ->
+        FolderColorDialog(
+            folder = target,
+            onPick = { color ->
+                colorItem = null
+                vm.setFolderColor(target, color)
+            },
+            onDismiss = { colorItem = null },
         )
     }
 

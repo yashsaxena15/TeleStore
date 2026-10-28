@@ -77,6 +77,7 @@ import com.backendforge.telestore.data.Session
 import com.backendforge.telestore.data.WatchEntry
 import com.backendforge.telestore.player.formatTime
 import com.backendforge.telestore.ui.components.FileThumbnail
+import com.backendforge.telestore.ui.components.folderTint
 import com.backendforge.telestore.ui.components.NewFolderDialog
 import java.util.Calendar
 
@@ -289,7 +290,7 @@ private fun FolderTile(folder: FileItem, onClick: () -> Unit) {
         modifier = Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp)),
     ) {
         Column(Modifier.padding(14.dp)) {
-            Icon(Icons.Filled.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primaryContainer)
+            Icon(Icons.Filled.Folder, contentDescription = null, tint = folderTint(folder.color) ?: MaterialTheme.colorScheme.primaryContainer)
             Text(folder.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
         }
     }

@@ -64,6 +64,7 @@ fun BackupScreen(container: AppContainer, onBack: () -> Unit) {
     val status by store.status.collectAsStateWithLifecycle()
     var canRead by remember { mutableStateOf(PhoneMedia.canRead(context)) }
     var partial by remember { mutableStateOf(PhoneMedia.partialAccess(context)) }
+    var keepsLocation by remember { mutableStateOf(PhoneMedia.canReadLocation(context)) }
     var albums by remember { mutableStateOf<List<PhoneAlbum>>(emptyList()) }
     var freeable by remember { mutableStateOf<List<PhoneItem>>(emptyList()) }
     var refresh by remember { mutableIntStateOf(0) }
@@ -76,6 +77,7 @@ fun BackupScreen(container: AppContainer, onBack: () -> Unit) {
     val askAccess = rememberPhotoAccessRequest { granted ->
         canRead = granted
         partial = PhoneMedia.partialAccess(context)
+        keepsLocation = PhoneMedia.canReadLocation(context)
         refresh++
         if (granted) apply { it.copy(enabled = true) }
     }
@@ -146,6 +148,13 @@ fun BackupScreen(container: AppContainer, onBack: () -> Unit) {
                 Card {
                     Text("TeleStore can see only the photos you picked.", style = MaterialTheme.typography.bodyMedium)
                     OutlinedButton(onClick = { askAccess() }, modifier = Modifier.padding(top = 8.dp)) { Text("Allow all photos") }
+                }
+            }
+
+            if (settings.enabled && canRead && !keepsLocation) item {
+                Card {
+                    Text("Allow photo locations so backups keep where they were taken.", style = MaterialTheme.typography.bodyMedium)
+                    OutlinedButton(onClick = { askAccess() }, modifier = Modifier.padding(top = 8.dp)) { Text("Allow photo locations") }
                 }
             }
 

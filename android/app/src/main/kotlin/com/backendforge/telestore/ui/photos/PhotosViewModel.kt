@@ -14,6 +14,7 @@ import com.backendforge.telestore.core.PhotoMerge
 import com.backendforge.telestore.core.SortBy
 import com.backendforge.telestore.core.Timeline
 import com.backendforge.telestore.data.AppContainer
+import com.backendforge.telestore.ui.components.protectedOutcomeMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -205,7 +206,22 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
 
     fun starSelected() = bulk("Starred") { container.api().setStarred(it, true) }
 
-    fun trashSelected() = bulk("Moved to Trash", removeOnSuccess = true) { container.api().trash(it) }
+    /** Protected photos are trashed after one password prompt; cancelled, they stay ("Not deleted"). */
+    fun trashSelected() {
+        val items = selectedItems()
+        _state.update { it.copy(selected = emptySet()) }
+        viewModelScope.launch {
+            val outcome = container.protection.deleteAll(items) { item, token -> container.api().trash(item, token) }
+            val gone = outcome.done.map { it.id }.toSet()
+            _state.update {
+                it.copy(
+                    items = it.items.filterNot { f -> f.id in gone },
+                    message = protectedOutcomeMessage(outcome, "Moved to Trash"),
+                )
+            }
+            remerge()
+        }
+    }
 
     /**
      * Runs the backup now for selected photos that are only on the phone. False when backup is

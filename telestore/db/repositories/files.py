@@ -42,6 +42,8 @@ class FileData:
     original_path: str = None
     is_vault: bool = False
     taken_at: str = None  # when a photo/video was taken (from the phone's backup), ISO UTC
+    protected: bool = False  # deleting needs the password (Protect from deletion)
+    color: str = None  # a folder's colour ("red", "blue"…), None for the default
     
 class Files(Collection):
     def __init__(self,collection: Collection) -> None:
@@ -379,6 +381,8 @@ class Files(Collection):
                 original_path=file_dict.get("original_path"),
                 is_vault=bool(file_dict.get("is_vault", False)),
                 taken_at=file_dict.get("taken_at"),
+                protected=bool(file_dict.get("protected", False)),
+                color=file_dict.get("color"),
             )
 
         if page is not None or page_size is not None:

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -129,13 +130,19 @@ fun FileGridCard(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = if (item.isFolder) DateFormatter.formatShort(item.modified) else formatBytes(item.size),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (item.protected) {
+                            ProtectedBadge()
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
+                        Text(
+                            text = if (item.isFolder) DateFormatter.formatShort(item.modified) else formatBytes(item.size),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
 
                 AnimatedShow(visible = !isSelectionMode, enter = fadeIn(), exit = fadeOut()) {

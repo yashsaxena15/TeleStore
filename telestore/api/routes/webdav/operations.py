@@ -34,6 +34,14 @@ async def handle_mkcol(request: Request, segments: List[str], owner_id: str) -> 
     return Response(status_code=201)
 
 
+def _refuse_protected(item: dict, owner_id: str) -> None:
+    """WebDAV apps can't ask for the password, so protected items can't be deleted through them."""
+    from telestore.services.protection_service import blocker
+    name = blocker(item, [owner_id])
+    if name:
+        raise HTTPException(status_code=403, detail=f"“{name}” is protected from deletion. Delete it in TeleStore.")
+
+
 async def handle_delete(request: Request, segments: List[str], owner_id: str) -> Response:
     """Handle WebDAV item deletion via DELETE."""
     if len(segments) < 2:
@@ -46,6 +54,7 @@ async def handle_delete(request: Request, segments: List[str], owner_id: str) ->
         # Permanently purge from database and delete Telegram messages
         item = database.Files.find_one({"file_name": target_name, "trashed": True, "owner_id": owner_id, "is_vault": {"$ne": True}})
         if item:
+            _refuse_protected(item, owner_id)
             from collections import defaultdict
             messages_to_delete = defaultdict(set)
             
@@ -120,6 +129,7 @@ async def handle_delete(request: Request, segments: List[str], owner_id: str) ->
         })
 
     if item:
+        _refuse_protected(item, owner_id)
         database.Files.move_to_trash(str(item["_id"]), owner_id)
         return Response(status_code=204)
 

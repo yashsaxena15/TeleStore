@@ -31,12 +31,48 @@ data class PhoneAlbum(val id: String, val name: String, val count: Int)
 
 /** Reads the phone's photos and videos (MediaStore). */
 object PhoneMedia {
-    /** The runtime permissions needed to read photos and videos on this Android version. */
-    fun permissions(): Array<String> = when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
-            arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
-        else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    /**
+     * The runtime permissions needed to read photos and videos on this Android version, plus (Android
+     * 10+) their locations: without it Android removes the GPS position from every photo read.
+     */
+    fun permissions(): Array<String> {
+        val read = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+                arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
+            else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) read + Manifest.permission.ACCESS_MEDIA_LOCATION else read
+    }
+
+    /** Photos read keep where they were taken (always true before Android 10, which never hid it). */
+    fun canReadLocation(context: Context): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * The photo with its location kept (Android 10+ with the location permission); [uri] itself
+     * otherwise. Opening the original can still be refused: callers fall back to [uri].
+     */
+    fun originalUri(context: Context, uri: Uri): Uri =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && canReadLocation(context) && uri.authority == MediaStore.AUTHORITY) {
+            runCatching { MediaStore.setRequireOriginal(uri) }.getOrDefault(uri)
+        } else {
+            uri
+        }
+
+    /** Opens the photo with its location when allowed, else as Android hands it out. */
+    fun openPhoto(context: Context, uri: Uri): java.io.InputStream? {
+        val original = originalUri(context, uri)
+        if (original != uri) {
+            try {
+                context.contentResolver.openInputStream(original)?.let { return it }
+            } catch (_: SecurityException) {
+            } catch (_: UnsupportedOperationException) {
+            } catch (_: java.io.FileNotFoundException) {
+            }
+        }
+        return context.contentResolver.openInputStream(uri)
     }
 
     /** Full access, or (Android 14) access only to the photos the user picked. */
