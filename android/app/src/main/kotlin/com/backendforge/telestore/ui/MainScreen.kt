@@ -574,6 +574,7 @@ fun MainScreen(
                             session = session,
                             onSearch = { navController.navigate("search") },
                             onAccount = { navigateToTab(MainTab.MORE) },
+                            onNotifications = { navController.navigate(ROUTE_NOTIFICATIONS) },
                             onKind = { navController.navigate("home_kind/${it.name}") },
                             onShortcut = { shortcut ->
                                 when (shortcut) {

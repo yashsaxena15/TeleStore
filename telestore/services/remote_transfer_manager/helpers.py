@@ -39,6 +39,37 @@ def is_gdrive_quota_error(err: Exception) -> bool:
         "download quota" in msg
     )
 
+_GOOGLE_ERRORS = (
+    # (pattern in the raw error, what the user reads)
+    (re.compile(r"downloadQuotaExceeded|quota.*exceeded|rateLimitExceeded|userRateLimitExceeded", re.I),
+     "Google Drive's download limit for this file was reached. Try again in a few hours."),
+    (re.compile(r"missing a valid API key|invalid authentication credentials|invalid_grant|Invalid Credentials|HTTP 401", re.I),
+     "Google Drive refused the download (its sign-in had expired). Tap Retry."),
+    (re.compile(r"notFound|File not found|HTTP 404", re.I),
+     "The file isn't in Google Drive any more, or this account can't see it."),
+    (re.compile(r"insufficientFilePermissions|cannotDownloadAbusiveFile|HTTP 403", re.I),
+     "Google Drive doesn't allow downloading this file (no permission, or the owner blocked downloads)."),
+)
+
+
+def friendly_error(raw: Optional[str]) -> Optional[str]:
+    """One readable sentence for errors that arrive as raw HTTP/JSON (mostly Google Drive's);
+    anything else is returned as it was."""
+    if not raw:
+        return raw
+    text = str(raw)
+    looks_raw = "{" in text or "HTTP 4" in text or "HTTP 5" in text
+    if not looks_raw:
+        return text
+    for pattern, message in _GOOGLE_ERRORS:
+        if pattern.search(text):
+            return message
+    code = re.search(r"HTTP (\d{3})", text)
+    if code:
+        return f"The source refused the download (error {code.group(1)}). Tap Retry, or check the link."
+    return text.split("{", 1)[0].strip(" :") or "The download failed."
+
+
 def get_remote_db():
     if hasattr(database, "db") and database.db is not None:
         return database.db

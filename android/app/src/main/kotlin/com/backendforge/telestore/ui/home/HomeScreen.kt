@@ -1,5 +1,10 @@
 package com.backendforge.telestore.ui.home
 
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Badge
+import androidx.compose.foundation.layout.WindowInsets
 import com.backendforge.telestore.R
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -86,6 +91,7 @@ fun HomeScreen(
     session: Session,
     onSearch: () -> Unit,
     onAccount: () -> Unit,
+    onNotifications: () -> Unit,
     onKind: (FileKind) -> Unit,
     onShortcut: (HomeShortcut) -> Unit,
     onOpenFolder: (String) -> Unit,
@@ -103,7 +109,11 @@ fun HomeScreen(
     var newMenu by remember { mutableStateOf(false) }
     var newFolder by remember { mutableStateOf(false) }
 
+    val unread by container.unreadNotifications.collectAsStateWithLifecycle()
+    // The header pads for the status bar itself (and scrolls away with the page), so the
+    // Scaffold mustn't add that space a second time
     Scaffold(
+        contentWindowInsets = WindowInsets(0),
         floatingActionButton = {
             Box {
                 FloatingActionButton(onClick = { newMenu = true }, containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer) {
@@ -125,7 +135,7 @@ fun HomeScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                full { Header(session.username, onAccount) }
+                full { Header(session.username, unread, onNotifications, onAccount) }
                 full { SearchBar(onSearch) }
                 full {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
@@ -178,18 +188,23 @@ private fun androidx.compose.foundation.lazy.grid.LazyGridScope.full(content: @C
 }
 
 @Composable
-private fun Header(username: String, onAccount: () -> Unit) {
+private fun Header(username: String, unread: Int, onNotifications: () -> Unit, onAccount: () -> Unit) {
     val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
     val greeting = when (hour) {
         in 5..11 -> "Good morning"
         in 12..16 -> "Good afternoon"
         else -> "Good evening"
     }
-    Row(Modifier.statusBarsPadding().padding(top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.statusBarsPadding().padding(top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         AppLogo(30)
         Column(Modifier.weight(1f).padding(start = 12.dp)) {
             Text(greeting, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(username.substringBefore('@').ifEmpty { "Welcome" }, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        IconButton(onClick = onNotifications) {
+            BadgedBox(badge = { if (unread > 0) Badge { Text(if (unread > 99) "99+" else unread.toString()) } }) {
+                Icon(Icons.Outlined.Notifications, contentDescription = if (unread > 0) "Notifications, $unread new" else "Notifications")
+            }
         }
         Box(
             Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer).clickable(onClick = onAccount),

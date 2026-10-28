@@ -70,3 +70,6 @@ export function markReadLocally(data, ids, all = false) {
 
 /** The badge text: "" for none, "99+" past 99. */
 export const badgeText = (count) => (!count || count < 1 ? "" : count > 99 ? "99+" : String(count));
+
+/** Asks the phone layout to open its notifications sheet (the top bar's bell). */
+export const OPEN_NOTIFICATIONS_EVENT = "telestore:open-notifications";

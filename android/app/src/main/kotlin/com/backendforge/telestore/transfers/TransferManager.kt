@@ -119,9 +119,15 @@ class TransferManager(private val context: Context) {
         if (t.offline) store.remove(setOf(id))
     }
 
-    /** Removes finished rows from the list (downloaded files stay in Downloads). */
+    /**
+     * Clears finished rows from the list. A finished download of a TeleStore file is only hidden:
+     * the app still needs it to know the file is on the phone (the file stays in Downloads).
+     */
     fun clearFinished() {
-        store.remove(store.items.value.filter { it.status.finished && !(it.status == TransferStatus.DONE && it.direction == Direction.DOWNLOAD && it.fileId != null) }.map { it.id }.toSet())
+        val finished = store.items.value.filter { it.status.finished && it.listed }
+        val keep = finished.filter { it.status == TransferStatus.DONE && it.direction == Direction.DOWNLOAD && it.fileId != null }.map { it.id }.toSet()
+        store.remove(finished.map { it.id }.toSet() - keep)
+        keep.forEach { id -> store.update(id) { it.copy(hidden = true) } }
     }
 
     private fun enqueue(t: PhoneTransfer) {

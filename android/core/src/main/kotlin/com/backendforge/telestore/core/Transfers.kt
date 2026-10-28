@@ -70,6 +70,8 @@ data class RemoteTask(
     @SerialName("error_message") val error: String? = null,
     @SerialName("group_id") val groupId: String? = null,
     @SerialName("group_name") val groupName: String? = null,
+    /** What the server is doing right now, in words ("Google Drive limit reached, resumes at 14:00"). */
+    val phase: String? = null,
 ) {
     val isActive: Boolean get() = status in ACTIVE
     val isFailed: Boolean get() = status == "failed"
@@ -87,6 +89,8 @@ data class GroupSummary(
     val filesize: Long = 0,
     @SerialName("transferred_bytes") val transferred: Long = 0,
     @SerialName("speed_bps") val speed: Double = 0.0,
+    /** Why files failed (the latest reason), when some did. */
+    val error: String? = null,
 ) {
     val done: Int get() = counts["completed"] ?: 0
     val failed: Int get() = counts["failed"] ?: 0

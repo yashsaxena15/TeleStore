@@ -76,7 +76,11 @@ const ROUTES = {
     "/transfers/remote/tasks": { tasks: [
         { task_id: "t1", filename: "ubuntu-24.04.1-desktop-amd64.iso", filesize: 5_700_000_000, transferred_bytes: 3_600_000_000, speed_bps: 12_400_000, status: "downloading", progress: 63, source_type: "magnet", peer_count: 48 },
         { task_id: "t5", filename: "old-backup.tar.gz", filesize: 1_200_000_000, transferred_bytes: 0, status: "failed", progress: 0, source_type: "url", error_message: "HTTP 403 from source", created_at: "2026-10-18T20:00:00Z" },
-    ] },
+        // A Google Drive folder copy whose files failed (the summary says why)
+        { task_id: "g1", filename: "IMG_001.jpg", filesize: 2_000_000, transferred_bytes: 0, status: "failed", progress: 0, source_type: "direct_url", group_id: "drive1", group_name: "Goa trip", group_type: "folder", error_message: "Google Drive refused the download (its sign-in had expired). Tap Retry.", created_at: "2026-10-27T20:00:00Z" },
+    ], groups: {
+        drive1: { total: 3, counts: { completed: 1, failed: 2 }, filesize: 6_000_000, transferred_bytes: 2_000_000, speed_bps: 0, error: "Google Drive refused the download (its sign-in had expired). Tap Retry." },
+    } },
 };
 
 // Notifications for the bell: one unread (a finished transfer), two already read

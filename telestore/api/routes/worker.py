@@ -1,5 +1,6 @@
 # telestore/api/routes/worker.py
 
+from telestore.services.remote_transfer_manager.helpers import friendly_error
 from telestore.services import event_service
 from fastapi import APIRouter, Request, HTTPException, Header, Depends, status
 from telestore.security.credentials import require_admin
@@ -155,6 +156,8 @@ async def claim_task(
             "claimed_by": {"$exists": False},
             # Instagram and video downloads need the server's sign-in sessions, so only the main server runs them
             "source_type": {"$nin": list(LOCAL_ONLY_SOURCES)},
+            # Copies from a connected Google Drive need that account's sign-in, which stays on the main server
+            "cloud_account_id": {"$exists": False},
         },
         {
             "$set": {
@@ -368,7 +371,8 @@ async def fail_task(
             {
                 "$set": {
                     "status": "failed",
-                    "error_message": f"[{body.worker_id}] {body.error_message}",
+                    "error_message": friendly_error(body.error_message),
+                    "error_detail": f"[{body.worker_id}] {body.error_message}"[:2000],
                     "phase": f"Failed: {body.error_message[:60]}",
                     "updated_at": now
                 }

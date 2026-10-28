@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Bell, Folder, HardDriveDownload, Images, Inbox, ListMusic, ArrowUpDown, LayoutGrid, Plus, Star, ShieldCheck, Trash2, HardDrive, Cloud, User, Settings, Users, Laptop, LogOut } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useTransferManager } from "@/features/transfers/useTransferManager";
 import { useCloudAccounts, useIsOwner, useUserProfile, displayName } from "@/hooks/useShellData";
 import { NotificationsPanel } from "@/features/notifications/NotificationsPanel";
 import { useNotifications } from "@/features/notifications/useNotifications";
-import { badgeText } from "@/features/notifications/notificationHelpers";
+import { badgeText, OPEN_NOTIFICATIONS_EVENT } from "@/features/notifications/notificationHelpers";
 import { NewMenu } from "./NewMenu";
 
 const Tab = ({ icon: Icon, label, active, onClick, badge }) => (<button onClick={onClick} className={`relative flex flex-col items-center justify-center gap-1 text-[10.5px] ${active ? "text-foreground" : "text-muted-foreground"}`} aria-current={active ? "page" : undefined}>
@@ -25,6 +25,11 @@ export const MobileNav = ({ selectedFilter, activeView, onNavigateView, onAction
     const [moreOpen, setMoreOpen] = useState(false);
     const [notificationsOpen, setNotificationsOpen] = useState(false);
     const { unread } = useNotifications();
+    useEffect(() => {
+        const open = () => setNotificationsOpen(true);
+        window.addEventListener(OPEN_NOTIFICATIONS_EVENT, open);
+        return () => window.removeEventListener(OPEN_NOTIFICATIONS_EVENT, open);
+    }, []);
     const { totalActiveCount } = useTransferManager();
     const cloudAccounts = useCloudAccounts();
     const isOwner = useIsOwner();

@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { ChevronLeft, ChevronRight, Search, LayoutGrid, List, X, ArrowUpDown, SlidersHorizontal, Check, RotateCcw, MoreHorizontal, Home, Inbox, PanelRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search, LayoutGrid, List, X, ArrowUpDown, SlidersHorizontal, Check, RotateCcw, MoreHorizontal, Home, Inbox, PanelRight, Bell } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuCheckboxItem } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { getSortLabel, getTypeChips } from "./topBarConfig";
+import { useNotifications } from "@/features/notifications/useNotifications";
+import { badgeText, OPEN_NOTIFICATIONS_EVENT } from "@/features/notifications/notificationHelpers";
 
 const SORT_OPTIONS = [
     ["name", "asc", "Name (A → Z)"], ["name", "desc", "Name (Z → A)"],
@@ -20,6 +22,7 @@ const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
 
 // Files top bar: breadcrumbs, folder search, sort, filter, view; then the type chips row.
 export const TopBar = ({ currentPath, searchQuery, viewMode, onSearchChange, onViewModeChange, onBreadcrumbClick, sortField = "name", sortOrder = "asc", foldersFirst = true, onSortChange, onFoldersFirstChange, typeFilter = "all", onTypeFilterChange, sizeFilter = "all", onSizeFilterChange, dateFilter = "all", onDateFilterChange, onResetFilters, typeCounts, totalCount = 0, filteredCount = 0, isInboxMode = false, detailsOpen = false, onDetailsToggle }) => {
+    const { unread } = useNotifications();
     const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
     const activeFilterCount = (sizeFilter !== "all" ? 1 : 0) + (dateFilter !== "all" ? 1 : 0);
     const typeChips = getTypeChips(isInboxMode);
@@ -129,8 +132,12 @@ export const TopBar = ({ currentPath, searchQuery, viewMode, onSearchChange, onV
               </Button>)}
           </div>
 
-          {/* Phone: search, filter, more */}
+          {/* Phone: notifications, search, filter, more */}
           <div className="md:hidden flex items-center gap-0.5 shrink-0">
+            <Button variant="ghost" size="icon" onClick={() => window.dispatchEvent(new Event(OPEN_NOTIFICATIONS_EVENT))} className="relative h-8 w-8 text-muted-foreground" aria-label={unread ? `Notifications, ${unread} new` : "Notifications"}>
+              <Bell className="h-4 w-4"/>
+              {badgeText(unread) && <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-destructive text-destructive-foreground text-[9.5px] font-semibold grid place-items-center" aria-hidden>{badgeText(unread)}</span>}
+            </Button>
             <Button variant="ghost" size="icon" onClick={() => setIsMobileSearchOpen(true)} className="h-8 w-8 text-muted-foreground" aria-label={`Search in ${folderName}`}>
               <Search className="h-4 w-4"/>
             </Button>

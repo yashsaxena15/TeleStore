@@ -154,6 +154,14 @@ test.describe("trash, starter folders and new transfers", () => {
         await expect.poll(async () => (await mutations(request)).filter((r) => r.path === "/files/trash").map((r) => JSON.parse(r.body).file_id).sort()).toEqual(["f1", "f2", "f3"]);
     });
 
+    test("a folder copy says why its files failed and can retry them", async ({ page, request }) => {
+        await page.goto("/transfers");
+        const folder = page.getByRole("row").filter({ hasText: "Goa trip" });
+        await expect(folder.getByText(/2 of 3 files failed: Google Drive refused the download/)).toBeVisible();
+        await folder.getByRole("button", { name: /Retry failed/ }).click();
+        await expect.poll(async () => (await mutations(request)).find((r) => r.path === "/transfers/remote/resume-group")?.body).toContain("drive1");
+    });
+
     test("New transfer offers leech, video and Instagram", async ({ page }) => {
         await page.goto("/transfers");
         await page.getByRole("button", { name: "New transfer" }).first().click();
@@ -808,6 +816,12 @@ test.describe("notifications", () => {
         await expect(page).toHaveURL(/\/transfers$/);
         await expect.poll(async () => (await mutations(request)).filter((r) => r.path === "/user/notifications/read").map((r) => JSON.parse(r.body))).toEqual([{ ids: ["n3"] }]);
         await expect(bell.getByTestId("notification-badge")).toHaveCount(0);
+    });
+
+    test("@phone the bell in the top bar opens notifications", async ({ page }) => {
+        await page.goto("/");
+        await page.getByRole("button", { name: "Notifications, 1 new" }).click();
+        await expect(page.getByRole("button", { name: /Transfer finished/ })).toBeVisible();
     });
 
     test("@phone Notifications and Offline are in the More sheet", async ({ page }) => {

@@ -130,7 +130,7 @@ const TransferRow = ({ item, expanded, onToggle, actions, openInFolder }) => {
         <div role="cell" className="flex items-center justify-end gap-0.5">
           {can.resumeRemaining && (<Button variant="outline" size="sm" className="h-8 px-2 text-xs gap-1 text-warning border-warning/40 hover:bg-warning/10 hover:text-warning" onClick={() => actions.resumeRemoteGroup(isGroup ? item.group_id : item.id)} title={quota ? QUOTA_HELP : "Resume or retry the remaining files"}>
               {quota ? <Play className="w-3.5 h-3.5 fill-current"/> : <RotateCcw className="w-3.5 h-3.5"/>}
-              <span className="hidden sm:inline">{quota ? "Resume now" : "Resume rest"}</span>
+              <span className="hidden sm:inline">{quota ? "Resume now" : item.status === "failed" ? "Retry failed" : "Resume rest"}</span>
             </Button>)}
           {can.pause && <IconButton label={`Pause ${item.filename}`} onClick={() => (isUpload ? actions.pauseUpload(item.id) : actions.pauseDownload(item.id))}><Pause className="w-4 h-4"/></IconButton>}
           {can.resume && <IconButton label={`Resume ${item.filename}`} onClick={() => (isUpload ? actions.resumeUpload(item.id) : actions.resumeDownload(item.id))} className="text-primary"><Play className="w-4 h-4"/></IconButton>}
