@@ -92,11 +92,15 @@ async def get_all_files_route(
             files_data = database.Files.get_files_by_path(path=path, owner_id=user_id, q=q, kind=kind, under=under)
             total_items = len(files_data)
 
+        from telestore.services.protection_service import protected_folders_of
+        guards = protected_folders_of([user_id])
         files_list = []
         for f in files_data:
             f_dict = asdict(f)
             f_dict['id'] = str(f_dict['id'])  # Convert ObjectId to string
             f_dict['file_unique_id'] = f.file_unique_id  # Include file_unique_id for streaming
+            # Inside a protected folder: protected too (apps hide Move to Trash for it)
+            f_dict['protected_by'] = guards.covering(f_dict.get('original_path') if f_dict.get('trashed') else f_dict.get('file_path'))
             files_list.append(f_dict)
 
         if is_paginated:

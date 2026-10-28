@@ -83,6 +83,8 @@ export const apiFileToFileItem = (apiFile) => {
         trashed_at: serverTime(apiFile.trashed_at),
         original_path: apiFile.original_path,
         protected: Boolean(apiFile.protected),
+        // Name of the protected folder this item is inside (it can't be deleted either)
+        protected_by: apiFile.protected_by || null,
         color: apiFile.color || null,
     };
 };

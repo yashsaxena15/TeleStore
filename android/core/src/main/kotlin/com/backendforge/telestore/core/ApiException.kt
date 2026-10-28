@@ -14,5 +14,5 @@ class NetworkException(message: String, cause: Throwable? = null) : ApiException
 /** 429: the server is busy with earlier work and asks to try again after [seconds]. */
 class RetryLaterException(val seconds: Long, message: String) : ApiException(429, message)
 
-/** 423: the item is protected from deletion; confirm with the password (or an email code) and retry with the unlock token. */
+/** 423: the item is protected from deletion (or holds / sits in something protected); the message says which. */
 class ProtectedException(message: String) : ApiException(423, message)

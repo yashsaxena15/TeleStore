@@ -6,7 +6,7 @@ import { api, fetchWithTimeout, getApiBaseUrl } from "@/lib/api";
 import logger from "@/lib/logger";
 import { downloadManager } from "@/features/transfers/downloadManager";
 import { TRASH_MOVE_MESSAGE } from "./batchActions";
-import { isProtectionCancelled, withProtection } from "@/features/protection/protection";
+import { isProtectedError, isProtectedItem, keptMessage, protectedReason } from "@/features/protection/protection";
 
 export function createItemActions({ cloudAccountId, cloudFolderId, currentApiPath, currentFolder, currentPath, deleteDialog, isCloudMode, isEffectiveTrashMode, isInboxMode, isTrashMode, moveItem, refetch, renamingItem, setDeleteDialog, setEmptyTrashDialogOpen, setFolderDownloadInfo, setIsEmptyingTrash, setNewFolderDialogOpen, setRenamingItem }) {
 const handleSidebarDrop = async (item, targetFolderName) => {
@@ -116,6 +116,11 @@ const handleNewFolder = async (folderName) => {
 };
 // Add the missing functions
 const handleDelete = (item, index) => {
+    // Protected items (or ones inside a protected folder) can't be deleted (see features/protection)
+    if (isProtectedItem(item)) {
+        toast.error(protectedReason(item));
+        return;
+    }
     setDeleteDialog({ item, index });
 };
 const handleRename = (item, index) => {
@@ -326,13 +331,12 @@ const confirmDelete = async () => {
             refetch();
             return;
         }
-        // A protected item asks for the password first (see features/protection)
         if (isTrashMode) {
-            await withProtection((token) => api.deleteForever(item.id, token));
+            await api.deleteForever(item.id);
             toast.success(`Permanently deleted "${item.name}"`);
         }
         else {
-            await withProtection((token) => api.trashFile(item.id, token));
+            await api.trashFile(item.id);
             toast.success(`Moved "${item.name}" to Trash`);
         }
         setDeleteDialog(null);
@@ -340,11 +344,9 @@ const confirmDelete = async () => {
         refetch();
     }
     catch (error) {
-        if (isProtectionCancelled(error)) {
+        // Protected: the server says why
+        if (isProtectedError(error))
             setDeleteDialog(null);
-            toast.info("Not deleted");
-            return;
-        }
         toast.error(error.message || "Failed to delete item");
     }
 };
@@ -396,18 +398,15 @@ const handleEmptyTrash = async () => {
             toast.success("Google Drive trash emptied successfully");
         }
         else {
-            const res = await withProtection((token) => api.emptyTrash(token));
-            toast.success(res?.message || "Trash emptied successfully");
+            const res = await api.emptyTrash();
+            // Protected items stay in the trash
+            if (res?.kept > 0) toast.info(`Trash emptied — ${keptMessage(res.kept)}`);
+            else toast.success(res?.message || "Trash emptied successfully");
         }
         setEmptyTrashDialogOpen(false);
         refetch();
     }
     catch (error) {
-        if (isProtectionCancelled(error)) {
-            setEmptyTrashDialogOpen(false);
-            toast.info("Not deleted");
-            return;
-        }
         toast.error(error.message || "Failed to empty trash");
     }
     finally {

@@ -6,7 +6,7 @@ import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Circle, Download, Images, Loader2, PlayCircle, Star, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { createProtectionGuard, isProtectionCancelled } from "@/features/protection/protection";
+import { isProtectedError, notDeletedMessage, protectedSelectionReason } from "@/features/protection/protection";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -134,16 +134,26 @@ export const PhotosPage = () => {
         const list = selectedItems();
         const results = await Promise.allSettled(list.map(action));
         const rejected = results.filter((r) => r.status === "rejected");
-        // Protected photos the user didn't confirm for (see features/protection)
-        const kept = rejected.filter((r) => isProtectionCancelled(r.reason)).length;
+        // Protected photos (the server refuses them with 423 and says why; see features/protection)
+        const locked = rejected.filter((r) => isProtectedError(r.reason));
+        const kept = locked.length;
         const failed = rejected.length - kept;
-        if (kept) toast.info(kept === list.length ? "Not deleted" : `${kept} protected ${kept === 1 ? "item" : "items"} not deleted`);
+        if (kept) toast.info(list.length === 1 ? locked[0].reason.message : notDeletedMessage(kept));
         if (failed) toast.error(`${failed} of ${list.length} couldn't be ${verb.toLowerCase()}`);
         else if (!kept) toast.success(`${verb} ${list.length === 1 ? "1 item" : `${list.length} items`}`);
         clearSelection();
         queryClient.invalidateQueries({ queryKey: ["files"] });
     };
     const allStarred = selecting && selectedItems().every((i) => i.starred);
+    // Protected photos can't go to Trash: the button is disabled and says why
+    const trashBlocked = selecting ? protectedSelectionReason(selectedItems()) : null;
+    const trashSelected = () => {
+        if (trashBlocked) {
+            toast.error(trashBlocked);
+            return;
+        }
+        bulk("Moved to Trash", (i) => api.trashFile(i.id));
+    };
 
     return (<div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       {selecting ? (<div className="flex items-center gap-2 px-3 sm:px-5 h-[60px] border-b border-border bg-primary/5 animate-in fade-in slide-in-from-top-1 duration-200" role="toolbar" aria-label="Selected photos">
@@ -151,7 +161,7 @@ export const PhotosPage = () => {
           <span className="text-sm font-medium flex-1">{selected.size} selected</span>
           <Button variant="ghost" size="icon" onClick={download} title="Download" aria-label="Download"><Download className="w-4 h-4"/></Button>
           <Button variant="ghost" size="icon" onClick={() => bulk(allStarred ? "Unstarred" : "Starred", (i) => api.toggleStar(i.id, !allStarred))} title={allStarred ? "Unstar" : "Star"} aria-label={allStarred ? "Unstar" : "Star"}><Star className={cn("w-4 h-4", allStarred && "fill-warning text-warning")}/></Button>
-          <Button variant="ghost" size="icon" onClick={() => { const guarded = createProtectionGuard(); bulk("Moved to Trash", (i) => guarded((token) => api.trashFile(i.id, token))); }} title="Move to Trash" aria-label="Move to Trash"><Trash2 className="w-4 h-4"/></Button>
+          <Button variant="ghost" size="icon" onClick={trashSelected} aria-disabled={Boolean(trashBlocked) || undefined} aria-description={trashBlocked || undefined} className={cn(trashBlocked && "opacity-50 cursor-not-allowed")} title={trashBlocked || "Move to Trash"} aria-label="Move to Trash"><Trash2 className="w-4 h-4"/></Button>
         </div>) : (<PageHeader icon={Images} title="Photos" subtitle={query.isLoading ? "Loading…" : photosSubtitle(view, total)} actions={<PhotosMenu view={view} onViewChange={changeView}/>}/>)}
 
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar" data-testid="photos-scroll">

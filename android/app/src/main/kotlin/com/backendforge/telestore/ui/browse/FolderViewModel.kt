@@ -6,10 +6,10 @@ import com.backendforge.telestore.core.ApiException
 import com.backendforge.telestore.core.FileItem
 import com.backendforge.telestore.core.Place
 import com.backendforge.telestore.core.Places
+import com.backendforge.telestore.core.ProtectedDelete
 import com.backendforge.telestore.core.SortBy
 import com.backendforge.telestore.data.AppContainer
 import com.backendforge.telestore.ui.components.BrowserPreferences
-import com.backendforge.telestore.ui.components.protectedOutcomeMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -249,6 +249,11 @@ class FolderViewModel(
         }
     }
 
+    /** Shows [message] in the snackbar (e.g. why Delete is off for a protected selection). */
+    fun showMessage(message: String) {
+        _state.update { it.copy(snackbarMessage = message) }
+    }
+
     fun dismissSnackbar() {
         _state.update { it.copy(snackbarMessage = null) }
     }
@@ -341,8 +346,8 @@ class FolderViewModel(
     fun emptyTrash() {
         viewModelScope.launch {
             try {
-                val done = container.protection.retrying { token -> api.emptyTrash(token) }
-                _state.update { it.copy(snackbarMessage = if (done == null) "Not deleted" else "Trash emptied") }
+                val reply = api.emptyTrash()
+                _state.update { it.copy(snackbarMessage = ProtectedDelete.emptyTrashMessage(reply.kept)) }
                 refresh()
             } catch (e: CancellationException) {
                 throw e
@@ -353,14 +358,22 @@ class FolderViewModel(
         }
     }
 
-    /** Protects [item] from deletion, or (after the password) removes the protection. */
+    /**
+     * Protects [item] from deletion, or removes the protection after the password (or an emailed
+     * code): that gives a single-use token for this item only, used once here.
+     */
     fun setProtected(item: FileItem, protect: Boolean) {
         viewModelScope.launch {
             try {
-                val now = container.protection.retrying { token -> api.setProtected(item, protect, if (protect) null else token) }
-                if (now == null) {
-                    _state.update { it.copy(snackbarMessage = "Still protected") }
-                    return@launch
+                val now = if (protect) {
+                    api.setProtected(item, true)
+                } else {
+                    val token = container.protection.unlockFor(item)
+                    if (token == null) {
+                        _state.update { it.copy(snackbarMessage = "Still protected") }
+                        return@launch
+                    }
+                    api.setProtected(item, false, token)
                 }
                 _state.update { s ->
                     s.copy(
@@ -406,7 +419,7 @@ class FolderViewModel(
     }
 
     fun trashItems(items: List<FileItem>) {
-        runProtectedDelete(items, "Moved to Trash") { item, token -> api.trash(item, token) }
+        runProtectedDelete(items, "Moved to Trash") { api.trash(it) }
     }
 
     fun restoreItems(items: List<FileItem>) {
@@ -414,19 +427,19 @@ class FolderViewModel(
     }
 
     fun deleteForeverItems(items: List<FileItem>) {
-        runProtectedDelete(items, "Permanently deleted") { item, token -> api.deleteForever(item, token) }
+        runProtectedDelete(items, "Permanently deleted") { api.deleteForever(it) }
     }
 
-    /** Like [runBulkAction], but protected items are retried after one password prompt. */
+    /** Like [runBulkAction], but items the server refuses as protected are kept and counted (the server's words for one). */
     private fun runProtectedDelete(
         items: List<FileItem>,
         pastVerb: String,
-        action: suspend (FileItem, String?) -> Unit,
+        action: suspend (FileItem) -> Unit,
     ) {
         viewModelScope.launch {
             clearSelection()
-            val outcome = container.protection.deleteAll(items, action)
-            _state.update { it.copy(snackbarMessage = protectedOutcomeMessage(outcome, pastVerb)) }
+            val outcome = ProtectedDelete.run(items, action)
+            _state.update { it.copy(snackbarMessage = ProtectedDelete.message(outcome, pastVerb)) }
             refresh()
         }
     }

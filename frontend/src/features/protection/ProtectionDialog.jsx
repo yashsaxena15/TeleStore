@@ -1,5 +1,5 @@
-// "Confirm it's you" before deleting a protected item or removing its protection.
-// Mounted once, in App; opened by confirmProtected() (see protection.js).
+// "Confirm it's you" before removing the protection from an item.
+// Mounted once, in App; opened by confirmUnlock() (see protection.js).
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2, ShieldCheck } from "lucide-react";
@@ -9,10 +9,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { onConfirmProtectedRequest, rememberUnlockToken } from "./protection";
+import { onConfirmUnlockRequest } from "./protection";
 
 export const ProtectionDialog = () => {
-    const [request, setRequest] = useState(null); // { reason, resolve }
+    const [request, setRequest] = useState(null); // { reason, onConfirm, resolve }
     const [method, setMethod] = useState(null); // { method, email_hint } once loaded
     const [loadError, setLoadError] = useState("");
     const [secret, setSecret] = useState("");
@@ -23,17 +23,16 @@ export const ProtectionDialog = () => {
     const resolveRef = useRef(null);
     const navigate = useNavigate();
 
-    const finish = (token) => {
-        resolveRef.current?.(token);
+    const finish = (done) => {
+        resolveRef.current?.(done);
         resolveRef.current = null;
         setRequest(null);
     };
 
-    useEffect(() => onConfirmProtectedRequest((detail) => {
-        // A second request while open: answer it with whatever this one gets
+    useEffect(() => onConfirmUnlockRequest((detail) => {
+        // One at a time: a second request while open is turned down
         if (resolveRef.current) {
-            const first = resolveRef.current;
-            resolveRef.current = (token) => { first(token); detail.resolve(token); };
+            detail.resolve(false);
             return;
         }
         resolveRef.current = detail.resolve;
@@ -47,8 +46,8 @@ export const ProtectionDialog = () => {
         api.getProtectionMethod().then(setMethod).catch((e) => setLoadError(e.message || "Couldn't check how to confirm"));
     }), []);
 
-    // Closing without confirming: nothing is deleted
-    useEffect(() => () => resolveRef.current?.(null), []);
+    // Closing without confirming: the item stays protected
+    useEffect(() => () => resolveRef.current?.(false), []);
 
     const sendCode = async () => {
         setBusy(true);
@@ -72,9 +71,8 @@ export const ProtectionDialog = () => {
         setBusy(true);
         setError("");
         try {
-            const res = await api.unlockProtection(method?.method === "email" ? { code: secret.trim() } : { password: secret });
-            rememberUnlockToken(res.unlock_token, res.expires_in);
-            finish(res.unlock_token);
+            await request.onConfirm(method?.method === "email" ? { code: secret.trim() } : { password: secret });
+            finish(true);
         }
         catch (err) {
             setError(err.message || "Couldn't confirm");
@@ -86,22 +84,22 @@ export const ProtectionDialog = () => {
 
     const kind = method?.method;
     const openAccount = () => {
-        finish(null);
+        finish(false);
         navigate(settingsUrl("account"));
     };
 
-    return (<Dialog open={Boolean(request)} onOpenChange={(open) => !open && finish(null)}>
+    return (<Dialog open={Boolean(request)} onOpenChange={(open) => !open && finish(false)}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-primary"/>Confirm it's you</DialogTitle>
-          <DialogDescription>{request?.reason || "This item is protected from deletion."}</DialogDescription>
+          <DialogDescription>{request?.reason || "Confirm to remove the protection."}</DialogDescription>
         </DialogHeader>
         {!method && !loadError && (<div className="grid place-items-center py-4"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" aria-label="Loading"/></div>)}
         {loadError && <p role="alert" className="text-sm text-destructive">{loadError}</p>}
         {kind === "none" && (<div className="grid gap-3 text-sm">
             <p className="text-muted-foreground">Your account has no password to confirm with. Set one in Settings › Account, then try again.</p>
             <DialogFooter>
-              <Button variant="outline" onClick={() => finish(null)}>Cancel</Button>
+              <Button variant="outline" onClick={() => finish(false)}>Cancel</Button>
               <Button onClick={openAccount}>Open Settings › Account</Button>
             </DialogFooter>
           </div>)}
@@ -120,7 +118,7 @@ export const ProtectionDialog = () => {
               </div>)}
             {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
             <DialogFooter className="gap-2">
-              <Button type="button" variant="outline" onClick={() => finish(null)}>Cancel</Button>
+              <Button type="button" variant="outline" onClick={() => finish(false)}>Cancel</Button>
               {kind === "email" && !codeSent ? (<Button type="button" onClick={sendCode} disabled={busy}>{busy && <Loader2 className="w-4 h-4 animate-spin"/>}Send code</Button>) : (<>
                   {kind === "email" && <Button type="button" variant="ghost" onClick={sendCode} disabled={busy}>Resend</Button>}
                   <Button type="submit" disabled={busy || (kind === "email" ? secret.length !== 6 : !secret)}>{busy && <Loader2 className="w-4 h-4 animate-spin"/>}Confirm</Button>

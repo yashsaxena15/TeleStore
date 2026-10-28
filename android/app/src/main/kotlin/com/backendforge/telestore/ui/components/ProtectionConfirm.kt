@@ -1,6 +1,5 @@
 package com.backendforge.telestore.ui.components
 
-import android.os.SystemClock
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -28,9 +27,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.backendforge.telestore.core.ApiException
-import com.backendforge.telestore.core.ProtectedDelete
-import com.backendforge.telestore.core.ProtectedException
-import com.backendforge.telestore.core.ProtectedOutcome
+import com.backendforge.telestore.core.FileItem
 import com.backendforge.telestore.core.ProtectionMethod
 import com.backendforge.telestore.core.TeleStoreApi
 import kotlinx.coroutines.CancellationException
@@ -42,12 +39,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/** One "confirm to delete protected items" question waiting for the user. */
-class ProtectionAsk(val message: String, internal val answer: CompletableDeferred<String?>)
+/** One "confirm to remove protection from [item]" question waiting for the user. */
+class ProtectionAsk(val item: FileItem, val message: String, internal val answer: CompletableDeferred<String?>)
 
 /**
- * Asks for the password (or an emailed code) before protected things are deleted, and keeps the
- * unlock token until it expires so a bulk delete asks once. Lives in AppContainer
+ * Asks for the password (or an emailed code) before protection is removed from one item and hands
+ * back the single-use unlock token for it. Nothing is kept: every removal asks again, and deleting
+ * never asks (protected items can't be deleted at all). Lives in AppContainer
  * (`container.protection`); [ProtectionConfirmHost] in MainScreen shows the dialog.
  */
 class ProtectionGate {
@@ -55,19 +53,10 @@ class ProtectionGate {
     val ask: StateFlow<ProtectionAsk?> = _ask.asStateFlow()
 
     private val mutex = Mutex()
-    private var token: String? = null
-    private var expiresAt = 0L
 
-    /** A token still valid for a while, else null. */
-    fun cachedToken(): String? = token?.takeIf { SystemClock.elapsedRealtime() < expiresAt }
-
-    /**
-     * The unlock token: the cached one, or one the user confirms now; null when they cancel.
-     * [message] is the server's words ("“Taxes” is protected…").
-     */
-    suspend fun unlock(message: String): String? = mutex.withLock {
-        cachedToken()?.let { return@withLock it }
-        val request = ProtectionAsk(message, CompletableDeferred())
+    /** A fresh single-use token for removing protection from [item]; null when the user cancels. */
+    suspend fun unlockFor(item: FileItem): String? = mutex.withLock {
+        val request = ProtectionAsk(item, "Confirm it's you to remove protection from “${item.name}”. It can then be moved to the trash or deleted.", CompletableDeferred())
         _ask.value = request
         try {
             request.answer.await()
@@ -76,57 +65,13 @@ class ProtectionGate {
         }
     }
 
-    /**
-     * Runs [block] (with the cached token, if any); refused as protected, it asks once and runs it
-     * again with the new token. Null when the user cancelled.
-     */
-    suspend fun <T> retrying(block: suspend (unlockToken: String?) -> T): T? {
-        val cached = cachedToken()
-        return try {
-            block(cached)
-        } catch (e: ProtectedException) {
-            // The server no longer takes the kept token (restarted, or it expired there first)
-            if (cached != null) forget(cached)
-            val unlocked = unlock(e.message ?: "This is protected. Confirm to continue.") ?: return null
-            block(unlocked)
-        }
-    }
-
-    /** Deletes or trashes [items], asking at most once for the protected ones. */
-    suspend fun <T> deleteAll(items: List<T>, action: suspend (item: T, unlockToken: String?) -> Unit): ProtectedOutcome<T> {
-        val cached = cachedToken()
-        return ProtectedDelete.run(
-            items,
-            token = cached,
-            unlock = { message ->
-                if (cached != null) forget(cached)
-                unlock(message)
-            },
-            action = action,
-        )
-    }
-
-    private fun forget(stale: String) {
-        if (token == stale) {
-            token = null
-            expiresAt = 0L
-        }
-    }
-
-    internal fun answer(ask: ProtectionAsk, token: String?, expiresInSeconds: Long) {
-        if (token != null) {
-            this.token = token
-            // A little early, so a token never expires mid-request
-            expiresAt = SystemClock.elapsedRealtime() + (expiresInSeconds - 10).coerceAtLeast(5) * 1000
-        }
+    internal fun answer(ask: ProtectionAsk, token: String?) {
         ask.answer.complete(token)
         if (_ask.value === ask) _ask.value = null
     }
 
-    /** Forgets the token (signing out). */
+    /** Cancels a question still open (signing out). */
     fun clear() {
-        token = null
-        expiresAt = 0
         _ask.value?.answer?.complete(null)
         _ask.value = null
     }
@@ -163,7 +108,7 @@ private fun ProtectionDialog(ask: ProtectionAsk, gate: ProtectionGate, api: () -
         }
     }
 
-    fun cancel() = gate.answer(ask, null, 0)
+    fun cancel() = gate.answer(ask, null)
 
     fun sendCode() {
         busy = true
@@ -188,8 +133,12 @@ private fun ProtectionDialog(ask: ProtectionAsk, gate: ProtectionGate, api: () -
         error = null
         scope.launch {
             try {
-                val reply = if (m.usesPassword) api().unlockProtection(password = secret) else api().unlockProtection(code = secret)
-                gate.answer(ask, reply.unlockToken, reply.expiresIn)
+                val reply = if (m.usesPassword) {
+                    api().unlockProtection(ask.item, password = secret)
+                } else {
+                    api().unlockProtection(ask.item, code = secret)
+                }
+                gate.answer(ask, reply.unlockToken)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -211,7 +160,7 @@ private fun ProtectionDialog(ask: ProtectionAsk, gate: ProtectionGate, api: () -
     AlertDialog(
         onDismissRequest = { if (!busy) cancel() },
         icon = { Icon(Icons.Filled.Shield, contentDescription = null) },
-        title = { Text("Protected") },
+        title = { Text("Remove protection?") },
         text = {
             Column {
                 Text(ask.message, style = MaterialTheme.typography.bodyMedium)
@@ -248,7 +197,7 @@ private fun ProtectionDialog(ask: ProtectionAsk, gate: ProtectionGate, api: () -
                         modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                     )
                     else -> Text(
-                        "To delete protected items, first set a password for your account in Account.",
+                        "To remove protection, first set a password for your account in Account.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
@@ -272,17 +221,4 @@ private fun ProtectionDialog(ask: ProtectionAsk, gate: ProtectionGate, api: () -
             TextButton(onClick = ::cancel, enabled = !busy) { Text("Cancel") }
         },
     )
-}
-
-/** The snackbar line after deleting or trashing several items ("Moved to Trash 3 items", "Not deleted"…). */
-fun protectedOutcomeMessage(outcome: ProtectedOutcome<*>, pastVerb: String): String {
-    val done = outcome.done.size
-    val kept = outcome.kept.size
-    val failed = outcome.failed.size
-    val error = outcome.firstError?.let { (it as? ApiException)?.message ?: it.message }
-    val parts = mutableListOf<String>()
-    if (done > 0 || (kept == 0 && failed == 0)) parts += "$pastVerb $done item${if (done != 1) "s" else ""}"
-    if (kept > 0) parts += if (done == 0 && failed == 0) "Not deleted" else "$kept protected not deleted"
-    if (failed > 0) parts += if (done == 0 && kept == 0) "Failed: $error" else "$failed failed: $error"
-    return parts.joinToString(", ")
 }

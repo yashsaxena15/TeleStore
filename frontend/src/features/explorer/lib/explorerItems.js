@@ -60,7 +60,15 @@ export function getSection({ isTrash = false, isVault = false, isInbox = false, 
  * Selection bar actions for a section, in display order.
  * `primary` actions stay visible on phones; the rest go into the ⋯ menu there.
  */
-export function getSelectionActions(section, { count = 0, allStarred = false, playable = false, offline = null } = {}) {
+export function getSelectionActions(section, { count = 0, allStarred = false, playable = false, offline = null, protectedCount = 0 } = {}) {
+    return selectionActionsFor(section, { count, allStarred, playable, offline }).map((a) => (
+        // Protected items can't be deleted: the delete stays in place, disabled, saying why
+        protectedCount > 0 && (a.id === "delete" || a.id === "delete-forever")
+            ? { ...a, disabled: true, reason: `${protectedCount} protected ${protectedCount === 1 ? "item" : "items"} — remove protection first` }
+            : a));
+}
+
+function selectionActionsFor(section, { count, allStarred, playable, offline }) {
     const star = { id: allStarred ? "unstar" : "star", primary: false };
     // Only music and videos selected: they can go in a playlist
     const playlist = playable ? [{ id: "playlist", primary: false }] : [];

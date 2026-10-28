@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { serverTime } from "./fileTypes";
+import { apiFileToFileItem, serverTime } from "./fileTypes";
 import { formatShortDate } from "./lib/explorerItems";
 
 describe("serverTime", () => {
@@ -16,5 +16,14 @@ describe("serverTime", () => {
     it("a file saved a moment ago reads as just now", () => {
         const now = new Date("2026-10-23T09:44:30Z");
         expect(formatShortDate(serverTime("2026-10-23T09:44:00"), now)).toBe("just now");
+    });
+});
+
+describe("apiFileToFileItem protection", () => {
+    const api = (extra) => ({ id: "f1", file_name: "2024.pdf", file_type: "document", file_size: 1, file_path: "/Home/Taxes", ...extra });
+    it("carries the item's own protection and the protected folder it's inside", () => {
+        expect(apiFileToFileItem(api({ protected: true }))).toMatchObject({ protected: true, protected_by: null });
+        expect(apiFileToFileItem(api({ protected: false, protected_by: "Taxes" }))).toMatchObject({ protected: false, protected_by: "Taxes" });
+        expect(apiFileToFileItem(api({}))).toMatchObject({ protected: false, protected_by: null });
     });
 });

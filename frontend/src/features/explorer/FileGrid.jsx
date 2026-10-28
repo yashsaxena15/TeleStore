@@ -27,6 +27,7 @@ import { api } from "@/lib/api";
 import { useBatchThumbnailLoader } from "@/features/explorer/hooks/useBatchThumbnailLoader"; // Add this import
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "sonner";
+import { isProtectedItem, protectedSelectionReason } from "@/features/protection/protection";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, } from "@/components/ui/alert-dialog";
 import authService from "@/features/auth/authService";
 import { isItemStarred, getItemKey } from "@/features/explorer/lib/fileCardHelpers";
@@ -459,6 +460,12 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
         if (!offlineSupported() || isCloudMode || !selectedList.length || !selectedList.every(canSaveOffline)) return null;
         return selectedList.every(isOffline) ? "remove" : "save";
     };
+    // Protected items (or ones inside a protected folder) can't be deleted: say so instead
+    const protectedReason = protectedSelectionReason(selectedList);
+    const requestBatchDelete = () => {
+        if (protectedReason) toast.error(protectedReason);
+        else setBatchDeleteDialogOpen(true);
+    };
     const handleSelectionAction = (id) => {
         const list = selectedList;
         switch (id) {
@@ -478,11 +485,11 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             case "restore": return runBatch(onBatch.restore, list);
             case "details": return list[0] && openDetails(list[0]);
             case "delete":
-            case "delete-forever": return setBatchDeleteDialogOpen(true);
+            case "delete-forever": return requestBatchDelete();
             default: return undefined;
         }
     };
-    const selectionActions = getSelectionActions(section, { count: selectedList.length, allStarred: selectedList.length > 0 && selectedList.every(isItemStarred), playable: selectedList.length > 0 && selectedList.every(canAddToPlaylist), offline: offlineChoice() });
+    const selectionActions = getSelectionActions(section, { count: selectedList.length, allStarred: selectedList.length > 0 && selectedList.every(isItemStarred), playable: selectedList.length > 0 && selectedList.every(canAddToPlaylist), offline: offlineChoice(), protectedCount: selectedList.filter(isProtectedItem).length });
     const locationPath = currentApiPath || (currentPath && currentPath.length > 0 ? `/${currentPath.join("/")}` : "/Home");
     const pickerStartPath = /^\/(Home|Vault)(\/|$)/.test(locationPath) ? locationPath : "/Home";
     // Keep stateRef fresh for capture-phase keyboard navigation
@@ -510,6 +517,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
         onDetailsOpenChange,
         openDetails,
         batchDeleteDialogOpen,
+        requestBatchDelete,
         imageViewer,
         documentReader,
         archiveInspect,

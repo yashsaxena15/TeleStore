@@ -138,12 +138,17 @@ fun ItemActionSheet(
                         label = "Restore",
                         onClick = { onDismiss(); onRestore?.invoke(item) },
                     )
-                    ActionRow(
-                        icon = Icons.Default.DeleteForever,
-                        label = "Delete forever",
-                        color = MaterialTheme.colorScheme.error,
-                        onClick = { onDismiss(); onDeleteForever?.invoke(item) },
-                    )
+                    // Protected items can't be deleted (restore, then remove protection)
+                    if (item.isProtected) {
+                        ProtectedInfoRow(item)
+                    } else {
+                        ActionRow(
+                            icon = Icons.Default.DeleteForever,
+                            label = "Delete forever",
+                            color = MaterialTheme.colorScheme.error,
+                            onClick = { onDismiss(); onDeleteForever?.invoke(item) },
+                        )
+                    }
                     ActionRow(
                         icon = Icons.Default.Info,
                         label = "Info",
@@ -174,12 +179,14 @@ fun ItemActionSheet(
                         label = if (item.starred) "Unstar" else "Star",
                         onClick = { onDismiss(); onToggleStar?.invoke(item) },
                     )
-                    ActionRow(
-                        icon = Icons.Default.Delete,
-                        label = "Move to Trash",
-                        color = MaterialTheme.colorScheme.error,
-                        onClick = { onDismiss(); onTrash?.invoke(item) },
-                    )
+                    if (!item.isProtected) {
+                        ActionRow(
+                            icon = Icons.Default.Delete,
+                            label = "Move to Trash",
+                            color = MaterialTheme.colorScheme.error,
+                            onClick = { onDismiss(); onTrash?.invoke(item) },
+                        )
+                    }
                 }
 
                 else -> {
@@ -271,8 +278,10 @@ fun ItemActionSheet(
                             onClick = { onDismiss(); onFolderColor(item) },
                         )
                     }
-                    if (onToggleProtected != null && !item.isVault) {
-                        ActionRow(
+                    when {
+                        // Inside a protected folder: only that folder's protection can be removed
+                        !item.protected && item.protectedBy != null -> ProtectedInfoRow(item)
+                        onToggleProtected != null && !item.isVault -> ActionRow(
                             icon = if (item.protected) Icons.Default.RemoveModerator else Icons.Default.Shield,
                             label = if (item.protected) "Remove protection" else "Protect from deletion",
                             onClick = { onDismiss(); onToggleProtected(item) },
@@ -285,30 +294,45 @@ fun ItemActionSheet(
                             onClick = { onDismiss(); onMoveToVault(item) },
                         )
                     }
-                    ActionRow(
-                        icon = Icons.Default.Delete,
-                        label = "Move to Trash",
-                        color = MaterialTheme.colorScheme.error,
-                        onClick = { onDismiss(); onTrash?.invoke(item) },
-                    )
+                    if (!item.isProtected) {
+                        ActionRow(
+                            icon = Icons.Default.Delete,
+                            label = "Move to Trash",
+                            color = MaterialTheme.colorScheme.error,
+                            onClick = { onDismiss(); onTrash?.invoke(item) },
+                        )
+                    }
                 }
             }
         }
     }
 }
 
+/** A non-clickable line saying why the item can't be deleted. */
+@Composable
+private fun ProtectedInfoRow(item: FileItem) {
+    val by = item.protectedBy
+    ActionRow(
+        icon = Icons.Default.Shield,
+        label = if (!item.protected && by != null) "Protected by folder “$by”" else "Protected from deletion",
+        onClick = null,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/** One row of the sheet; a null [onClick] makes it a plain, non-clickable line. */
 @Composable
 private fun ActionRow(
     icon: ImageVector,
     label: String,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)?,
     color: Color = MaterialTheme.colorScheme.onSurface,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 20.dp, vertical = 12.dp),
     ) {
         Icon(

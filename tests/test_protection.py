@@ -23,6 +23,8 @@ def _match(doc, flt):
         if isinstance(want, dict):
             if "$in" in want and have not in want["$in"]:
                 return False
+            if "$nin" in want and have in want["$nin"]:
+                return False
             if "$ne" in want and have == want["$ne"]:
                 return False
             if "$regex" in want and not (isinstance(have, str) and re.search(want["$regex"], have)):
@@ -87,8 +89,8 @@ def bob(files):
     app.dependency_overrides.pop(require_auth, None)
 
 
-def unlock(client, password="right-pass"):
-    return client.post("/files/protection/unlock", json={"password": password})
+def unlock(client, file_id, password="right-pass"):
+    return client.post("/files/protection/unlock", json={"password": password, "file_id": str(file_id)})
 
 
 class TestWhatIsProtected:
@@ -98,9 +100,9 @@ class TestWhatIsProtected:
         holder = files.add("Docs", kind="folder")
         files.add("passport.pdf", path="/Home/Docs", protected=True)
         loose = files.add("notes.txt")
-        assert protection_service.blocker(taxes, ["42"]) == "Taxes"
-        assert protection_service.blocker(inside, ["42"]) == "Taxes"
-        assert protection_service.blocker(holder, ["42"]) == "passport.pdf"
+        assert protection_service.blocker(taxes, ["42"]) == "“Taxes” is protected. Remove protection first."
+        assert protection_service.blocker(inside, ["42"]) == "“2024.pdf” is inside the protected folder “Taxes”. Remove the folder's protection first."
+        assert protection_service.blocker(holder, ["42"]) == "“Docs” contains a protected item (“passport.pdf”). Remove its protection first."
         assert protection_service.blocker(loose, ["42"]) is None
         # A neighbour whose name merely starts the same isn't inside
         assert protection_service.blocker(files.add("x", path="/Home/Taxes2"), ["42"]) is None
@@ -108,32 +110,43 @@ class TestWhatIsProtected:
     def test_a_trashed_item_remembers_where_it_was(self, files):
         files.add("Taxes", kind="folder", protected=True)
         doc = files.add("2024.pdf", path="/Trash", trashed=True, original_path="/Home/Taxes")
-        assert protection_service.blocker(doc, ["42"]) == "Taxes"
+        assert "protected folder “Taxes”" in protection_service.blocker(doc, ["42"])
 
 
 class TestDeleting:
-    def test_trash_needs_the_password_then_works(self, client, bob):
+    def test_protected_items_cannot_be_deleted_even_with_a_password(self, client, bob):
         doc = bob.add("passport.pdf", protected=True)
         res = client.post("/files/trash", json={"file_id": str(doc["_id"])})
-        assert res.status_code == 423 and "passport.pdf" in res.json()["detail"]
+        assert res.status_code == 423 and res.json()["detail"] == "“passport.pdf” is protected. Remove protection first."
+        # A pass (even for this very file) never unlocks a delete
+        token = unlock(client, doc["_id"]).json()["unlock_token"]
+        assert client.post("/files/trash", json={"file_id": str(doc["_id"]), "unlock_token": token}).status_code == 423
+        assert client.post("/files/delete", json={"file_id": str(doc["_id"]), "unlock_token": token}).status_code == 423
         assert not doc.get("trashed")
-        assert unlock(client, "nope").status_code == 400
-        token = unlock(client).json()["unlock_token"]
-        assert client.post("/files/trash", json={"file_id": str(doc["_id"]), "unlock_token": token}).status_code == 200
+
+    def test_the_reported_case_a_recent_password_does_not_open_a_newly_protected_file(self, client, bob):
+        old = bob.add("Phone Backup", kind="folder", protected=True)
+        token = unlock(client, old["_id"]).json()["unlock_token"]
+        assert client.post("/files/protect", json={"file_id": str(old["_id"]), "protected": False, "unlock_token": token}).status_code == 200
+        new = bob.add("Claude Setup.exe")
+        assert client.post("/files/protect", json={"file_id": str(new["_id"]), "protected": True}).status_code == 200
+        assert client.post("/files/trash", json={"file_id": str(new["_id"]), "unlock_token": token}).status_code == 423
+        assert client.post("/files/trash", json={"file_id": str(new["_id"])}).status_code == 423
+        assert not new.get("trashed")
+
+    def test_after_removing_protection_it_deletes_normally(self, client, bob):
+        doc = bob.add("passport.pdf", protected=True)
+        token = unlock(client, doc["_id"]).json()["unlock_token"]
+        assert client.post("/files/protect", json={"file_id": str(doc["_id"]), "protected": False, "unlock_token": token}).status_code == 200
+        assert client.post("/files/trash", json={"file_id": str(doc["_id"])}).status_code == 200
         assert doc["trashed"] is True
 
-    def test_a_token_is_only_good_for_its_own_account(self, client, bob):
-        doc = bob.add("passport.pdf", protected=True)
-        other = protection_service.issue_token("eve")
-        assert client.post("/files/trash", json={"file_id": str(doc["_id"]), "unlock_token": other}).status_code == 423
-
-    def test_delete_forever_and_empty_trash(self, client, bob):
-        doc = bob.add("passport.pdf", protected=True, trashed=True)
-        assert client.post("/files/delete", json={"file_id": str(doc["_id"])}).status_code == 423
-        assert client.post("/files/trash/empty").status_code == 423
-        token = unlock(client).json()["unlock_token"]
-        assert client.post("/files/trash/empty", json={"unlock_token": token}).status_code == 200
-        assert bob.docs == []
+    def test_empty_trash_keeps_protected_items(self, client, bob):
+        keep = bob.add("passport.pdf", protected=True, trashed=True)
+        bob.add("junk.txt", trashed=True)
+        res = client.post("/files/trash/empty").json()
+        assert res["kept"] == 1
+        assert bob.docs == [keep]
 
     def test_unprotected_items_go_as_before(self, client, bob):
         doc = bob.add("notes.txt")
@@ -149,9 +162,27 @@ class TestProtecting:
         assert client.post("/files/protect", json={"file_id": str(doc["_id"]), "protected": True}).json() == {"protected": True}
         assert doc["protected"] is True
         assert client.post("/files/protect", json={"file_id": str(doc["_id"]), "protected": False}).status_code == 423
-        token = unlock(client).json()["unlock_token"]
+        assert unlock(client, doc["_id"], "nope").status_code == 400
+        token = unlock(client, doc["_id"]).json()["unlock_token"]
         assert client.post("/files/protect", json={"file_id": str(doc["_id"]), "protected": False, "unlock_token": token}).status_code == 200
         assert "protected" not in doc
+
+    def test_a_pass_is_for_one_item_and_works_once(self, client, bob):
+        a = bob.add("a.txt", protected=True)
+        b = bob.add("b.txt", protected=True)
+        token = unlock(client, a["_id"]).json()["unlock_token"]
+        assert client.post("/files/protect", json={"file_id": str(b["_id"]), "protected": False, "unlock_token": token}).status_code == 423
+        # Tried on the wrong item: used up
+        assert client.post("/files/protect", json={"file_id": str(a["_id"]), "protected": False, "unlock_token": token}).status_code == 423
+        token = unlock(client, a["_id"]).json()["unlock_token"]
+        assert client.post("/files/protect", json={"file_id": str(a["_id"]), "protected": False, "unlock_token": token}).status_code == 200
+        a["protected"] = True
+        assert client.post("/files/protect", json={"file_id": str(a["_id"]), "protected": False, "unlock_token": token}).status_code == 423
+
+    def test_a_pass_from_another_account_does_nothing(self, client, bob):
+        doc = bob.add("a.txt", protected=True)
+        other = protection_service.issue_token("eve", str(doc["_id"]))
+        assert client.post("/files/protect", json={"file_id": str(doc["_id"]), "protected": False, "unlock_token": other}).status_code == 423
 
     def test_how_an_account_confirms(self, client, files):
         app.dependency_overrides[require_auth] = lambda: User(username="gina", telegram_user_id=42)
@@ -166,15 +197,28 @@ class TestProtecting:
             app.dependency_overrides.pop(require_auth, None)
 
     def test_an_email_code_unlocks_too(self, client, files):
+        doc = files.add("a.txt", protected=True)
         app.dependency_overrides[require_auth] = lambda: User(username="gina", telegram_user_id=42)
         try:
             with patch.object(database.Users, "getUser", return_value={"email": "gina@gmail.com"}), \
                     patch("telestore.services.email_service.verify_vault_otp", side_effect=lambda e, u, c, p: c == "123456") as check:
-                assert client.post("/files/protection/unlock", json={"code": "000000"}).status_code == 400
-                assert "unlock_token" in client.post("/files/protection/unlock", json={"code": "123456"}).json()
+                assert client.post("/files/protection/unlock", json={"code": "000000", "file_id": str(doc["_id"])}).status_code == 400
+                assert "unlock_token" in client.post("/files/protection/unlock", json={"code": "123456", "file_id": str(doc["_id"])}).json()
             assert check.call_args.args[3] == protection_service.CODE_PURPOSE
         finally:
             app.dependency_overrides.pop(require_auth, None)
+
+    def test_a_trashed_item_cannot_be_protected(self, client, bob):
+        doc = bob.add("old.txt", trashed=True)
+        assert client.post("/files/protect", json={"file_id": str(doc["_id"]), "protected": True}).status_code == 400
+
+
+def test_listing_marks_items_inside_protected_folders():
+    folders = protection_service.ProtectedFolders([{"file_name": "Taxes", "file_path": "/Home"}])
+    assert folders.covering("/Home/Taxes") == "Taxes"
+    assert folders.covering("/Home/Taxes/2024") == "Taxes"
+    assert folders.covering("/Home") is None
+    assert folders.covering("/Home/Taxes2") is None
 
 
 class TestColours:

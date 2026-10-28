@@ -77,6 +77,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -175,6 +176,7 @@ fun PhotosScreen(
     val picked = remember(state.selected, state.entries) { state.entries.filter { it.id in state.selected } }
     val inTeleStore = picked.count { it.server != null }
     val notBackedUp = picked.count { it.phoneOnly && !it.backedUp }
+    val protectedCount = picked.count { it.server?.isProtected == true }
 
     fun open(entry: PhotoEntry) {
         val server = entry.server
@@ -194,7 +196,7 @@ fun PhotosScreen(
         Column(Modifier.fillMaxSize()) {
             if (state.selecting) {
                 SelectionBar(
-                    count = state.selected.size, inTeleStore = inTeleStore, notBackedUp = notBackedUp,
+                    count = state.selected.size, inTeleStore = inTeleStore, notBackedUp = notBackedUp, protectedCount = protectedCount,
                     onClose = vm::clearSelection, onDownload = vm::downloadSelected, onStar = vm::starSelected, onTrash = vm::trashSelected,
                     onBackUp = {
                         if (!vm.backUpSelected()) {
@@ -437,6 +439,8 @@ private fun SelectionBar(
     count: Int,
     inTeleStore: Int,
     notBackedUp: Int,
+    /** Selected photos protected from deletion: Trash then looks off (tapping it says why). */
+    protectedCount: Int,
     onClose: () -> Unit,
     onDownload: () -> Unit,
     onStar: () -> Unit,
@@ -452,7 +456,9 @@ private fun SelectionBar(
             if (inTeleStore > 0) {
                 IconButton(onClick = onDownload) { Icon(Icons.Filled.Download, contentDescription = "Download") }
                 IconButton(onClick = onStar) { Icon(Icons.Filled.Star, contentDescription = "Star") }
-                IconButton(onClick = onTrash) { Icon(Icons.Filled.Delete, contentDescription = "Move to Trash") }
+                IconButton(onClick = onTrash) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Move to Trash", modifier = Modifier.alpha(if (protectedCount > 0) 0.38f else 1f))
+                }
             }
         }
     }

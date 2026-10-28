@@ -3,7 +3,7 @@
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { getItemKey } from "../lib/fileCardHelpers";
-import { createProtectionGuard, isProtectionCancelled } from "@/features/protection/protection";
+import { isProtectedError, isProtectedItem, notDeletedMessage } from "@/features/protection/protection";
 
 export function createSelectionActions({ cloudAccountId, cloudFolderId, currentPath, handleItemOpen, isCloudMode, isLongPressRef, isSelectionMode, isTrashMode, items, lastSelectedIndex, lastTapRef, onDownload, onRefresh, selectedItems, setBatchDeleteDialogOpen, setFocusedIndex, setIsBatchDeleting, setIsSelectionMode, setLastSelectedIndex, setSelectedItems }) {
 const handleItemClick = (e, item, index) => {
@@ -116,17 +116,18 @@ const handleBatchDownload = async () => {
 };
 const handleConfirmBatchDelete = async () => {
     const itemsToDelete = items.filter(item => selectedItems.has(getItemKey(item)));
-    const validItemsToDelete = itemsToDelete;
+    // Protected items (or ones inside a protected folder) are left alone (see features/protection)
+    const validItemsToDelete = itemsToDelete.filter((item) => !isProtectedItem(item));
+    let keptCount = itemsToDelete.length - validItemsToDelete.length;
+    let lockedMessage = null;
     if (validItemsToDelete.length === 0) {
         setBatchDeleteDialogOpen(false);
+        if (keptCount > 0) toast.info(notDeletedMessage(keptCount));
         return;
     }
     setIsBatchDeleting(true);
     let successCount = 0;
     let failCount = 0;
-    let keptCount = 0;
-    // Protected items: the password is asked once for the whole batch (see features/protection)
-    const guarded = createProtectionGuard();
     for (const item of validItemsToDelete) {
         try {
             if (isCloudMode || item.is_cloud) {
@@ -136,13 +137,16 @@ const handleConfirmBatchDelete = async () => {
                 await api.deleteCloudFile(accId, fileId, isAlreadyTrashed);
             }
             else {
-                await guarded((token) => (isTrashMode ? api.deleteForever(item.id, token) : api.trashFile(item.id, token)));
+                await (isTrashMode ? api.deleteForever(item.id) : api.trashFile(item.id));
             }
             successCount++;
         }
         catch (e) {
-            if (isProtectionCancelled(e))
+            // The server refuses protected items (HTTP 423) with a message saying why
+            if (isProtectedError(e)) {
                 keptCount++;
+                lockedMessage = e.message;
+            }
             else
                 failCount++;
         }
@@ -162,7 +166,7 @@ const handleConfirmBatchDelete = async () => {
         }
     }
     if (keptCount > 0) {
-        toast.info(keptCount === validItemsToDelete.length ? "Not deleted" : `${keptCount} protected item${keptCount > 1 ? 's' : ''} not deleted`);
+        toast.info(itemsToDelete.length === 1 && lockedMessage ? lockedMessage : notDeletedMessage(keptCount));
     }
     if (failCount > 0) {
         toast.error(`Failed to process ${failCount} item${failCount > 1 ? 's' : ''}`);

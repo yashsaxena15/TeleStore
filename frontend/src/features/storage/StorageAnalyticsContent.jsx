@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { api, getApiBaseUrl } from "@/lib/api";
-import { isProtectionCancelled, withProtection } from "@/features/protection/protection";
+import { isProtectedError, isProtectedItem, keptMessage, protectedReason } from "@/features/protection/protection";
 import { formatBytes } from "@/lib/utils";
 import { MediaPlayerContext } from "@/features/player/MediaPlayerContext";
 import {
@@ -134,16 +134,13 @@ export const StorageAnalyticsContent = ({
   const handleEmptyTrashConfirm = async () => {
     try {
       setEmptyingTrash(true);
-      await withProtection((token) => api.emptyTrash(token));
-      toast.success("Trash emptied successfully");
+      const res = await api.emptyTrash();
+      // Protected items stay in the trash
+      if (res?.kept > 0) toast.info(`Trash emptied — ${keptMessage(res.kept)}`);
+      else toast.success("Trash emptied successfully");
       setEmptyTrashOpen(false);
       await fetchAnalytics();
     } catch (err) {
-      if (isProtectionCancelled(err)) {
-        setEmptyTrashOpen(false);
-        toast.info("Not deleted");
-        return;
-      }
       toast.error("Failed to empty trash", {
         description: err.message || String(err),
       });
@@ -156,14 +153,15 @@ export const StorageAnalyticsContent = ({
     if (!fileToDelete) return;
     try {
       setDeletingFile(true);
-      await withProtection((token) => api.trashFile(fileToDelete.id, token));
+      await api.trashFile(fileToDelete.id);
       toast.success(`Moved "${fileToDelete.file_name}" to Trash`);
       setFileToDelete(null);
       await fetchAnalytics();
     } catch (err) {
-      if (isProtectionCancelled(err)) {
+      // Protected (or inside a protected folder): the server says why
+      if (isProtectedError(err)) {
         setFileToDelete(null);
-        toast.info("Not deleted");
+        toast.error(err.message);
         return;
       }
       toast.error("Failed to delete file", {
@@ -509,9 +507,11 @@ export const StorageAnalyticsContent = ({
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => setFileToDelete(file)}
-                            className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive gap-1"
-                            title="Move to trash"
+                            onClick={() => (isProtectedItem(file) ? toast.error(protectedReason({ ...file, name: file.file_name })) : setFileToDelete(file))}
+                            aria-disabled={isProtectedItem(file) || undefined}
+                            aria-description={isProtectedItem(file) ? protectedReason({ ...file, name: file.file_name }) : undefined}
+                            className={`h-7 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive gap-1 ${isProtectedItem(file) ? "opacity-50 cursor-not-allowed" : ""}`}
+                            title={isProtectedItem(file) ? "Protected from deletion" : "Move to trash"}
                             aria-label={`Move ${file.file_name} to trash`}
                           >
                             <Trash2 className="w-3.5 h-3.5" />

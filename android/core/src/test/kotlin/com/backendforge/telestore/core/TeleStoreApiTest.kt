@@ -264,6 +264,7 @@ class TeleStoreApiTest {
         server.enqueue(json("""{"message":"Trash emptied"}"""))
         val reply = api.emptyTrash()
         assertEquals("Trash emptied", reply.message)
+        assertEquals(0, reply.kept)
         val req = server.takeRequest()
         assertEquals("POST", req.method)
         assertEquals("/files/trash/empty", req.path)

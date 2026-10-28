@@ -234,17 +234,19 @@ export const api = {
     // Photos: photos and videos in one folder tree (the phone backup), newest taken first
     fetchMedia: (under, page, pageSize) => request('/files', { query: { path: 'all', kind: 'media', under, page, page_size: pageSize, sort_by: 'taken', sort_order: 'desc' }, timeout: 15000, fallback: 'Failed to fetch photos' }),
     toggleStar: (fileId, starred) => post('/files/star', { file_id: fileId, starred }, { fallback: 'Failed to update star status' }),
-    // Deleting a protected item (or one inside a protected folder) answers 423 unless an
-    // unlock token is sent (see features/protection)
-    trashFile: (fileId, unlockToken) => post('/files/trash', { file_id: fileId, unlock_token: unlockToken }, { fallback: 'Failed to move item to trash' }),
+    // A protected item (or one inside a protected folder) can't be deleted: the server answers 423
+    // with a message saying why (see features/protection)
+    trashFile: (fileId) => post('/files/trash', { file_id: fileId }, { fallback: 'Failed to move item to trash' }),
     restoreFile: (fileId) => post('/files/restore', { file_id: fileId }, { fallback: 'Failed to restore item from trash' }),
-    emptyTrash: (unlockToken) => post('/files/trash/empty', unlockToken ? { unlock_token: unlockToken } : undefined, { fallback: 'Failed to empty trash' }),
-    deleteForever: (fileId, unlockToken) => post('/files/delete', { file_id: fileId, unlock_token: unlockToken }, { fallback: 'Failed to permanently delete item' }),
-    // Protect from deletion: how this account confirms, the emailed code, and the 5-minute unlock
+    // Keeps protected items: answers { message, kept }
+    emptyTrash: () => post('/files/trash/empty', undefined, { fallback: 'Failed to empty trash' }),
+    deleteForever: (fileId) => post('/files/delete', { file_id: fileId }, { fallback: 'Failed to permanently delete item' }),
+    // Protect from deletion: how this account confirms, the emailed code, and the one-time pass
+    // that removes the protection from one item (fileId) once
     getProtectionMethod: () => request('/files/protection', { fallback: "Couldn't check how to confirm" }),
     sendProtectionCode: () => post('/files/protection/code', undefined, { fallback: "Couldn't send the code" }),
-    unlockProtection: ({ password, code }) => post('/files/protection/unlock', { password, code }, { fallback: "Couldn't confirm" }),
-    setProtected: (fileId, isProtected, unlockToken) => post('/files/protect', { file_id: fileId, protected: isProtected, unlock_token: unlockToken }, { fallback: "Couldn't change the protection" }),
+    unlockProtection: ({ password, code, fileId }) => post('/files/protection/unlock', { password, code, file_id: fileId }, { fallback: "Couldn't confirm" }),
+    setProtected: (fileId, isProtected, unlockToken) => post('/files/protect', isProtected ? { file_id: fileId, protected: true } : { file_id: fileId, protected: false, unlock_token: unlockToken }, { fallback: "Couldn't change the protection" }),
     // Folder colour (null = default)
     setFolderColor: (fileId, color) => post('/files/color', { file_id: fileId, color }, { fallback: "Couldn't change the folder colour" }),
     // Camera, exposure and place a photo was taken (from its EXIF)

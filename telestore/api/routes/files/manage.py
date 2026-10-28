@@ -27,7 +27,6 @@ class CopyFileRequest(BaseModel):
 
 class DeleteFileRequest(BaseModel):
     file_id: str
-    unlock_token: Optional[str] = None
 
 class RenameFileRequest(BaseModel):
     file_id: str
@@ -39,21 +38,15 @@ class StarRequest(BaseModel):
 
 class TrashRequest(BaseModel):
     file_id: str
-    unlock_token: Optional[str] = None
 
 
-class EmptyTrashRequest(BaseModel):
-    unlock_token: Optional[str] = None
-
-
-def _check_protection(doc: Optional[dict], user: User, token: Optional[str]) -> None:
-    """423 when [doc] is protected (or holds or sits in something protected) and isn't unlocked."""
-    if not doc:
-        return
+def _check_protection(doc: Optional[dict], user: User) -> None:
+    """423 when [doc] is protected, sits in a protected folder or holds something protected:
+    those can't be deleted until their protection is removed (no password unlocks a delete)."""
     from telestore.api.routes.files.protection import locked, owner_ids
     from telestore.services import protection_service as protection
     try:
-        protection.require(token, user.username, protection.blocker(doc, owner_ids(user)))
+        protection.refuse(doc, owner_ids(user))
     except protection.ProtectedError as e:
         raise locked(str(e))
 
@@ -242,7 +235,7 @@ async def delete_file_route(
         file_data = database.Files.find_one({"_id": ObjectId(request.file_id), "owner_id": user_id})
         if not file_data:
             raise HTTPException(status_code=404, detail="File not found")
-        _check_protection(file_data, user, request.unlock_token)
+        _check_protection(file_data, user)
         
         # Track Telegram messages to delete: {chat_id: set([message_id, ...])}
         messages_to_delete = defaultdict(set)
@@ -362,7 +355,7 @@ async def trash_file_route(request: TrashRequest, user: User = Depends(require_a
     try:
         user_id = str(user.telegram_user_id) if user.telegram_user_id else user.username
         if ObjectId.is_valid(request.file_id):
-            _check_protection(database.Files.find_one({"_id": ObjectId(request.file_id), "owner_id": user_id}), user, request.unlock_token)
+            _check_protection(database.Files.find_one({"_id": ObjectId(request.file_id), "owner_id": user_id}), user)
         success = database.Files.move_to_trash(request.file_id, user_id)
         if success:
             return {"message": "Moved to trash successfully"}
@@ -390,16 +383,15 @@ async def restore_file_route(request: TrashRequest, user: User = Depends(require
 
 
 @router.post("/trash/empty")
-async def empty_trash_route(http_request: Request, body: Optional[EmptyTrashRequest] = None, user: User = Depends(require_auth)):
+async def empty_trash_route(http_request: Request, user: User = Depends(require_auth)):
     try:
         user_id = str(user.telegram_user_id) if user.telegram_user_id else user.username
-        from telestore.api.routes.files.protection import locked, owner_ids
+        from telestore.api.routes.files.protection import owner_ids
         from telestore.services import protection_service as protection
-        try:
-            protection.require(body.unlock_token if body else None, user.username, protection.trash_blocker(owner_ids(user)))
-        except protection.ProtectedError as e:
-            raise locked(str(e))
-        trashed_items = list(database.Files.find({"trashed": True, "owner_id": user_id}))
+        # Protected items stay (and so do their Telegram messages)
+        kept = protection.kept_in_trash(owner_ids(user))
+        kept_ids = [d["_id"] for d in kept]
+        trashed_items = [d for d in database.Files.find({"trashed": True, "owner_id": user_id}) if d["_id"] not in kept_ids]
         
         messages_to_delete = defaultdict(set)
         for doc in trashed_items:
@@ -412,7 +404,7 @@ async def empty_trash_route(http_request: Request, body: Optional[EmptyTrashRequ
                 if p_mid and c_id:
                     messages_to_delete[c_id].add(p_mid)
         
-        database.Files.delete_many({"trashed": True, "owner_id": user_id})
+        database.Files.delete_many({"trashed": True, "owner_id": user_id, "_id": {"$nin": kept_ids}})
         messages_to_delete = database.Files.unreferenced_messages(messages_to_delete)
 
         if messages_to_delete:
@@ -433,7 +425,10 @@ async def empty_trash_route(http_request: Request, body: Optional[EmptyTrashRequ
             except Exception as ex:
                 logger.warning(f"Error accessing bot client for trash deletion: {ex}")
                 
-        return {"message": f"Emptied {len(trashed_items)} items from trash"}
+        message = f"Emptied {len(trashed_items)} items from trash"
+        if kept:
+            message += f"; kept {len(kept)} protected"
+        return {"message": message, "kept": len(kept)}
     except HTTPException:
         raise
     except Exception as e:

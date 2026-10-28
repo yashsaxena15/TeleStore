@@ -443,7 +443,7 @@ fun MainScreen(
     }
     val snackbar = remember { SnackbarHostState() }
 
-    // Deleting something protected: asks for the password (or an emailed code) once
+    // Removing protection: asks for the password (or an emailed code) each time
     com.backendforge.telestore.ui.components.ProtectionConfirmHost(
         gate = container.protection,
         api = { container.api() },

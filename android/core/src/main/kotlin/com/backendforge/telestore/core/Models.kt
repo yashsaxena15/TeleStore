@@ -52,8 +52,10 @@ data class FileItem(
     @SerialName("is_vault") val isVault: Boolean = false,
     /** When a photo or video was taken (sent by the phone backup); null for other uploads. */
     @SerialName("taken_at") val takenAt: String? = null,
-    /** Protected from deletion: trashing or deleting it needs the password (or an email code). */
+    /** Protected from deletion (the item itself): it can't be trashed or deleted until protection is removed. */
     val protected: Boolean = false,
+    /** The name of a protected folder this item is inside (so it can't be deleted either); null when none. */
+    @SerialName("protected_by") val protectedBy: String? = null,
     /** A folder's colour name (see [FolderColors]); null is the default colour. */
     val color: String? = null,
 ) {
@@ -61,6 +63,8 @@ data class FileItem(
     val timelineDate: String? get() = takenAt ?: modified
     val isFolder: Boolean get() = type == "folder"
     val kind: FileKind get() = FileKinds.of(this)
+    /** Can't be trashed or deleted: protected itself or inside a protected folder. */
+    val isProtected: Boolean get() = protected || protectedBy != null
 }
 
 @Serializable

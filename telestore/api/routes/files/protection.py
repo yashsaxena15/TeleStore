@@ -17,6 +17,8 @@ from telestore.services import protection_service as protection
 class UnlockRequest(BaseModel):
     password: Optional[str] = None
     code: Optional[str] = None
+    # The item whose protection is being removed: the pass works for that alone, once
+    file_id: str
 
 
 class ProtectRequest(BaseModel):
@@ -50,7 +52,7 @@ def locked(message: str) -> HTTPException:
 
 @router.get("/protection")
 def protection_method(user: User = Depends(require_auth)):
-    """How this account confirms deleting protected files."""
+    """How this account confirms removing protection."""
     return protection.method(user.username)
 
 
@@ -71,7 +73,9 @@ async def send_protection_code(user: User = Depends(require_auth)):
 
 @router.post("/protection/unlock")
 async def unlock_protection(body: UnlockRequest, user: User = Depends(require_auth)):
-    """Checks the password (or email code) and returns a token that unlocks deleting for 5 minutes."""
+    """Checks the password (or email code) and returns a one-time pass to remove protection from
+    [file_id]. It never unlocks deleting: protected items can't be deleted at all."""
+    _own(body.file_id, user)
     key = f"pw:{user.username.strip().lower()}"
     try:
         password_limiter.check(key)
@@ -92,7 +96,7 @@ async def unlock_protection(body: UnlockRequest, user: User = Depends(require_au
             raise HTTPException(status_code=429, detail=wait_message(lock), headers={"Retry-After": str(lock)})
         raise HTTPException(status_code=400, detail="Wrong password." if body.password else "Wrong or expired code.")
     password_limiter.success(key)
-    return {"unlock_token": protection.issue_token(user.username), "expires_in": protection.TOKEN_SECONDS}
+    return {"unlock_token": protection.issue_token(user.username, body.file_id), "expires_in": protection.TOKEN_SECONDS}
 
 
 @router.post("/protect")
@@ -101,7 +105,9 @@ def protect_route(body: ProtectRequest, user: User = Depends(require_auth)):
     doc = _own(body.file_id, user)
     if doc.get("is_vault"):
         raise HTTPException(status_code=400, detail="Private Vault files are already locked.")
-    if not body.protected and doc.get("protected") and not protection.token_valid(body.unlock_token, user.username):
+    if body.protected and doc.get("trashed"):
+        raise HTTPException(status_code=400, detail="Restore it from Trash first.")
+    if not body.protected and doc.get("protected") and not protection.use_token(body.unlock_token, user.username, body.file_id):
         raise locked(f"Confirm with your password to remove protection from “{doc.get('file_name')}”.")
     database.Files.update_one({"_id": doc["_id"]}, {"$set": {"protected": True}} if body.protected else {"$unset": {"protected": ""}})
     logger.info(f"{'Protected' if body.protected else 'Unprotected'} {doc.get('file_name')} for {user.username}")

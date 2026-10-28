@@ -19,7 +19,7 @@ onUploadFolder, // Destructure the new prop
 isClipboardPasted, // Destructure the new prop
 hasClipboard, // Destructure the new prop
 disableDelete = false, // Destructure the new prop with default value
-onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false, isVideo = false, onCopyStreamUrl, selectedCount = 1, isStarred = false, onToggleStar, isTrashMode = false, onRestore, isVaultMode = false, onMoveToVault, onMoveToHome, isCloudMode = false, isVirtualFolder = false, isRestrictedEmptyArea = false, onAddToPlaylist, onMakeOffline, onRemoveOffline, onProtect, onUnprotect, folderColor, onSetFolderColor, }) => {
+onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false, isVideo = false, onCopyStreamUrl, selectedCount = 1, isStarred = false, onToggleStar, isTrashMode = false, onRestore, isVaultMode = false, onMoveToVault, onMoveToHome, isCloudMode = false, isVirtualFolder = false, isRestrictedEmptyArea = false, onAddToPlaylist, onMakeOffline, onRemoveOffline, onProtect, onUnprotect, folderColor, onSetFolderColor, hideDelete = false, protectionNote, }) => {
     const menuRef = useRef(null);
     const isMobile = useIsMobile();
 
@@ -178,6 +178,10 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                 onClose();
         }
     };
+    // Protected items can't be deleted: no delete entry, a disabled line saying why instead
+    const deleteOr = (entry) => (hideDelete
+        ? (protectionNote ? [{ icon: ShieldCheck, label: protectionNote, action: "protection_note", disabled: true }] : [])
+        : [entry]);
     const menuItems = isTrashMode
         ? (itemType === "empty"
             ? [
@@ -195,12 +199,12 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                     action: "restore",
                 },
                 { divider: true, label: "", action: "" },
-                {
+                ...deleteOr({
                     icon: Trash2,
                     label: "Delete Forever",
                     action: "delete",
                     danger: true,
-                },
+                }),
                 { divider: true, label: "", action: "" },
                 {
                     icon: Info,
@@ -478,14 +482,14 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                                 },
                             ]),
                         { divider: true, label: "", action: "" },
-                        {
+                        ...deleteOr({
                             icon: Trash2,
                             label: selectedCount > 1 ? `Move to Trash (${selectedCount})` : "Move to Trash",
                             action: "delete",
                             shortcut: "Del",
                             danger: true,
                             disabled: disableDelete,
-                        },
+                        }),
                         { divider: true, label: "", action: "" },
                         {
                             icon: Info,

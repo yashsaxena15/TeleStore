@@ -1,32 +1,38 @@
-// Menu actions: protect / unprotect items and colour folders. `refresh` reloads the file lists.
+// Menu actions: protect items, remove the protection and colour folders. `refresh` reloads the file lists.
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { isProtectionCancelled, withUnlock } from "./protection";
+import { confirmUnlock, unprotectWith } from "./protection";
 
 const named = (items) => (items.length === 1 ? `“${items[0].name}”` : `${items.length} items`);
 
-/** Protect items from deletion, or (after confirming with the password) remove the protection. */
-export async function setProtection(items, on, refresh) {
+/** Protect items from deletion (no password needed to turn it on). */
+export async function protectItems(items, refresh) {
     if (!items.length) return;
     try {
-        if (on) {
-            await Promise.all(items.map((it) => api.setProtected(it.id, true)));
-            toast.success(`${named(items)} ${items.length === 1 ? "is" : "are"} protected from deletion`);
-        }
-        else {
-            await withUnlock(`Confirm to remove the protection from ${named(items)}.`, async (token) => {
-                for (const it of items) await api.setProtected(it.id, false, token);
-            });
-            toast.success(`Removed the protection from ${named(items)}`);
-        }
+        await Promise.all(items.map((it) => api.setProtected(it.id, true)));
+        toast.success(`${named(items)} ${items.length === 1 ? "is" : "are"} protected from deletion`);
     }
     catch (error) {
-        if (isProtectionCancelled(error)) toast.info("Still protected");
-        else toast.error(error.message);
+        toast.error(error.message);
     }
     finally {
         refresh?.();
     }
+}
+
+/**
+ * Remove the protection from one item, after the user confirms with their password (or emailed
+ * code). Each confirm gets a pass for this item only, spent on this one request.
+ */
+export async function removeProtection(item, refresh) {
+    if (!item?.id) return;
+    const done = await confirmUnlock({
+        reason: `Confirm to remove the protection from “${item.name}”.`,
+        onConfirm: (credentials) => unprotectWith(api, item.id, credentials),
+    });
+    if (!done) return;
+    toast.success(`Removed the protection from “${item.name}”`);
+    refresh?.();
 }
 
 /** Colour folders (null = the default colour). */

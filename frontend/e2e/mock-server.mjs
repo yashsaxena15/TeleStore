@@ -44,7 +44,9 @@ FOLDERS["/Home/Music"].push(file(500, "huge-backup.zip", "archive", 300 * 1024 *
 FOLDERS["/Home/Documents"] = Array.from({ length: 1500 }, (_, n) => file(1000 + n, `scan-${String(n + 1).padStart(4, "0")}.pdf`, "document", 120_000 + n, "/Home/Documents"));
 
 // Protect from deletion and folder colours: Q3-report.pdf starts protected, Movies is blue.
-// Deleting a protected item without the unlock token answers 423; the password is "right-pass".
+// Protected items (and ones inside a protected folder, or folders holding one) can't be deleted:
+// trash/delete always answer 423. Removing protection needs the password ("right-pass"): unlock
+// gives "tok-1" for that file_id, good for one /files/protect.
 const PROTECTED = new Set();
 const COLORS = {};
 const resetProtection = () => {
@@ -54,8 +56,21 @@ const resetProtection = () => {
     COLORS.f1 = "blue";
 };
 resetProtection();
-const withMarks = (f) => ({ ...f, protected: PROTECTED.has(f.id), color: f.file_type === "folder" ? (COLORS[f.id] || null) : null });
-const nameOf = (id) => Object.values(FOLDERS).flat().find((f) => f.id === id)?.file_name || "This item";
+let UNLOCK = null; // the file_id the last unlock was for, until it's spent
+const ALL = () => Object.values(FOLDERS).flat();
+const byId = (id) => ALL().find((f) => f.id === id);
+const fullPath = (f) => `${f.file_path}/${f.file_name}`;
+// The protected folder an item is inside (its name), or null
+const protectedBy = (f) => ALL().find((d) => d.file_type === "folder" && PROTECTED.has(d.id) && `${f.file_path}/`.startsWith(`${fullPath(d)}/`))?.file_name || null;
+const lockedReason = (f) => {
+    if (!f) return null;
+    if (PROTECTED.has(f.id)) return `“${f.file_name}” is protected. Remove protection first.`;
+    const by = protectedBy(f);
+    if (by) return `“${f.file_name}” is inside the protected folder “${by}”. Remove the folder's protection first.`;
+    const inner = f.file_type === "folder" && ALL().find((x) => PROTECTED.has(x.id) && `${x.file_path}/`.startsWith(`${fullPath(f)}/`));
+    return inner ? `“${f.file_name}” contains a protected item (“${inner.file_name}”). Remove its protection first.` : null;
+};
+const withMarks = (f) => ({ ...f, protected: PROTECTED.has(f.id), protected_by: PROTECTED.has(f.id) ? null : protectedBy(f), color: f.file_type === "folder" ? (COLORS[f.id] || null) : null });
 // Photo details (EXIF) for team-offsite.jpg
 const PHOTO_INFO = {
     f8: { width: 4032, height: 3024, megapixels: 12.2, camera_make: "Apple", camera_model: "iPhone 13", lens: "iPhone 13 back dual wide camera 5.1mm f/1.6", aperture: 1.8, exposure: 1 / 120, iso: 100, focal_length: 4.2, flash: false, taken_at: "2026-10-12T17:45:00", latitude: 15.55271, longitude: 73.75169, altitude: 12, format: "JPEG", file_size: 4_800_000, file_name: "team-offsite.jpg", folder: "/Home" },
@@ -230,11 +245,18 @@ const mutation = (req, res, url, body) => {
     requests.push({ method: req.method, path: url.pathname, body });
     if (url.pathname === "/files/protection/unlock") {
         const data = JSON.parse(body || "{}");
-        return data.password === "right-pass" ? send(res, 200, { unlock_token: "tok-1", expires_in: 300 }) : send(res, 400, { detail: "Wrong password" });
+        if (!data.file_id) return send(res, 422, { detail: "file_id is required" });
+        if (data.password !== "right-pass") return send(res, 400, { detail: "Wrong password" });
+        UNLOCK = data.file_id;
+        return send(res, 200, { unlock_token: "tok-1", expires_in: 120 });
     }
     if (url.pathname === "/files/protect") {
         const data = JSON.parse(body || "{}");
-        if (!data.protected && data.unlock_token !== "tok-1") return send(res, 423, { detail: "Confirm with your password to remove the protection." });
+        if (!data.protected) {
+            // The pass works for the file it was asked for, once
+            if (data.unlock_token !== "tok-1" || UNLOCK !== data.file_id) return send(res, 423, { detail: "Confirm with your password to remove the protection." });
+            UNLOCK = null;
+        }
         if (data.protected) PROTECTED.add(data.file_id);
         else PROTECTED.delete(data.file_id);
         return send(res, 200, { protected: Boolean(data.protected) });
@@ -246,8 +268,12 @@ const mutation = (req, res, url, body) => {
     }
     if (url.pathname === "/files/trash" || url.pathname === "/files/delete") {
         const data = JSON.parse(body || "{}");
-        if (PROTECTED.has(data.file_id) && data.unlock_token !== "tok-1")
-            return send(res, 423, { detail: `“${nameOf(data.file_id)}” is protected. Confirm with your password to delete it.` });
+        const reason = lockedReason(byId(data.file_id));
+        if (reason) return send(res, 423, { detail: reason });
+    }
+    if (url.pathname === "/files/trash/empty") {
+        const kept = FOLDERS["/trash"].filter((f) => PROTECTED.has(f.id)).length;
+        return send(res, 200, { message: "Trash emptied", kept });
     }
     if (url.pathname === "/user/notifications/read") {
         const data = JSON.parse(body || "{}");
@@ -354,6 +380,7 @@ http.createServer((req, res) => {
                 resetNotifications();
                 resetDevices();
                 resetProtection();
+                UNLOCK = null;
             }
             return send(res, 200, requests);
         }

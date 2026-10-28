@@ -47,7 +47,7 @@ class AppContainer(val context: Context) {
     /** Where a tapped notification should open ("transfers", "folder", "offline"…), until MainScreen goes there. */
     val pendingTarget = MutableStateFlow<com.backendforge.telestore.core.NotificationTarget?>(null)
 
-    /** Asks for the password before protected things are deleted; keeps the unlock token a few minutes. */
+    /** Asks for the password (or an emailed code) before protection is removed from an item; nothing is kept. */
     val protection = com.backendforge.telestore.ui.components.ProtectionGate()
 
     /** Unread server notifications (the badge on More › Notifications). */

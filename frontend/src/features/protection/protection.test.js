@@ -1,76 +1,69 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError } from "@/lib/api";
-import { cachedUnlockToken, canProtect, createProtectionGuard, forgetUnlockToken, isProtectionCancelled, rememberUnlockToken, withUnlock } from "./protection";
-
-vi.mock("@/lib/api", () => ({
-    ApiError: class extends Error {
-        constructor(message, status) {
-            super(message);
-            this.status = status;
-        }
-    },
-}));
-
-const locked = () => new ApiError("“Taxes” is protected. Confirm with your password to delete it.", 423);
+import { describe, expect, it, vi } from "vitest";
+import { canProtect, isProtectedError, isProtectedItem, keptMessage, notDeletedMessage, protectedReason, protectedSelectionReason, unprotectWith } from "./protection";
 
 describe("protect from deletion", () => {
-    afterEach(() => forgetUnlockToken());
-
-    it("keeps the unlock token until just before it expires", () => {
-        rememberUnlockToken("tok", 300, 1_000);
-        expect(cachedUnlockToken(1_000)).toBe("tok");
-        expect(cachedUnlockToken(1_000 + 285_000)).toBe("tok");
-        expect(cachedUnlockToken(1_000 + 295_000)).toBeNull();
-        expect(cachedUnlockToken(1_000)).toBeNull();
+    it("an item is protected itself or by the folder it's in", () => {
+        expect(isProtectedItem({ name: "a.pdf", protected: true, protected_by: null })).toBe(true);
+        expect(isProtectedItem({ name: "a.pdf", protected: false, protected_by: "Taxes" })).toBe(true);
+        expect(isProtectedItem({ name: "a.pdf", protected: false, protected_by: null })).toBe(false);
+        expect(isProtectedItem(null)).toBe(false);
     });
 
-    it("asks once on 423 and retries with the token", async () => {
-        const confirm = vi.fn(async (reason) => {
-            expect(reason).toMatch(/is protected/);
-            rememberUnlockToken("tok-1", 300);
-            return "tok-1";
-        });
-        const run = createProtectionGuard({ confirm });
-        const calls = [];
-        const action = (id) => async (token) => {
-            calls.push([id, token]);
-            if (id !== "plain" && token !== "tok-1") throw locked();
-            return id;
+    it("says why an item can't be deleted", () => {
+        expect(protectedReason({ name: "passport.pdf", protected: true })).toBe("“passport.pdf” is protected. Remove protection first.");
+        expect(protectedReason({ name: "2024.pdf", protected: false, protected_by: "Taxes" }))
+            .toBe("“2024.pdf” is inside the protected folder “Taxes”. Remove the folder's protection first.");
+    });
+
+    it("says why a selection can't be deleted", () => {
+        const plain = { name: "a.jpg" };
+        const own = { name: "b.pdf", protected: true };
+        const inside = { name: "c.pdf", protected_by: "Taxes" };
+        expect(protectedSelectionReason([plain])).toBeNull();
+        expect(protectedSelectionReason([])).toBeNull();
+        expect(protectedSelectionReason([own])).toBe("“b.pdf” is protected. Remove protection first.");
+        expect(protectedSelectionReason([plain, own])).toBe("1 protected item — remove protection first");
+        expect(protectedSelectionReason([plain, own, inside])).toBe("2 protected items — remove protection first");
+    });
+
+    it("counts in messages", () => {
+        expect(notDeletedMessage(1)).toBe("1 protected item not deleted");
+        expect(notDeletedMessage(3)).toBe("3 protected items not deleted");
+        expect(keptMessage(2)).toBe("2 protected items kept");
+    });
+
+    it("recognises the server's refusal", () => {
+        expect(isProtectedError({ status: 423 })).toBe(true);
+        expect(isProtectedError({ status: 404 })).toBe(false);
+        expect(isProtectedError(null)).toBe(false);
+    });
+
+    it("removing protection spends the pass on that one item, once", async () => {
+        const client = {
+            unlockProtection: vi.fn(async () => ({ unlock_token: "tok-1", expires_in: 120 })),
+            setProtected: vi.fn(async () => ({ protected: false })),
         };
-        expect(await run(action("a"))).toBe("a");
-        expect(await run(action("b"))).toBe("b");
-        expect(await run(action("plain"))).toBe("plain");
-        expect(confirm).toHaveBeenCalledTimes(1);
-        // The first request goes without a token; later ones reuse the confirmed one
-        expect(calls).toEqual([["a", undefined], ["a", "tok-1"], ["b", "tok-1"], ["plain", "tok-1"]]);
+        await unprotectWith(client, "f5", { password: "right-pass" });
+        expect(client.unlockProtection).toHaveBeenCalledWith({ password: "right-pass", fileId: "f5" });
+        expect(client.setProtected).toHaveBeenCalledTimes(1);
+        expect(client.setProtected).toHaveBeenCalledWith("f5", false, "tok-1");
     });
 
-    it("stops asking after the user cancels", async () => {
-        const confirm = vi.fn(async () => null);
-        const run = createProtectionGuard({ confirm });
-        const action = async () => { throw locked(); };
-        await expect(run(action)).rejects.toSatisfy(isProtectionCancelled);
-        await expect(run(action)).rejects.toSatisfy(isProtectionCancelled);
-        expect(confirm).toHaveBeenCalledTimes(1);
+    it("a wrong password removes nothing", async () => {
+        const client = {
+            unlockProtection: vi.fn(async () => { throw Object.assign(new Error("Wrong password."), { status: 400 }); }),
+            setProtected: vi.fn(),
+        };
+        await expect(unprotectWith(client, "f5", { code: "000000" })).rejects.toThrow("Wrong password.");
+        expect(client.unlockProtection).toHaveBeenCalledWith({ code: "000000", fileId: "f5" });
+        expect(client.setProtected).not.toHaveBeenCalled();
     });
 
-    it("passes other errors through", async () => {
-        const run = createProtectionGuard({ confirm: vi.fn() });
-        await expect(run(async () => { throw new ApiError("Not found", 404); })).rejects.toThrow("Not found");
-    });
-
-    it("asks first when removing protection", async () => {
-        const confirm = vi.fn(async () => "tok-2");
-        const action = vi.fn(async (token) => token);
-        expect(await withUnlock("Confirm", action, { confirm })).toBe("tok-2");
-        expect(confirm).toHaveBeenCalledWith("Confirm");
-        await expect(withUnlock("Confirm", action, { confirm: async () => null })).rejects.toSatisfy(isProtectionCancelled);
-    });
-
-    it("only TeleStore items outside Trash can be protected", () => {
+    it("only TeleStore items outside Trash and the Vault can be protected", () => {
         expect(canProtect({ id: "f1", name: "a.pdf" })).toBe(true);
         expect(canProtect({ id: "f1", is_cloud: true })).toBe(false);
         expect(canProtect({ id: "f1", trashed: true })).toBe(false);
+        expect(canProtect({ id: "f1", is_vault: true })).toBe(false);
         expect(canProtect({ id: "v", is_virtual: true })).toBe(false);
         expect(canProtect(null)).toBe(false);
     });

@@ -11,10 +11,10 @@ import com.backendforge.telestore.core.Memory
 import com.backendforge.telestore.core.PhotoDay
 import com.backendforge.telestore.core.PhotoEntry
 import com.backendforge.telestore.core.PhotoMerge
+import com.backendforge.telestore.core.ProtectedDelete
 import com.backendforge.telestore.core.SortBy
 import com.backendforge.telestore.core.Timeline
 import com.backendforge.telestore.data.AppContainer
-import com.backendforge.telestore.ui.components.protectedOutcomeMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -206,17 +206,25 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
 
     fun starSelected() = bulk("Starred") { container.api().setStarred(it, true) }
 
-    /** Protected photos are trashed after one password prompt; cancelled, they stay ("Not deleted"). */
+    /**
+     * Protected photos can't be trashed: with any selected, nothing happens and the snackbar says
+     * why (the selection stays). Ones the server still refuses are kept and counted.
+     */
     fun trashSelected() {
         val items = selectedItems()
+        val protectedCount = items.count { it.isProtected }
+        if (protectedCount > 0) {
+            _state.update { it.copy(message = ProtectedDelete.selectionBlockedMessage(protectedCount)) }
+            return
+        }
         _state.update { it.copy(selected = emptySet()) }
         viewModelScope.launch {
-            val outcome = container.protection.deleteAll(items) { item, token -> container.api().trash(item, token) }
+            val outcome = ProtectedDelete.run(items) { item -> container.api().trash(item) }
             val gone = outcome.done.map { it.id }.toSet()
             _state.update {
                 it.copy(
                     items = it.items.filterNot { f -> f.id in gone },
-                    message = protectedOutcomeMessage(outcome, "Moved to Trash"),
+                    message = ProtectedDelete.message(outcome, "Moved to Trash"),
                 )
             }
             remerge()

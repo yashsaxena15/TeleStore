@@ -72,11 +72,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.backendforge.telestore.core.FileItem
 import com.backendforge.telestore.core.FolderPaths
+import com.backendforge.telestore.core.ProtectedDelete
 import com.backendforge.telestore.core.TeleStoreApi
 import com.backendforge.telestore.ui.components.ConfirmDialog
 import com.backendforge.telestore.ui.components.FileGridCard
@@ -135,7 +137,6 @@ fun FolderScreen(
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var showEmptyTrashDialog by remember { mutableStateOf(false) }
     var deleteForeverItems by remember { mutableStateOf<List<FileItem>?>(null) }
-    var unprotectItem by remember { mutableStateOf<FileItem?>(null) }
     var colorItem by remember { mutableStateOf<FileItem?>(null) }
     var folderPickerTarget by remember { mutableStateOf<Pair<List<FileItem>, FolderPickerMode>?>(null) }
 
@@ -242,6 +243,9 @@ fun FolderScreen(
         bottomBar = {
             if (state.isSelectionMode) {
                 val selected = state.selectedItems
+                // Protected items can't be deleted: Delete / Trash look off and say why when tapped
+                val protectedCount = selected.count { it.isProtected }
+                val deleteAlpha = if (protectedCount > 0) 0.38f else 1f
                 NavigationBar {
                     if (state.isTrash) {
                         NavigationBarItem(
@@ -253,9 +257,15 @@ fun FolderScreen(
                         )
                         NavigationBarItem(
                             selected = false,
-                            onClick = { deleteForeverItems = selected },
-                            icon = { Icon(Icons.Default.DeleteForever, contentDescription = null) },
-                            label = { Text("Delete") },
+                            onClick = {
+                                if (protectedCount > 0) {
+                                    vm.showMessage(ProtectedDelete.selectionBlockedMessage(protectedCount))
+                                } else {
+                                    deleteForeverItems = selected
+                                }
+                            },
+                            icon = { Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.alpha(deleteAlpha)) },
+                            label = { Text("Delete", modifier = Modifier.alpha(deleteAlpha)) },
                             enabled = selected.isNotEmpty(),
                         )
                     } else if (state.isInbox) {
@@ -281,9 +291,15 @@ fun FolderScreen(
                         )
                         NavigationBarItem(
                             selected = false,
-                            onClick = { vm.trashItems(selected) },
-                            icon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                            label = { Text("Trash") },
+                            onClick = {
+                                if (protectedCount > 0) {
+                                    vm.showMessage(ProtectedDelete.selectionBlockedMessage(protectedCount))
+                                } else {
+                                    vm.trashItems(selected)
+                                }
+                            },
+                            icon = { Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.alpha(deleteAlpha)) },
+                            label = { Text("Trash", modifier = Modifier.alpha(deleteAlpha)) },
                             enabled = selected.isNotEmpty(),
                         )
                     } else {
@@ -333,9 +349,15 @@ fun FolderScreen(
                         )
                         NavigationBarItem(
                             selected = false,
-                            onClick = { vm.trashItems(selected) },
-                            icon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                            label = { Text("Trash") },
+                            onClick = {
+                                if (protectedCount > 0) {
+                                    vm.showMessage(ProtectedDelete.selectionBlockedMessage(protectedCount))
+                                } else {
+                                    vm.trashItems(selected)
+                                }
+                            },
+                            icon = { Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.alpha(deleteAlpha)) },
+                            label = { Text("Trash", modifier = Modifier.alpha(deleteAlpha)) },
                             enabled = selected.isNotEmpty(),
                         )
                     }
@@ -568,7 +590,8 @@ fun FolderScreen(
             onAddToPlaylist = onAddToPlaylist?.let { add -> { item: FileItem -> add(listOf(item)) } },
             isOffline = if (target.isFolder) FolderPaths.childPath(target) in offlineFolders else target.id in offlineIds,
             onToggleOffline = onToggleOffline,
-            onToggleProtected = { if (it.protected) { unprotectItem = it } else { vm.setProtected(it, true) } },
+            // Removing protection asks for the password (or an emailed code) in its own dialog
+            onToggleProtected = { vm.setProtected(it, !it.protected) },
             onFolderColor = { colorItem = it },
             onDismiss = { actionItem = null },
         )
@@ -618,27 +641,13 @@ fun FolderScreen(
     if (showEmptyTrashDialog) {
         ConfirmDialog(
             title = "Empty trash?",
-            message = "All items in the trash will be permanently deleted. This action cannot be undone.",
+            message = "All items in the trash will be permanently deleted, except protected ones. This action cannot be undone.",
             confirmText = "Empty trash",
             isDestructive = true,
             onDismiss = { showEmptyTrashDialog = false },
             onConfirm = {
                 showEmptyTrashDialog = false
                 vm.emptyTrash()
-            },
-        )
-    }
-
-    unprotectItem?.let { target ->
-        ConfirmDialog(
-            title = "Remove protection?",
-            message = "'${target.name}' can then be moved to the trash or deleted without your password.",
-            confirmText = "Remove protection",
-            isDestructive = true,
-            onDismiss = { unprotectItem = null },
-            onConfirm = {
-                unprotectItem = null
-                vm.setProtected(target, false)
             },
         )
     }

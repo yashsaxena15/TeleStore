@@ -29,7 +29,10 @@ export const SelectionBar = ({ count, allSelected, actions, onAction, onClear, o
         const meta = ACTION_META[action.id];
         if (!meta) return null;
         const Icon = meta.icon;
-        return (<button key={action.id} type="button" disabled={busy} onClick={() => onAction(action.id)} title={meta.hint ? `${meta.label} (${meta.hint})` : meta.label} aria-label={meta.label} className={cn("h-8 inline-flex items-center gap-1.5 px-2 sm:px-2.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors disabled:opacity-50", meta.danger ? "text-destructive hover:bg-destructive/10" : "text-foreground hover:bg-muted", extra)}>
+        // A disabled action (e.g. delete with protected items) stays focusable and says why;
+        // clicking it shows the reason too (onAction decides)
+        const title = action.reason || (meta.hint ? `${meta.label} (${meta.hint})` : meta.label);
+        return (<button key={action.id} type="button" disabled={busy} aria-disabled={action.disabled || undefined} aria-description={action.reason} onClick={() => onAction(action.id)} title={title} aria-label={meta.label} className={cn("h-8 inline-flex items-center gap-1.5 px-2 sm:px-2.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors disabled:opacity-50", action.disabled ? "opacity-50 cursor-not-allowed text-muted-foreground" : meta.danger ? "text-destructive hover:bg-destructive/10" : "text-foreground hover:bg-muted", extra)}>
           <Icon className="w-3.5 h-3.5 shrink-0"/>
           <span className="hidden lg:inline">{meta.label}</span>
         </button>);
@@ -58,7 +61,7 @@ export const SelectionBar = ({ count, allSelected, actions, onAction, onClear, o
                 const meta = ACTION_META[a.id];
                 if (!meta) return null;
                 const Icon = meta.icon;
-                return (<DropdownMenuItem key={a.id} disabled={busy} onSelect={() => onAction(a.id)} className={cn("gap-2", meta.danger && "text-destructive")}>
+                return (<DropdownMenuItem key={a.id} disabled={busy || a.disabled} title={a.reason} onSelect={() => onAction(a.id)} className={cn("gap-2", meta.danger && "text-destructive")}>
                     <Icon className="w-4 h-4"/>{meta.label}
                   </DropdownMenuItem>);
             })}

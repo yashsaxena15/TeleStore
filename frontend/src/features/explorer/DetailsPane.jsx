@@ -109,7 +109,7 @@ const ItemDetails = ({ item, selectionCount, selectionSize, thumbnailSrc, locati
         {duration && (<><dt className="text-muted-foreground">Duration</dt><dd className="font-mono text-[11.5px]">{duration}</dd></>)}
         <dt className="text-muted-foreground">Location</dt><dd className="font-mono text-[11.5px] break-all">{item.file_path || locationPath}</dd>
         <dt className="text-muted-foreground">Modified</dt><dd className="font-mono text-[11.5px]">{formatDateTime(item.modified)}</dd>
-        {item.protected && (<><dt className="text-muted-foreground">Protection</dt><dd className="flex items-center gap-1 text-[11.5px]"><ShieldCheck className="w-3.5 h-3.5 text-primary" aria-hidden="true"/>Protected from deletion</dd></>)}
+        {(item.protected || item.protected_by) && (<><dt className="text-muted-foreground">Protection</dt><dd className="flex items-center gap-1 text-[11.5px]"><ShieldCheck className="w-3.5 h-3.5 text-primary" aria-hidden="true"/>{item.protected ? "Protected from deletion" : `Protected by folder “${item.protected_by}”`}</dd></>)}
         {isTrash && item.trashed_at && (<><dt className="text-muted-foreground">Deleted</dt><dd className="font-mono text-[11.5px]">{formatDateTime(item.trashed_at)}</dd></>)}
         {item.message_id && (<><dt className="text-muted-foreground">Telegram</dt><dd className="font-mono text-[11.5px] break-all">message {item.message_id}</dd></>)}
       </dl>

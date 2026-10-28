@@ -37,9 +37,9 @@ async def handle_mkcol(request: Request, segments: List[str], owner_id: str) -> 
 def _refuse_protected(item: dict, owner_id: str) -> None:
     """WebDAV apps can't ask for the password, so protected items can't be deleted through them."""
     from telestore.services.protection_service import blocker
-    name = blocker(item, [owner_id])
-    if name:
-        raise HTTPException(status_code=403, detail=f"“{name}” is protected from deletion. Delete it in TeleStore.")
+    reason = blocker(item, [owner_id])
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
 
 
 async def handle_delete(request: Request, segments: List[str], owner_id: str) -> Response:

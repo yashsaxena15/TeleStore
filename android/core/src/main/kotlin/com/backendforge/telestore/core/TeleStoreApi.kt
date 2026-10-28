@@ -474,11 +474,10 @@ class TeleStoreApi(
         return reply.starred
     }
 
-    /** Moves [item] to the trash; a protected item needs [unlockToken] (else [ProtectedException]). */
-    suspend fun trash(item: FileItem, unlockToken: String? = null): MessageReply =
+    /** Moves [item] to the trash; a protected item (or one inside a protected folder) throws [ProtectedException]. */
+    suspend fun trash(item: FileItem): MessageReply =
         post(url("files/trash"), buildJsonObject {
             put("file_id", item.id)
-            if (unlockToken != null) put("unlock_token", unlockToken)
         })
 
     suspend fun restore(item: FileItem): MessageReply =
@@ -486,32 +485,31 @@ class TeleStoreApi(
             put("file_id", item.id)
         })
 
-    suspend fun deleteForever(item: FileItem, unlockToken: String? = null): MessageReply =
+    /** Deletes [item] for good; protected items throw [ProtectedException]. */
+    suspend fun deleteForever(item: FileItem): MessageReply =
         post(url("files/delete"), buildJsonObject {
             put("file_id", item.id)
-            if (unlockToken != null) put("unlock_token", unlockToken)
         })
 
-    suspend fun emptyTrash(unlockToken: String? = null): MessageReply =
-        post(url("files/trash/empty"), buildJsonObject {
-            if (unlockToken != null) put("unlock_token", unlockToken)
-        })
+    /** Deletes everything in the trash except protected items; [EmptyTrashReply.kept] counts those. */
+    suspend fun emptyTrash(): EmptyTrashReply = post(url("files/trash/empty"), buildJsonObject { })
 
     // ── Protect from deletion ───────────────────────────────────────────────────
-    /** How this account confirms deleting protected things: password, an email code, or nothing set up. */
+    /** How this account confirms removing protection: password, an email code, or nothing set up. */
     suspend fun protectionMethod(): ProtectionMethod = get(url("files/protection"))
 
     /** Emails a 6-digit code (accounts without a password). */
     suspend fun sendProtectionCode(): MessageReply = post(url("files/protection/code"), buildJsonObject { })
 
-    /** Trades the password or the emailed code for a short-lived unlock token. */
-    suspend fun unlockProtection(password: String? = null, code: String? = null): UnlockReply =
+    /** Trades the password or the emailed code for a single-use token that removes protection from [item] only. */
+    suspend fun unlockProtection(item: FileItem, password: String? = null, code: String? = null): UnlockReply =
         post(url("files/protection/unlock"), buildJsonObject {
             if (password != null) put("password", password)
             if (code != null) put("code", code.trim())
+            put("file_id", item.id)
         })
 
-    /** Protects or unprotects [item]; turning it off needs [unlockToken]. Returns whether it's protected now. */
+    /** Protects or unprotects [item]; turning it off needs the [unlockToken] from [unlockProtection] for it. Returns whether it's protected now. */
     suspend fun setProtected(item: FileItem, protected: Boolean, unlockToken: String? = null): Boolean =
         post<ProtectReply>(url("files/protect"), buildJsonObject {
             put("file_id", item.id)
@@ -656,7 +654,7 @@ class TeleStoreApi(
             onUnauthorized()
             throw UnauthorizedException(message ?: "Please sign in again.")
         }
-        if (response.code == 423) throw ProtectedException(message ?: "This item is protected. Confirm with your password to delete it.")
+        if (response.code == 423) throw ProtectedException(message ?: "This item is protected. Remove protection first.")
         if (response.code == 429) {
             val wait = response.header("Retry-After")?.toLongOrNull() ?: 3
             throw RetryLaterException(wait.coerceIn(1, 60), message ?: "The server is busy. Trying again shortly.")

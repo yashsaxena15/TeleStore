@@ -932,10 +932,43 @@ test.describe("offline files", () => {
 test.describe("protect from deletion, folder colours and photo details", () => {
     const sent = async (request, path) => (await mutations(request)).filter((r) => r.path === path).map((r) => JSON.parse(r.body || "{}"));
 
-    test("a protected file asks for the password before it goes to Trash", async ({ page, request }) => {
+    test("a protected file can't be trashed until its protection is removed with the password", async ({ page, request }) => {
         await page.goto("/");
-        // Q3-report.pdf starts protected
+        // Q3-report.pdf starts protected: its menu has no Move to Trash
         await expect(row(page, "Q3-report.pdf").getByTestId("protected-mark").first()).toBeAttached();
+        await expect(async () => {
+            await row(page, "Q3-report.pdf").click({ button: "right" });
+            await expect(page.getByRole("menuitem", { name: "Remove protection" })).toBeVisible({ timeout: 2000 });
+        }).toPass({ timeout: 15000 });
+        await expect(page.getByRole("menuitem", { name: /Move to Trash/ })).toHaveCount(0);
+        await expect(page.getByRole("menuitem", { name: "Protect from deletion" })).toHaveCount(0);
+
+        // Remove protection: wrong password → error, right one → done
+        await page.getByRole("menuitem", { name: "Remove protection" }).click();
+        const dialog = page.getByRole("dialog", { name: "Confirm it's you" });
+        await expect(dialog).toContainText("remove the protection from “Q3-report.pdf”");
+        await dialog.getByLabel("Password").fill("nope");
+        await dialog.getByRole("button", { name: "Confirm" }).click();
+        await expect(dialog.getByRole("alert")).toHaveText("Wrong password");
+        await dialog.getByLabel("Password").fill("right-pass");
+        await dialog.getByRole("button", { name: "Confirm" }).click();
+        await expect(dialog).toBeHidden();
+        await expect.poll(() => sent(request, "/files/protection/unlock")).toEqual([{ password: "nope", file_id: "f5" }, { password: "right-pass", file_id: "f5" }]);
+        // The pass is used for that one request only
+        await expect.poll(() => sent(request, "/files/protect")).toEqual([{ file_id: "f5", protected: false, unlock_token: "tok-1" }]);
+        await expect(row(page, "Q3-report.pdf").getByTestId("protected-mark")).toHaveCount(0);
+
+        // Now it can go to Trash, with no password asked
+        await row(page, "Q3-report.pdf").click({ button: "right" });
+        await expect(page.getByRole("menuitem", { name: "Protect from deletion" })).toBeVisible();
+        await page.getByRole("menuitem", { name: "Move to Trash" }).click();
+        await page.getByRole("alertdialog").getByRole("button", { name: "Move to Trash" }).click();
+        await expect.poll(() => sent(request, "/files/trash")).toEqual([{ file_id: "f5" }]);
+        await expect(page.getByText("Moved \"Q3-report.pdf\" to Trash")).toBeVisible();
+    });
+
+    test("protecting is free, and the Delete key then refuses", async ({ page, request }) => {
+        await page.goto("/");
         await expect(async () => {
             await row(page, "project-src.zip").click({ button: "right" });
             await expect(page.getByRole("menuitem", { name: "Protect from deletion" })).toBeVisible({ timeout: 2000 });
@@ -943,36 +976,42 @@ test.describe("protect from deletion, folder colours and photo details", () => {
         await page.getByRole("menuitem", { name: "Protect from deletion" }).click();
         await expect.poll(() => sent(request, "/files/protect")).toEqual([{ file_id: "f7", protected: true }]);
         await expect(row(page, "project-src.zip").getByRole("img", { name: "Protected" }).first()).toBeAttached();
-
-        await row(page, "project-src.zip").click({ button: "right" });
-        await expect(page.getByRole("menuitem", { name: "Remove protection" })).toBeVisible();
-        await page.getByRole("menuitem", { name: "Move to Trash" }).click();
-        await page.getByRole("alertdialog").getByRole("button", { name: "Move to Trash" }).click();
-        const dialog = page.getByRole("dialog", { name: "Confirm it's you" });
-        await expect(dialog).toContainText("“project-src.zip” is protected");
-        await dialog.getByLabel("Password").fill("nope");
-        await dialog.getByRole("button", { name: "Confirm" }).click();
-        await expect(dialog.getByRole("alert")).toHaveText("Wrong password");
-        await dialog.getByLabel("Password").fill("right-pass");
-        await dialog.getByRole("button", { name: "Confirm" }).click();
-        await expect(dialog).toBeHidden();
-        await expect.poll(() => sent(request, "/files/trash")).toEqual([{ file_id: "f7" }, { file_id: "f7", unlock_token: "tok-1" }]);
-        await expect(page.getByText("Moved \"project-src.zip\" to Trash")).toBeVisible();
+        await page.getByRole("button", { name: "Select project-src.zip" }).click();
+        await page.keyboard.press("Delete");
+        await expect(page.getByText("“project-src.zip” is protected. Remove protection first.").first()).toBeVisible();
+        await expect(page.getByRole("alertdialog")).toHaveCount(0);
+        expect(await sent(request, "/files/trash")).toEqual([]);
     });
 
-    test("cancelling the password keeps the file", async ({ page, request }) => {
+    test("selecting a protected file disables Delete in the selection bar", async ({ page, request }) => {
         await page.goto("/");
         await page.getByRole("button", { name: "Select Q3-report.pdf" }).click();
         await page.getByRole("button", { name: "Select team-offsite.jpg" }).click();
-        await page.getByRole("toolbar", { name: /selected$/ }).getByRole("button", { name: /Delete/ }).click();
-        await page.getByRole("alertdialog").getByRole("button", { name: /Move to Trash/ }).click();
-        const dialog = page.getByRole("dialog", { name: "Confirm it's you" });
-        await expect(dialog).toContainText("“Q3-report.pdf” is protected");
-        await dialog.getByRole("button", { name: "Cancel" }).click();
-        await expect(page.getByText("1 protected item not deleted")).toBeVisible();
-        const trash = await sent(request, "/files/trash");
-        expect(trash.filter((b) => b.unlock_token)).toEqual([]);
-        expect(trash.map((b) => b.file_id).sort()).toEqual(["f5", "f8"]);
+        const del = page.getByRole("toolbar", { name: /selected$/ }).getByRole("button", { name: "Delete" });
+        await expect(del).toBeDisabled();
+        await expect(del).toHaveAttribute("aria-description", "1 protected item — remove protection first");
+        await del.click({ force: true });
+        await expect(page.getByText("1 protected item — remove protection first").first()).toBeVisible();
+        await expect(page.getByRole("alertdialog")).toHaveCount(0);
+        expect(await sent(request, "/files/trash")).toEqual([]);
+    });
+
+    test("items inside a protected folder say so and can't be trashed", async ({ page, request }) => {
+        await page.goto("/");
+        await expect(async () => {
+            await row(page, "Movies").click({ button: "right" });
+            await expect(page.getByRole("menuitem", { name: "Protect from deletion" })).toBeVisible({ timeout: 2000 });
+        }).toPass({ timeout: 15000 });
+        await page.getByRole("menuitem", { name: "Protect from deletion" }).click();
+        await expect.poll(() => sent(request, "/files/protect")).toEqual([{ file_id: "f1", protected: true }]);
+        await row(page, "Movies").dblclick();
+        await expect(row(page, "Arrival.2016.1080p.mkv")).toBeVisible();
+        await row(page, "Arrival.2016.1080p.mkv").click({ button: "right" });
+        const note = page.getByRole("menuitem", { name: "Protected by folder “Movies”" });
+        await expect(note).toBeVisible();
+        await expect(note).toBeDisabled();
+        await expect(page.getByRole("menuitem", { name: /Move to Trash/ })).toHaveCount(0);
+        await expect(page.getByRole("menuitem", { name: "Remove protection" })).toHaveCount(0);
     });
 
     test("folders show their colour and the menu changes it", async ({ page, request }) => {

@@ -74,6 +74,14 @@ describe("getSelectionActions", () => {
     it("drive has no move-to (the picker only browses Telegram folders)", () => {
         expect(ids(getSelectionActions("drive", { count: 2 }))).not.toContain("move-to");
     });
+    it("disables delete, saying why, when protected items are selected", () => {
+        const del = getSelectionActions("home", { count: 3, protectedCount: 2 }).find((a) => a.id === "delete");
+        expect(del).toMatchObject({ disabled: true, reason: "2 protected items — remove protection first" });
+        const forever = getSelectionActions("trash", { count: 1, protectedCount: 1 }).find((a) => a.id === "delete-forever");
+        expect(forever).toMatchObject({ disabled: true, reason: "1 protected item — remove protection first" });
+        expect(getSelectionActions("home", { count: 3 }).find((a) => a.id === "delete").disabled).toBeUndefined();
+        expect(getSelectionActions("home", { count: 3, protectedCount: 2 }).filter((a) => a.disabled).map((a) => a.id)).toEqual(["delete"]);
+    });
 });
 
 describe("planMove", () => {

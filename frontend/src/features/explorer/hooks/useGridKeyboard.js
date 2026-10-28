@@ -193,7 +193,9 @@ export function useGridKeyboard(stateRef, { setBatchDeleteDialogOpen, setContext
                 e.preventDefault();
                 e.stopPropagation();
                 if (s.selectedItems && s.selectedItems.size > 0) {
-                    setBatchDeleteDialogOpen(true);
+                    // Refuses (with a message) when the selection holds protected items
+                    if (s.requestBatchDelete) s.requestBatchDelete();
+                    else setBatchDeleteDialogOpen(true);
                 } else if (s.focusedIndex !== null && s.items[s.focusedIndex]) {
                     const item = s.items[s.focusedIndex];
                     if (s.onDelete) {
