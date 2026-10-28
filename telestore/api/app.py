@@ -37,6 +37,7 @@ from telestore.config import API_DOCS_ENABLED, APP_NAME, OWNER, SESSION_SECRET_K
 from telestore.db import database
 
 # Import utility functions and global variables
+from telestore.services import device_service
 from telestore.api.state import _auth_tokens, cached_token, cached_token_valid, load_persistent_tokens, cleanup_stale_upload_files
 
 app = FastAPI(
@@ -129,6 +130,7 @@ async def auth_token_middleware(request: Request, call_next):
             # Add token data to session-like storage for the route handlers
             request.state.auth_token_data = token_data
             request.state.authenticated_via_token = True
+            device_service.touch(auth_header, token_data)
         else:
             # Check in database if not found in memory
             db_token_data = database.Users.get_auth_token(auth_header)
@@ -138,6 +140,7 @@ async def auth_token_middleware(request: Request, call_next):
                 # Add token data to session-like storage for the route handlers
                 request.state.auth_token_data = _auth_tokens[auth_header]
                 request.state.authenticated_via_token = True
+                device_service.touch(auth_header, _auth_tokens[auth_header])
     response = await call_next(request)
     return response
 

@@ -1,13 +1,13 @@
 # telestore/api/routes/auth.py
 
-from telestore.services import event_service
-from fastapi import APIRouter, Request, HTTPException, status
+from telestore.services import device_service, event_service
+from fastapi import APIRouter, Depends, Request, HTTPException, status
 from pydantic import BaseModel
 import secrets
 
 from typing import Optional
 from telestore.config import GOOGLE_CLIENT_ID
-from telestore.security.credentials import ACCOUNT_DISABLED, AUTHORIZED_ADMINS, account_flags, canonical_username, check_login, verify_google_token
+from telestore.security.credentials import ACCOUNT_DISABLED, AUTHORIZED_ADMINS, User, account_flags, canonical_username, check_login, require_auth, verify_google_token
 from telestore.services.email_service import create_and_send_vault_otp, verify_vault_otp
 from telestore.utils.passwords import hash_password
 from telestore.security.attempt_limiter import TooManyAttempts, password_limiter, wait_message
@@ -53,10 +53,11 @@ async def login_post_route(request: Request, login_data: LoginRequest):
     user_data = database.Users.getUser(account)
     if not account_flags(account, user_data)[0]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNT_DISABLED)
-    _start_session(request, account, "local")
+    token = _issue_token(account, "local", user_data, login_data.device, request.headers.get("user-agent", ""))
+    _start_session(request, account, "local", token_id=device_service.token_id(token))
     logger.info(f"Login successful for user: {account}")
     event_service.sign_in(account, request.headers.get("user-agent", ""), login_data.device)
-    return {"message": "Login successful", "username": account, "auth_token": _issue_token(account, "local", user_data, login_data.device)}
+    return {"message": "Login successful", "username": account, "auth_token": token}
 
 
 def _start_session(request: Request, username: str, method: str, **extra) -> None:
@@ -66,7 +67,7 @@ def _start_session(request: Request, username: str, method: str, **extra) -> Non
     request.session.update(extra)
 
 
-def _issue_token(username: str, method: str, user_data: Optional[dict], device: Optional[str] = None) -> str:
+def _issue_token(username: str, method: str, user_data: Optional[dict], device: Optional[str] = None, user_agent: str = "") -> str:
     """Creates the starter folders once for a verified user and returns a token for the desktop app.
 
     Only the first time: after that they are the user's own folders, free to rename or delete.
@@ -78,9 +79,11 @@ def _issue_token(username: str, method: str, user_data: Optional[dict], device: 
     auth_token = secrets.token_urlsafe(32)
     device = (device or "").strip().lower()
     if device in APP_DEVICES:
-        database.Users.save_auth_token(username, auth_token, method, ttl_hours=APP_TOKEN_HOURS, device=device)
+        name = event_service.device_label(user_agent, device).removeprefix("the ").capitalize()
+        database.Users.save_auth_token(username, auth_token, method, ttl_hours=APP_TOKEN_HOURS, device=device, device_name=name)
     else:
-        database.Users.save_auth_token(username, auth_token, method)
+        name = event_service.device_label(user_agent)
+        database.Users.save_auth_token(username, auth_token, method, device_name="Unknown browser" if name == "a new device" else name)
     return auth_token
 
 
@@ -123,9 +126,10 @@ async def google_login_route(request: Request, login_data: GoogleLoginRequest):
     user_data = database.Users.getUser(account)
     if not account_flags(account, user_data)[0]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNT_DISABLED)
-    _start_session(request, account, "google", user_email=user_info["email"], user_picture=user_info["picture"])
+    token = _issue_token(account, "google", user_data, login_data.device, request.headers.get("user-agent", ""))
+    _start_session(request, account, "google", user_email=user_info["email"], user_picture=user_info["picture"], token_id=device_service.token_id(token))
     event_service.sign_in(account, request.headers.get("user-agent", ""), login_data.device, method="google")
-    return {"message": "Login successful", "user": {**user_info, "username": account}, "auth_token": _issue_token(account, "google", user_data, login_data.device)}
+    return {"message": "Login successful", "user": {**user_info, "username": account}, "auth_token": token}
 
 
 # ── Forgot password: a 6-digit code to the account's email, then a new password ──────────────
@@ -218,6 +222,9 @@ async def check_auth(request: Request):
         }
     
     authenticated = request.session.get("authenticated", False)
+    if authenticated and not device_service.session_valid(request):
+        request.session.clear()  # signed out from another device
+        authenticated = False
     logger.info(f"Auth check result: authenticated={authenticated}")
     return {
         "authenticated": authenticated,
@@ -225,3 +232,24 @@ async def check_auth(request: Request):
         "user_picture": request.session.get("user_picture"),
         "is_admin": request.session.get("username") == "admin" or request.session.get("auth_method") == "local"
     }
+
+# ── Your devices ────────────────────────────────────────────────────────────
+
+@router.get("/devices")
+def list_devices(request: Request, user: User = Depends(require_auth)):
+    """Every place this account is signed in, this device first."""
+    return {"devices": device_service.listing(user.username, device_service.current_id(request))}
+
+
+@router.post("/devices/sign-out-others")
+def sign_out_other_devices(request: Request, user: User = Depends(require_auth)):
+    return {"signed_out": device_service.sign_out_others(user.username, device_service.current_id(request))}
+
+
+@router.delete("/devices/{device_id}")
+def sign_out_device(device_id: str, request: Request, user: User = Depends(require_auth)):
+    if device_id == device_service.current_id(request):
+        raise HTTPException(status_code=400, detail="This is the device you're using. Use Sign out instead.")
+    if not device_service.sign_out(user.username, device_id):
+        raise HTTPException(status_code=404, detail="That device is already signed out.")
+    return {"message": "Signed out."}

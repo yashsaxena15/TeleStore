@@ -157,8 +157,19 @@ def account_flags(username: Optional[str], user_data: Optional[dict]) -> tuple:
     return data.get("active", True) is not False, data.get("can_upload", True) is not False
 
 
+def _session_signed_in(request: Request) -> bool:
+    """The browser's cookie session, unless that sign-in was ended from another device."""
+    if not request.session.get("authenticated"):
+        return False
+    from telestore.services import device_service
+    if device_service.session_valid(request):
+        return True
+    request.session.clear()
+    return False
+
+
 def is_authenticated(request: Request) -> bool:
-    auth_status = request.session.get("authenticated", False)
+    auth_status = _session_signed_in(request)
     logger.info(f"Checking authentication status: {auth_status}")
     return auth_status
 
@@ -189,7 +200,7 @@ def _with_account_flags(user: User, user_data: Optional[dict]) -> User:
 
 def require_auth(request: Request) -> User:
     # Check session first
-    if request.session.get("authenticated"):
+    if _session_signed_in(request):
         # For local auth, return the username
         username = request.session.get("username")
         # Get user data from database
