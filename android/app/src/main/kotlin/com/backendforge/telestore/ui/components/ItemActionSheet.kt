@@ -29,6 +29,9 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.RemoveModerator
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarOutline
@@ -77,6 +80,10 @@ fun ItemActionSheet(
     /** Kept on this phone already (file or folder): the row then removes the copy. */
     isOffline: Boolean = false,
     onToggleOffline: ((FileItem) -> Unit)? = null,
+    /** "Protect from deletion" / "Remove protection"; null hides it. */
+    onToggleProtected: ((FileItem) -> Unit)? = null,
+    /** Folders: opens "Folder colour"; null hides it. */
+    onFolderColor: ((FileItem) -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -255,6 +262,20 @@ fun ItemActionSheet(
                             icon = Icons.Default.Cloud,
                             label = "Copy to Google Drive",
                             onClick = { onDismiss(); onCopyToDrive(item) },
+                        )
+                    }
+                    if (item.isFolder && onFolderColor != null && !item.isVault) {
+                        ActionRow(
+                            icon = Icons.Default.Palette,
+                            label = "Folder colour",
+                            onClick = { onDismiss(); onFolderColor(item) },
+                        )
+                    }
+                    if (onToggleProtected != null && !item.isVault) {
+                        ActionRow(
+                            icon = if (item.protected) Icons.Default.RemoveModerator else Icons.Default.Shield,
+                            label = if (item.protected) "Remove protection" else "Protect from deletion",
+                            onClick = { onDismiss(); onToggleProtected(item) },
                         )
                     }
                     if (onMoveToVault != null) {

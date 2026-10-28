@@ -443,6 +443,13 @@ fun MainScreen(
     }
     val snackbar = remember { SnackbarHostState() }
 
+    // Deleting something protected: asks for the password (or an emailed code) once
+    com.backendforge.telestore.ui.components.ProtectionConfirmHost(
+        gate = container.protection,
+        api = { container.api() },
+        onOpenAccount = { navController.navigate("settings_account") },
+    )
+
     // "Copy to Google Drive" from a file's menu
     var copyToDrive by remember { mutableStateOf<List<FileItem>?>(null) }
     copyToDrive?.let { files ->

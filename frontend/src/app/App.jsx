@@ -11,6 +11,7 @@ import { useBackendConnection } from "@/hooks/useViteConnection";
 import { ErrorProvider } from "@/contexts/ErrorHandlerContext";
 import { MediaPlayerProvider } from "@/features/player/MediaPlayerContext";
 import { initTheme } from "@/lib/theme";
+import { ProtectionDialog } from "@/features/protection/ProtectionDialog";
 // Sign-in and the 404 page are only needed when shown
 const Login = lazy(() => import("@/features/auth/Login"));
 const NotFound = lazy(() => import("@/app/pages/NotFound"));
@@ -61,6 +62,8 @@ const App = () => {
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
                 <AppRoutes />
                 <Toaster />
+                {/* "Confirm it's you" for protected items (see features/protection) */}
+                <ProtectionDialog />
               </div>
             </div>
           </BrowserRouter>

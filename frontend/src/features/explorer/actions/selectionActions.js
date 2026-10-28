@@ -1,8 +1,9 @@
 // Selecting in the file grid (click, Ctrl/Shift-click, double-tap, checkboxes, select all) and
 // the batch download and delete that act on the selection (Telegram and Google Drive items).
 import { toast } from "sonner";
-import { api, fetchWithTimeout, getApiBaseUrl } from "@/lib/api";
+import { api } from "@/lib/api";
 import { getItemKey } from "../lib/fileCardHelpers";
+import { createProtectionGuard, isProtectionCancelled } from "@/features/protection/protection";
 
 export function createSelectionActions({ cloudAccountId, cloudFolderId, currentPath, handleItemOpen, isCloudMode, isLongPressRef, isSelectionMode, isTrashMode, items, lastSelectedIndex, lastTapRef, onDownload, onRefresh, selectedItems, setBatchDeleteDialogOpen, setFocusedIndex, setIsBatchDeleting, setIsSelectionMode, setLastSelectedIndex, setSelectedItems }) {
 const handleItemClick = (e, item, index) => {
@@ -123,9 +124,9 @@ const handleConfirmBatchDelete = async () => {
     setIsBatchDeleting(true);
     let successCount = 0;
     let failCount = 0;
-    const baseUrl = getApiBaseUrl();
-    const apiUrl = baseUrl ? `${baseUrl}` : '';
-    const deleteEndpoint = isTrashMode ? `${apiUrl}/files/delete` : `${apiUrl}/files/trash`;
+    let keptCount = 0;
+    // Protected items: the password is asked once for the whole batch (see features/protection)
+    const guarded = createProtectionGuard();
     for (const item of validItemsToDelete) {
         try {
             if (isCloudMode || item.is_cloud) {
@@ -133,29 +134,17 @@ const handleConfirmBatchDelete = async () => {
                 const fileId = item.cloud_file_id || item.id;
                 const isAlreadyTrashed = cloudFolderId === "trash" || Boolean(item.is_trashed);
                 await api.deleteCloudFile(accId, fileId, isAlreadyTrashed);
-                successCount++;
             }
             else {
-                const response = await fetchWithTimeout(deleteEndpoint, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    credentials: "include",
-                    body: JSON.stringify({
-                        file_id: item.id,
-                    }),
-                }, 5000);
-                if (response.ok) {
-                    successCount++;
-                }
-                else {
-                    failCount++;
-                }
+                await guarded((token) => (isTrashMode ? api.deleteForever(item.id, token) : api.trashFile(item.id, token)));
             }
+            successCount++;
         }
         catch (e) {
-            failCount++;
+            if (isProtectionCancelled(e))
+                keptCount++;
+            else
+                failCount++;
         }
     }
     setIsBatchDeleting(false);
@@ -171,6 +160,9 @@ const handleConfirmBatchDelete = async () => {
         if (onRefresh) {
             onRefresh();
         }
+    }
+    if (keptCount > 0) {
+        toast.info(keptCount === validItemsToDelete.length ? "Not deleted" : `${keptCount} protected item${keptCount > 1 ? 's' : ''} not deleted`);
     }
     if (failCount > 0) {
         toast.error(`Failed to process ${failCount} item${failCount > 1 ? 's' : ''}`);

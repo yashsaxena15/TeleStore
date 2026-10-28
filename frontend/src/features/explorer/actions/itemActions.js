@@ -6,6 +6,7 @@ import { api, fetchWithTimeout, getApiBaseUrl } from "@/lib/api";
 import logger from "@/lib/logger";
 import { downloadManager } from "@/features/transfers/downloadManager";
 import { TRASH_MOVE_MESSAGE } from "./batchActions";
+import { isProtectionCancelled, withProtection } from "@/features/protection/protection";
 
 export function createItemActions({ cloudAccountId, cloudFolderId, currentApiPath, currentFolder, currentPath, deleteDialog, isCloudMode, isEffectiveTrashMode, isInboxMode, isTrashMode, moveItem, refetch, renamingItem, setDeleteDialog, setEmptyTrashDialogOpen, setFolderDownloadInfo, setIsEmptyingTrash, setNewFolderDialogOpen, setRenamingItem }) {
 const handleSidebarDrop = async (item, targetFolderName) => {
@@ -325,12 +326,13 @@ const confirmDelete = async () => {
             refetch();
             return;
         }
+        // A protected item asks for the password first (see features/protection)
         if (isTrashMode) {
-            await api.deleteForever(item.id);
+            await withProtection((token) => api.deleteForever(item.id, token));
             toast.success(`Permanently deleted "${item.name}"`);
         }
         else {
-            await api.trashFile(item.id);
+            await withProtection((token) => api.trashFile(item.id, token));
             toast.success(`Moved "${item.name}" to Trash`);
         }
         setDeleteDialog(null);
@@ -338,6 +340,11 @@ const confirmDelete = async () => {
         refetch();
     }
     catch (error) {
+        if (isProtectionCancelled(error)) {
+            setDeleteDialog(null);
+            toast.info("Not deleted");
+            return;
+        }
         toast.error(error.message || "Failed to delete item");
     }
 };
@@ -389,13 +396,18 @@ const handleEmptyTrash = async () => {
             toast.success("Google Drive trash emptied successfully");
         }
         else {
-            const res = await api.emptyTrash();
-            toast.success(res.message || "Trash emptied successfully");
+            const res = await withProtection((token) => api.emptyTrash(token));
+            toast.success(res?.message || "Trash emptied successfully");
         }
         setEmptyTrashDialogOpen(false);
         refetch();
     }
     catch (error) {
+        if (isProtectionCancelled(error)) {
+            setEmptyTrashDialogOpen(false);
+            toast.info("Not deleted");
+            return;
+        }
         toast.error(error.message || "Failed to empty trash");
     }
     finally {

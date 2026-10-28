@@ -13,6 +13,7 @@ import { canAddToPlaylist, requestAddToPlaylist } from "@/features/playlists/pla
 import { canSaveOffline, makeAvailableOffline, offlineSupported, removeOffline, useOfflineIndex } from "@/features/offline/offlineStore";
 import { folderPathOf } from "@/features/offline/offlineIndex";
 import { GridTile, ListHeader, ListRow, GRID_CLASS } from "./items/FileItems";
+import { FolderIcon } from "./items/FolderIcon";
 import { VirtualItems } from "./items/VirtualItems";
 import { shouldVirtualize } from "./lib/virtualLayout";
 import { createUploadActions } from "./actions/uploadActions";
@@ -569,7 +570,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
         if (item.type === "folder") {
             // Use smaller icons for list view
             const folderIconSize = viewMode === 'list' ? 'w-4 h-4' : 'w-14 h-14 sm:w-16 sm:h-16';
-            return <Folder className={`${folderIconSize} text-primary`}/>;
+            return <FolderIcon color={item.color} className={folderIconSize}/>;
         }
         // Use the new Thumbnail component with pre-loaded data for better performance
         const thumbnailData = item.thumbnail ? loadedThumbnails[item.thumbnail] : undefined;

@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Folder, FolderOpen, FolderPlus, ChevronRight, ArrowLeft, Check, Loader2, ShieldCheck, Inbox, HardDrive } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
+import { FolderIcon } from "../items/FolderIcon";
 const ROOTS = [
     { path: "/Home", key: "Home", label: "Home", icon: HardDrive },
     { path: "/Vault", key: "Vault", label: "Private Vault", icon: ShieldCheck },
@@ -40,6 +41,7 @@ export const FolderPickerModal = ({ isOpen, onClose, currentSelectedPath, onSele
                 .filter((f) => f.file_type === "folder" || f.type === "folder")
                 .map((f) => ({
                 name: f.file_name || f.name,
+                color: f.color || null,
                 path: f.file_path ? `${f.file_path}/${f.file_name || f.name}`.replace(/\/+/g, "/") : `${clean}/${f.file_name || f.name}`.replace(/\/+/g, "/"),
             }));
             setFolders(subfolders);
@@ -200,7 +202,7 @@ export const FolderPickerModal = ({ isOpen, onClose, currentSelectedPath, onSele
               {folders.map((folder) => (<button type="button" key={folder.name} onClick={() => handleEnterSubfolder(folder)} aria-label={`Open ${folder.name}`} className="w-full text-left flex items-center justify-between p-2.5 rounded-xl border border-border/60 hover:border-primary/40 bg-background hover:bg-accent/60 cursor-pointer transition-all group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
                   <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0 group-hover:scale-105 transition-transform">
-                      <Folder className="w-4 h-4"/>
+                      <FolderIcon color={folder.color} className="w-4 h-4"/>
                     </div>
                     <span className="text-xs font-medium text-foreground truncate">
                       {folder.name}

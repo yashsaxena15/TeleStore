@@ -43,7 +43,26 @@ FOLDERS["/Home/Music"].push(file(500, "huge-backup.zip", "archive", 300 * 1024 *
 // A big folder, to check that long lists stay quick to render
 FOLDERS["/Home/Documents"] = Array.from({ length: 1500 }, (_, n) => file(1000 + n, `scan-${String(n + 1).padStart(4, "0")}.pdf`, "document", 120_000 + n, "/Home/Documents"));
 
+// Protect from deletion and folder colours: Q3-report.pdf starts protected, Movies is blue.
+// Deleting a protected item without the unlock token answers 423; the password is "right-pass".
+const PROTECTED = new Set();
+const COLORS = {};
+const resetProtection = () => {
+    PROTECTED.clear();
+    PROTECTED.add("f5");
+    Object.keys(COLORS).forEach((k) => delete COLORS[k]);
+    COLORS.f1 = "blue";
+};
+resetProtection();
+const withMarks = (f) => ({ ...f, protected: PROTECTED.has(f.id), color: f.file_type === "folder" ? (COLORS[f.id] || null) : null });
+const nameOf = (id) => Object.values(FOLDERS).flat().find((f) => f.id === id)?.file_name || "This item";
+// Photo details (EXIF) for team-offsite.jpg
+const PHOTO_INFO = {
+    f8: { width: 4032, height: 3024, megapixels: 12.2, camera_make: "Apple", camera_model: "iPhone 13", lens: "iPhone 13 back dual wide camera 5.1mm f/1.6", aperture: 1.8, exposure: 1 / 120, iso: 100, focal_length: 4.2, flash: false, taken_at: "2026-10-12T17:45:00", latitude: 15.55271, longitude: 73.75169, altitude: 12, format: "JPEG", file_size: 4_800_000, file_name: "team-offsite.jpg", folder: "/Home" },
+};
+
 const ROUTES = {
+    "/files/protection": { method: "password", email_hint: null },
     "/auth/check": { authenticated: true, username: "admin" },
     "/user/profile": { username: "admin", email: "owner@example.com", telegram_first_name: "Yash" },
     "/user/is-owner": { is_owner: true },
@@ -186,7 +205,7 @@ const listFiles = (url) => {
     const page = Number(url.searchParams.get("page") || 1);
     // No page size means "All" in the pagination menu
     const size = url.searchParams.has("page_size") ? Number(url.searchParams.get("page_size")) : all.length || 1;
-    const items = all.slice((page - 1) * size, page * size);
+    const items = all.slice((page - 1) * size, page * size).map(withMarks);
     const totalPages = Math.max(1, Math.ceil(all.length / size));
     return { files: items, pagination: { page, page_size: size, total_items: all.length, total_pages: totalPages, start_index: (page - 1) * size + 1, end_index: (page - 1) * size + items.length, has_next: page < totalPages, has_prev: page > 1 } };
 };
@@ -209,6 +228,27 @@ const serveMedia = (req, res, name) => {
 
 const mutation = (req, res, url, body) => {
     requests.push({ method: req.method, path: url.pathname, body });
+    if (url.pathname === "/files/protection/unlock") {
+        const data = JSON.parse(body || "{}");
+        return data.password === "right-pass" ? send(res, 200, { unlock_token: "tok-1", expires_in: 300 }) : send(res, 400, { detail: "Wrong password" });
+    }
+    if (url.pathname === "/files/protect") {
+        const data = JSON.parse(body || "{}");
+        if (!data.protected && data.unlock_token !== "tok-1") return send(res, 423, { detail: "Confirm with your password to remove the protection." });
+        if (data.protected) PROTECTED.add(data.file_id);
+        else PROTECTED.delete(data.file_id);
+        return send(res, 200, { protected: Boolean(data.protected) });
+    }
+    if (url.pathname === "/files/color") {
+        const data = JSON.parse(body || "{}");
+        COLORS[data.file_id] = data.color || null;
+        return send(res, 200, { color: data.color || null });
+    }
+    if (url.pathname === "/files/trash" || url.pathname === "/files/delete") {
+        const data = JSON.parse(body || "{}");
+        if (PROTECTED.has(data.file_id) && data.unlock_token !== "tok-1")
+            return send(res, 423, { detail: `“${nameOf(data.file_id)}” is protected. Confirm with your password to delete it.` });
+    }
     if (url.pathname === "/user/notifications/read") {
         const data = JSON.parse(body || "{}");
         NOTIFICATIONS.forEach((n) => { if (data.all || (data.ids || []).includes(n.id)) n.read = true; });
@@ -313,6 +353,7 @@ http.createServer((req, res) => {
                 resetPlaylists();
                 resetNotifications();
                 resetDevices();
+                resetProtection();
             }
             return send(res, 200, requests);
         }
@@ -324,6 +365,8 @@ http.createServer((req, res) => {
         if (ROUTES[url.pathname]) return send(res, 200, ROUTES[url.pathname]);
         if (url.pathname === "/files") return send(res, 200, listFiles(url));
         if (url.pathname === "/user/notifications") return send(res, 200, notificationsJson());
+        const photoInfo = /^\/files\/([^/]+)\/photo-info$/.exec(url.pathname);
+        if (photoInfo) return PHOTO_INFO[photoInfo[1]] ? send(res, 200, PHOTO_INFO[photoInfo[1]]) : send(res, 422, { detail: "Not an image" });
         if (url.pathname === "/auth/devices") return send(res, 200, { devices: DEVICES });
         if (/^\/files\/(preview|thumbnail)\//.test(url.pathname)) {
             requests.push({ method: req.method, path: url.pathname, body: "" });

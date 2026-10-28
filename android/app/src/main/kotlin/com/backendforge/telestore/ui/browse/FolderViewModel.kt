@@ -9,6 +9,7 @@ import com.backendforge.telestore.core.Places
 import com.backendforge.telestore.core.SortBy
 import com.backendforge.telestore.data.AppContainer
 import com.backendforge.telestore.ui.components.BrowserPreferences
+import com.backendforge.telestore.ui.components.protectedOutcomeMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -340,14 +341,51 @@ class FolderViewModel(
     fun emptyTrash() {
         viewModelScope.launch {
             try {
-                api.emptyTrash()
-                _state.update { it.copy(snackbarMessage = "Trash emptied") }
+                val done = container.protection.retrying { token -> api.emptyTrash(token) }
+                _state.update { it.copy(snackbarMessage = if (done == null) "Not deleted" else "Trash emptied") }
                 refresh()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 val msg = (e as? ApiException)?.message ?: "Failed to empty trash: ${e.message}"
                 _state.update { it.copy(snackbarMessage = msg) }
+            }
+        }
+    }
+
+    /** Protects [item] from deletion, or (after the password) removes the protection. */
+    fun setProtected(item: FileItem, protect: Boolean) {
+        viewModelScope.launch {
+            try {
+                val now = container.protection.retrying { token -> api.setProtected(item, protect, if (protect) null else token) }
+                if (now == null) {
+                    _state.update { it.copy(snackbarMessage = "Still protected") }
+                    return@launch
+                }
+                _state.update { s ->
+                    s.copy(
+                        items = s.items.map { if (it.id == item.id) it.copy(protected = now) else it },
+                        snackbarMessage = if (now) "${item.name} is protected from deletion" else "Protection removed from ${item.name}",
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(snackbarMessage = (e as? ApiException)?.message ?: "Couldn't change the protection.") }
+            }
+        }
+    }
+
+    /** Sets a folder's colour, or the default with null. */
+    fun setFolderColor(item: FileItem, color: String?) {
+        viewModelScope.launch {
+            try {
+                val now = api.setFolderColor(item, color)
+                _state.update { s -> s.copy(items = s.items.map { if (it.id == item.id) it.copy(color = now) else it }) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(snackbarMessage = (e as? ApiException)?.message ?: "Couldn't change the colour.") }
             }
         }
     }
@@ -368,7 +406,7 @@ class FolderViewModel(
     }
 
     fun trashItems(items: List<FileItem>) {
-        runBulkAction(items, "Moved to Trash") { api.trash(it) }
+        runProtectedDelete(items, "Moved to Trash") { item, token -> api.trash(item, token) }
     }
 
     fun restoreItems(items: List<FileItem>) {
@@ -376,7 +414,21 @@ class FolderViewModel(
     }
 
     fun deleteForeverItems(items: List<FileItem>) {
-        runBulkAction(items, "Permanently deleted") { api.deleteForever(it) }
+        runProtectedDelete(items, "Permanently deleted") { item, token -> api.deleteForever(item, token) }
+    }
+
+    /** Like [runBulkAction], but protected items are retried after one password prompt. */
+    private fun runProtectedDelete(
+        items: List<FileItem>,
+        pastVerb: String,
+        action: suspend (FileItem, String?) -> Unit,
+    ) {
+        viewModelScope.launch {
+            clearSelection()
+            val outcome = container.protection.deleteAll(items, action)
+            _state.update { it.copy(snackbarMessage = protectedOutcomeMessage(outcome, pastVerb)) }
+            refresh()
+        }
     }
 
     private fun runBulkAction(

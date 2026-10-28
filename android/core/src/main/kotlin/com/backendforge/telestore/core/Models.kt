@@ -52,6 +52,10 @@ data class FileItem(
     @SerialName("is_vault") val isVault: Boolean = false,
     /** When a photo or video was taken (sent by the phone backup); null for other uploads. */
     @SerialName("taken_at") val takenAt: String? = null,
+    /** Protected from deletion: trashing or deleting it needs the password (or an email code). */
+    val protected: Boolean = false,
+    /** A folder's colour name (see [FolderColors]); null is the default colour. */
+    val color: String? = null,
 ) {
     /** The date for timelines: when it was taken, else when it was uploaded. */
     val timelineDate: String? get() = takenAt ?: modified

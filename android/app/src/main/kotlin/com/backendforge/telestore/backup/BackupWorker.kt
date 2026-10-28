@@ -82,7 +82,7 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 store.status { it.copy(current = item.name, pending = todo.size - done) }
                 notify(done, todo.size, item.name)
                 if ("${item.name}|${item.size}" !in existing) {
-                    UriChunkSource(applicationContext, item.uri).use { source ->
+                    openWithLocation(item).use { source ->
                         ChunkedUploader(api, source, item.name, item.size, folder, takenAt = item.takenIso).upload()
                     }
                 }
@@ -106,6 +106,23 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             problem((e as? ApiException)?.message ?: "Backup stopped: ${e.message}")
             Result.retry()
         }
+    }
+
+    /**
+     * The photo as taken, location included (Android 10+ with "photo locations" allowed); Android
+     * may still refuse the original, then the copy it hands out without the location is sent.
+     */
+    private fun openWithLocation(item: PhoneItem): UriChunkSource {
+        val original = PhoneMedia.originalUri(applicationContext, item.uri)
+        if (original != item.uri) {
+            try {
+                return UriChunkSource(applicationContext, original)
+            } catch (_: SecurityException) {
+            } catch (_: UnsupportedOperationException) {
+            } catch (_: java.io.IOException) {
+            }
+        }
+        return UriChunkSource(applicationContext, item.uri)
     }
 
     /** Shows the problem in Backup, and as a notification when it's new (not every retry). */

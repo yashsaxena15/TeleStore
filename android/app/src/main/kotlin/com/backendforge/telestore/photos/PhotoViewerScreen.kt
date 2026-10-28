@@ -47,13 +47,13 @@ import coil3.compose.SubcomposeAsyncImage
 import com.backendforge.telestore.core.FileItem
 import com.backendforge.telestore.core.TeleStoreApi
 import com.backendforge.telestore.data.PhotoSource
-import com.backendforge.telestore.ui.components.FileInfoSheet
 import com.backendforge.telestore.ui.components.pullDownOffset
 import com.backendforge.telestore.ui.components.pullDownToClose
 import com.backendforge.telestore.ui.components.rememberPullDownState
 
 /**
- * Swipe through the folder's photos; pinch or double-tap to zoom, drag to look around, pull down to close.
+ * Swipe through the folder's photos; pinch or double-tap to zoom, drag to look around, pull down to
+ * close, swipe up for the photo's details.
  * A photo on this phone shows from there; one only in TeleStore from the server.
  */
 @Composable
@@ -72,8 +72,9 @@ fun PhotoViewerScreen(
     val pager = rememberPagerState(initialPage = startIndex.coerceIn(0, photos.lastIndex)) { photos.size }
     var zoomed by remember { mutableStateOf(false) }
     var chrome by remember { mutableStateOf(true) }
-    var info by remember { mutableStateOf<FileItem?>(null) }
-    val pull = rememberPullDownState(onBack)
+    // Swipe up (or Info) shows when and where it was taken, the camera and the file
+    var details by remember { mutableStateOf<PhotoSource?>(null) }
+    val pull = rememberPullDownState(onBack, onPullUp = { if (!zoomed) details = photos.getOrNull(pager.currentPage) })
 
     // The black fades as the photo is pulled down, showing it's about to close
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 1f - 0.6f * pull.progress)).pullDownToClose(pull, enabled = !zoomed)) {
@@ -99,14 +100,11 @@ fun PhotoViewerScreen(
                     Text(current.name, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                     Text("${pager.currentPage + 1} of ${photos.size}", color = Color(0xFFD4D4D8), style = MaterialTheme.typography.bodySmall)
                 }
-                // Details come from the server: a photo only on this phone has none to show
-                current.item?.let { item ->
-                    IconButton(onClick = { info = item }) { Icon(Icons.Outlined.Info, contentDescription = "Info", tint = Color.White) }
-                }
+                IconButton(onClick = { details = current }) { Icon(Icons.Outlined.Info, contentDescription = "Details", tint = Color.White) }
             }
         }
     }
-    info?.let { FileInfoSheet(item = it, api = api, onDismiss = { info = null }) }
+    details?.let { PhotoDetailsSheet(source = it, api = api, onDismiss = { details = null }) }
 }
 
 /** The phone's copy first, then a downloaded one, then the server. */

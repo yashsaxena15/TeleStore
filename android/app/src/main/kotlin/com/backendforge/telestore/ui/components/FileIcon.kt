@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.SubcomposeAsyncImage
 import com.backendforge.telestore.core.FileItem
 import com.backendforge.telestore.core.FileKind
+import com.backendforge.telestore.core.FolderColors
 import com.backendforge.telestore.core.TeleStoreApi
 
 object FileKindColors {
@@ -59,15 +60,21 @@ fun fileKindIcon(kind: FileKind): ImageVector = when (kind) {
     FileKind.OTHER -> Icons.Default.InsertDriveFile
 }
 
+/** A folder's chosen colour ("red", "teal"…), or null for the default. Same shades as the website. */
+fun folderTint(name: String?): Color? = FolderColors.argb(name)?.let { Color(it) }
+
 @Composable
 fun FileKindBox(
     kind: FileKind,
     modifier: Modifier = Modifier,
     iconSize: Dp = 24.dp,
     shapeRadius: Dp = 10.dp,
+    /** A folder's colour name; null draws the default colour. */
+    folderColor: String? = null,
 ) {
+    val tint: Color? = if (kind == FileKind.FOLDER) folderTint(folderColor) else null
     val (iconColor, bgColor) = when (kind) {
-        FileKind.FOLDER -> MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.secondaryContainer
+        FileKind.FOLDER -> if (tint != null) tint to tint.copy(alpha = 0.18f) else MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.secondaryContainer
         FileKind.VIDEO -> FileKindColors.VideoAccent to FileKindColors.VideoBg
         FileKind.AUDIO -> FileKindColors.AudioAccent to FileKindColors.AudioBg
         FileKind.PHOTO -> FileKindColors.PhotoAccent to FileKindColors.PhotoBg
@@ -105,7 +112,7 @@ fun FileThumbnail(
     val previewUrl = if (!item.isFolder) api.media.preview(item)?.toString() else null
     val shape = RoundedCornerShape(shapeRadius)
     val kindBox: @Composable () -> Unit = {
-        FileKindBox(kind = item.kind, modifier = Modifier.fillMaxSize(), iconSize = iconSize, shapeRadius = shapeRadius)
+        FileKindBox(kind = item.kind, modifier = Modifier.fillMaxSize(), iconSize = iconSize, shapeRadius = shapeRadius, folderColor = item.color)
     }
 
     when {
@@ -139,6 +146,6 @@ fun FileThumbnail(
             loading = { kindBox() },
             error = { kindBox() },
         )
-        else -> FileKindBox(kind = item.kind, modifier = modifier, iconSize = iconSize, shapeRadius = shapeRadius)
+        else -> FileKindBox(kind = item.kind, modifier = modifier, iconSize = iconSize, shapeRadius = shapeRadius, folderColor = item.color)
     }
 }

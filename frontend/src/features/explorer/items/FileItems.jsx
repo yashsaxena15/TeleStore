@@ -1,12 +1,13 @@
 // How one file or folder looks in the grid and in the list. FileGrid owns the behaviour
 // (selection, focus, drag and drop, menus) and passes it in as `ctx`.
-import { Folder, MoreVertical, Check, CircleCheck, Star } from "lucide-react";
+import { MoreVertical, Check, CircleCheck, ShieldCheck, Star } from "lucide-react";
 import { cn, formatBytes } from "@/lib/utils";
 import { isVideoItem } from "../fileTypes";
 import { RenameInput } from "../RenameInput";
 import { Thumbnail } from "../Thumbnail";
 import { getTypeInfo, formatShortDate, TYPE_TONE } from "../lib/explorerItems";
 import { getItemDuration } from "../lib/fileCardHelpers";
+import { FolderIcon } from "./FolderIcon";
 
 // Grid and list layout, shared by the plain and the virtualized lists
 export const GRID_CLASS = "grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2 sm:gap-2.5";
@@ -14,6 +15,8 @@ export const LIST_COLUMNS = "grid-cols-[18px_minmax(0,1fr)_64px_84px_92px_84px]"
 
 // Saved in this browser (see features/offline)
 const OfflineMark = ({ className }) => (<CircleCheck data-testid="offline-mark" role="img" aria-label="Available offline" className={cn("w-3 h-3 shrink-0 text-success pointer-events-none", className)}/>);
+// Protected from deletion (see features/protection)
+const ProtectedMark = ({ className }) => (<ShieldCheck data-testid="protected-mark" role="img" aria-label="Protected" className={cn("w-3 h-3 shrink-0 text-primary pointer-events-none", className)}/>);
 
 export const GridTile = ({ item, index, ctx }) => {
     const { getItemState, itemRowProps, checkbox, starOrRestore, openItemContextMenu, loadedThumbnails, loadingStates, onRenameConfirm, onRenameCancel } = ctx;
@@ -26,7 +29,7 @@ export const GridTile = ({ item, index, ctx }) => {
     return (<div {...itemRowProps(item, index, s)} className={cn("group relative rounded-[10px] p-1.5 cursor-pointer select-none outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-primary", s.isSelected ? "bg-primary/10" : s.isFocused ? "bg-muted/60" : "hover:bg-card", (s.isDragging || s.isCut) && "opacity-50", s.isDropTarget && "ring-2 ring-primary/50")}>
       <div role="gridcell" className="contents">
       <div className={cn("relative aspect-[16/10] rounded-lg border border-border bg-muted/30 overflow-hidden grid place-items-center transition-[box-shadow,transform] duration-200 ease-out", s.isSelected ? "outline outline-2 outline-primary outline-offset-2 motion-safe:scale-[0.95]" : "group-hover:shadow-[0_0_0_1px_hsl(var(--primary)/0.5),0_0_26px_-8px_hsl(var(--primary)/0.5)]")}>
-        {item.type === "folder" ? <Folder className="w-10 h-10 text-primary pointer-events-none" strokeWidth={1.4}/> : <div className="w-full h-full grid place-items-center pointer-events-none"><Thumbnail item={item} size="fill" thumbnailSrc={item.thumbnail ? loadedThumbnails[item.thumbnail] : undefined} loadingState={item.thumbnail ? loadingStates[item.thumbnail] : undefined}/></div>}
+        {item.type === "folder" ? <FolderIcon color={item.color} className="w-10 h-10 pointer-events-none" strokeWidth={1.4}/> : <div className="w-full h-full grid place-items-center pointer-events-none"><Thumbnail item={item} size="fill" thumbnailSrc={item.thumbnail ? loadedThumbnails[item.thumbnail] : undefined} loadingState={item.thumbnail ? loadingStates[item.thumbnail] : undefined}/></div>}
         {!s.isRenaming && checkbox(item, index, s, "absolute top-2 left-2 z-20")}
         {!s.isRenaming && (<div className="absolute top-1.5 right-1.5 z-10 flex gap-1">
             {starOrRestore(item, s, "w-6 h-6 rounded-md bg-black/55 text-white hover:bg-black/75")}
@@ -41,7 +44,7 @@ export const GridTile = ({ item, index, ctx }) => {
           <RenameInput initialName={item.name} onSave={onRenameConfirm} onCancel={onRenameCancel}/>
         </div>) : (<div className="px-0.5 pointer-events-none">
           <p className={cn("mt-1.5 text-[12.5px] font-medium truncate", s.isSelected && "text-primary")} title={item.name}>{item.name}</p>
-          <p className="flex items-center gap-1 text-[10.5px] font-mono text-muted-foreground mt-0.5">{s.offline && <OfflineMark />}<span className="truncate">{meta}</span></p>
+          <p className="flex items-center gap-1 text-[10.5px] font-mono text-muted-foreground mt-0.5">{item.protected && <ProtectedMark />}{s.offline && <OfflineMark />}<span className="truncate">{meta}</span></p>
         </div>)}
       </div>
     </div>);
@@ -76,6 +79,7 @@ export const ListRow = ({ item, index, ctx }) => {
                 <RenameInput initialName={item.name} onSave={onRenameConfirm} onCancel={onRenameCancel}/>
               </div>) : (<span className={cn("truncate pointer-events-none", s.isSelected && "text-primary font-medium")} title={item.name}>{item.name}</span>)}
             {s.starred && !s.isRenaming && <Star className="w-3 h-3 shrink-0 fill-warning text-warning pointer-events-none" aria-label="Starred"/>}
+            {item.protected && !s.isRenaming && <ProtectedMark />}
             {s.offline && !s.isRenaming && <OfflineMark />}
           </div>
           <div role="gridcell" className="pointer-events-none">
@@ -96,7 +100,7 @@ export const ListRow = ({ item, index, ctx }) => {
                 <RenameInput initialName={item.name} onSave={onRenameConfirm} onCancel={onRenameCancel}/>
               </div>) : (<>
                 <p className={cn("text-sm font-medium truncate", s.isSelected && "text-primary")}>{item.name}</p>
-                <p className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground">{s.offline && <OfflineMark />}<span className="truncate">{item.type === "folder" ? (date || "Folder") : [typeInfo.label, size, date].filter(Boolean).join(" · ")}</span></p>
+                <p className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground">{item.protected && <ProtectedMark />}{s.offline && <OfflineMark />}<span className="truncate">{item.type === "folder" ? (date || "Folder") : [typeInfo.label, size, date].filter(Boolean).join(" · ")}</span></p>
               </>)}
           </div>
           {!s.isRenaming && (<div className="flex items-center shrink-0">

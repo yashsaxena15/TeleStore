@@ -3,6 +3,9 @@ import { canAddToPlaylist, requestAddToPlaylist } from "@/features/playlists/pla
 import { canSaveOffline, makeAvailableOffline, offlineSupported, removeOffline } from "@/features/offline/offlineStore";
 import { folderPathOf } from "@/features/offline/offlineIndex";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
+import { canProtect } from "@/features/protection/protection";
+import { setFolderColor, setProtection } from "@/features/protection/protectionActions";
 import { api, fetchWithTimeout, getApiBaseUrl } from "@/lib/api";
 import { copyStreamUrl } from "@/lib/utils";
 import { trackArchiveTask } from "@/features/archives/archiveTracker";
@@ -33,6 +36,15 @@ export const GridContextMenu = ({ offlineIndex, cloudAccountId, cloudFolderId, c
     const isOffline = (it) => (it.type === "folder" ? Boolean(offlineIndex?.folders?.[folderPathOf(it)]) : Boolean(offlineIndex?.files?.[it.id]));
     const toSave = offlineTargets.filter((it) => !isOffline(it));
     const toRemove = offlineTargets.filter(isOffline);
+    // Protect from deletion (not in Trash, the Vault or Google Drive); colours for folders
+    const queryClient = useQueryClient();
+    const refreshFiles = () => queryClient.invalidateQueries({ queryKey: ["files"] });
+    const inTrash = isTrashMode || cloudFolderId === "trash" || Boolean(contextMenu.item?.is_trashed);
+    const protectTargets = !inTrash && !isCloudMode && !isVaultMode ? targets.filter(canProtect) : [];
+    const toProtect = protectTargets.filter((it) => !it.protected);
+    const toUnprotect = toProtect.length ? [] : protectTargets;
+    const colorTargets = !inTrash && !isCloudMode ? targets.filter((it) => it.type === "folder" && canProtect(it)) : [];
+    const canColor = colorTargets.length > 0 && colorTargets.length === targets.length;
     return (<ContextMenu x={contextMenu.x} y={contextMenu.y} itemType={contextMenu.itemType} itemName={contextMenu.itemName} isVideo={isVideo} onCopyStreamUrl={() => {
             if (!contextMenu.item)
                 return;
@@ -108,5 +120,5 @@ export const GridContextMenu = ({ offlineIndex, cloudAccountId, cloudFolderId, c
             }
         }} onCompress={() => {
             setCompressDialog(true);
-        }} isStarred={isItemStarred(contextMenu.item)} onToggleStar={() => contextMenu.item && onToggleStar?.(contextMenu.item)} isTrashMode={isTrashMode || cloudFolderId === "trash" || Boolean(contextMenu.item?.is_trashed)} onRestore={forSelection("restore", (item) => onRestoreItem?.(item))} isCloudMode={isCloudMode} isVirtualFolder={Boolean(contextMenu.item?.is_virtual)} isRestrictedEmptyArea={isRestrictedEmptyArea} onRefresh={onRefresh} onAddToPlaylist={addTargets.length > 0 && !isTrashMode ? () => requestAddToPlaylist(addTargets) : undefined} onMakeOffline={toSave.length ? () => makeAvailableOffline(toSave) : undefined} onRemoveOffline={toRemove.length ? () => removeOffline(toRemove) : undefined}/>);
+        }} isStarred={isItemStarred(contextMenu.item)} onToggleStar={() => contextMenu.item && onToggleStar?.(contextMenu.item)} isTrashMode={isTrashMode || cloudFolderId === "trash" || Boolean(contextMenu.item?.is_trashed)} onRestore={forSelection("restore", (item) => onRestoreItem?.(item))} isCloudMode={isCloudMode} isVirtualFolder={Boolean(contextMenu.item?.is_virtual)} isRestrictedEmptyArea={isRestrictedEmptyArea} onRefresh={onRefresh} onAddToPlaylist={addTargets.length > 0 && !isTrashMode ? () => requestAddToPlaylist(addTargets) : undefined} onMakeOffline={toSave.length ? () => makeAvailableOffline(toSave) : undefined} onRemoveOffline={toRemove.length ? () => removeOffline(toRemove) : undefined} onProtect={toProtect.length ? () => setProtection(toProtect, true, refreshFiles) : undefined} onUnprotect={toUnprotect.length ? () => setProtection(toUnprotect, false, refreshFiles) : undefined} folderColor={canColor && colorTargets.every((f) => f.color === colorTargets[0].color) ? colorTargets[0].color : undefined} onSetFolderColor={canColor ? (color) => setFolderColor(colorTargets, color, refreshFiles) : undefined}/>);
 };

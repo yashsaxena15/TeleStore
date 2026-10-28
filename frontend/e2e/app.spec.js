@@ -928,3 +928,83 @@ test.describe("offline files", () => {
         });
     });
 });
+
+test.describe("protect from deletion, folder colours and photo details", () => {
+    const sent = async (request, path) => (await mutations(request)).filter((r) => r.path === path).map((r) => JSON.parse(r.body || "{}"));
+
+    test("a protected file asks for the password before it goes to Trash", async ({ page, request }) => {
+        await page.goto("/");
+        // Q3-report.pdf starts protected
+        await expect(row(page, "Q3-report.pdf").getByTestId("protected-mark").first()).toBeAttached();
+        await expect(async () => {
+            await row(page, "project-src.zip").click({ button: "right" });
+            await expect(page.getByRole("menuitem", { name: "Protect from deletion" })).toBeVisible({ timeout: 2000 });
+        }).toPass({ timeout: 15000 });
+        await page.getByRole("menuitem", { name: "Protect from deletion" }).click();
+        await expect.poll(() => sent(request, "/files/protect")).toEqual([{ file_id: "f7", protected: true }]);
+        await expect(row(page, "project-src.zip").getByRole("img", { name: "Protected" }).first()).toBeAttached();
+
+        await row(page, "project-src.zip").click({ button: "right" });
+        await expect(page.getByRole("menuitem", { name: "Remove protection" })).toBeVisible();
+        await page.getByRole("menuitem", { name: "Move to Trash" }).click();
+        await page.getByRole("alertdialog").getByRole("button", { name: "Move to Trash" }).click();
+        const dialog = page.getByRole("dialog", { name: "Confirm it's you" });
+        await expect(dialog).toContainText("“project-src.zip” is protected");
+        await dialog.getByLabel("Password").fill("nope");
+        await dialog.getByRole("button", { name: "Confirm" }).click();
+        await expect(dialog.getByRole("alert")).toHaveText("Wrong password");
+        await dialog.getByLabel("Password").fill("right-pass");
+        await dialog.getByRole("button", { name: "Confirm" }).click();
+        await expect(dialog).toBeHidden();
+        await expect.poll(() => sent(request, "/files/trash")).toEqual([{ file_id: "f7" }, { file_id: "f7", unlock_token: "tok-1" }]);
+        await expect(page.getByText("Moved \"project-src.zip\" to Trash")).toBeVisible();
+    });
+
+    test("cancelling the password keeps the file", async ({ page, request }) => {
+        await page.goto("/");
+        await page.getByRole("button", { name: "Select Q3-report.pdf" }).click();
+        await page.getByRole("button", { name: "Select team-offsite.jpg" }).click();
+        await page.getByRole("toolbar", { name: /selected$/ }).getByRole("button", { name: /Delete/ }).click();
+        await page.getByRole("alertdialog").getByRole("button", { name: /Move to Trash/ }).click();
+        const dialog = page.getByRole("dialog", { name: "Confirm it's you" });
+        await expect(dialog).toContainText("“Q3-report.pdf” is protected");
+        await dialog.getByRole("button", { name: "Cancel" }).click();
+        await expect(page.getByText("1 protected item not deleted")).toBeVisible();
+        const trash = await sent(request, "/files/trash");
+        expect(trash.filter((b) => b.unlock_token)).toEqual([]);
+        expect(trash.map((b) => b.file_id).sort()).toEqual(["f5", "f8"]);
+    });
+
+    test("folders show their colour and the menu changes it", async ({ page, request }) => {
+        await page.goto("/");
+        await expect(row(page, "Movies").locator("[data-folder-color='blue']").first()).toBeAttached();
+        await row(page, "Music").click({ button: "right" });
+        const swatches = page.getByRole("group", { name: "Folder colour" });
+        await expect(swatches.getByRole("menuitemradio", { name: "Default colour" })).toHaveAttribute("aria-checked", "true");
+        await swatches.getByRole("menuitemradio", { name: "Red" }).click();
+        await expect.poll(() => sent(request, "/files/color")).toEqual([{ file_id: "f3", color: "red" }]);
+        await expect(row(page, "Music").locator("[data-folder-color='red']").first()).toBeAttached();
+        // Files don't get the colour choice
+        await row(page, "Q3-report.pdf").click({ button: "right" });
+        await expect(page.getByRole("menuitem", { name: "Remove protection" })).toBeVisible();
+        await expect(page.getByRole("group", { name: "Folder colour" })).toHaveCount(0);
+    });
+
+    test("the image viewer shows the photo's camera, size and place", async ({ page }) => {
+        await page.goto("/");
+        await row(page, "team-offsite.jpg").dblclick();
+        const toolbar = page.locator(".yarl__toolbar");
+        await toolbar.getByRole("button", { name: "Details" }).click();
+        const panel = page.getByRole("complementary", { name: "Photo details" });
+        await expect(panel).toContainText("Apple iPhone 13");
+        await expect(panel).toContainText("12.2 MP · 4032 × 3024");
+        await expect(panel).toContainText("f/1.8 · 1/120 s · ISO 100 · 4.2 mm");
+        await expect(panel).toContainText("No flash");
+        await expect(panel).toContainText("15.5527° N, 73.7517° E");
+        const maps = panel.getByRole("link", { name: "Open in Maps" });
+        await expect(maps).toHaveAttribute("href", "https://www.google.com/maps?q=15.55271,73.75169");
+        await expect(maps).toHaveAttribute("target", "_blank");
+        await panel.getByRole("button", { name: "Close details" }).click();
+        await expect(panel).toBeHidden();
+    });
+});

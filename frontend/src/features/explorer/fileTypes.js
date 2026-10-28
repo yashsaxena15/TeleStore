@@ -82,5 +82,7 @@ export const apiFileToFileItem = (apiFile) => {
         trashed: Boolean(apiFile.trashed),
         trashed_at: serverTime(apiFile.trashed_at),
         original_path: apiFile.original_path,
+        protected: Boolean(apiFile.protected),
+        color: apiFile.color || null,
     };
 };

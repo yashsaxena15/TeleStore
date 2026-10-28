@@ -192,7 +192,7 @@ fun FolderPickerSheet(
                                     Icon(
                                         imageVector = Icons.Default.Folder,
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
+                                        tint = folderTint(folder.color) ?: MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(24.dp),
                                     )
                                     Spacer(modifier = Modifier.width(16.dp))

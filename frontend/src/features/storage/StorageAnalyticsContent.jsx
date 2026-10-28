@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { api, getApiBaseUrl } from "@/lib/api";
+import { isProtectionCancelled, withProtection } from "@/features/protection/protection";
 import { formatBytes } from "@/lib/utils";
 import { MediaPlayerContext } from "@/features/player/MediaPlayerContext";
 import {
@@ -133,11 +134,16 @@ export const StorageAnalyticsContent = ({
   const handleEmptyTrashConfirm = async () => {
     try {
       setEmptyingTrash(true);
-      await api.emptyTrash();
+      await withProtection((token) => api.emptyTrash(token));
       toast.success("Trash emptied successfully");
       setEmptyTrashOpen(false);
       await fetchAnalytics();
     } catch (err) {
+      if (isProtectionCancelled(err)) {
+        setEmptyTrashOpen(false);
+        toast.info("Not deleted");
+        return;
+      }
       toast.error("Failed to empty trash", {
         description: err.message || String(err),
       });
@@ -150,11 +156,16 @@ export const StorageAnalyticsContent = ({
     if (!fileToDelete) return;
     try {
       setDeletingFile(true);
-      await api.trashFile(fileToDelete.id);
+      await withProtection((token) => api.trashFile(fileToDelete.id, token));
       toast.success(`Moved "${fileToDelete.file_name}" to Trash`);
       setFileToDelete(null);
       await fetchAnalytics();
     } catch (err) {
+      if (isProtectionCancelled(err)) {
+        setFileToDelete(null);
+        toast.info("Not deleted");
+        return;
+      }
       toast.error("Failed to delete file", {
         description: err.message || String(err),
       });

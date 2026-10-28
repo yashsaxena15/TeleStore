@@ -60,7 +60,7 @@ const openNow = (item) => {
         const photoItems = items.filter((it) => it.type !== "folder" &&
             (it.fileType === "photo" ||
                 PHOTO_EXTS.includes((it.extension || it.name.split('.').pop() || '').toLowerCase())));
-        const allImages = photoItems.map((it) => ({ url: fileUrl(it), fileName: it.name }));
+        const allImages = photoItems.map((it) => ({ url: fileUrl(it), fileName: it.name, id: it.is_cloud ? undefined : it.id }));
         const currentIdx = allImages.findIndex((img) => img.fileName === item.name);
         if (item.is_cloud) {
             const photoUrl = api.getCloudStreamUrl(cloudAccountId || item.cloud_account_id, item.cloud_file_id || item.id);
@@ -74,6 +74,7 @@ const openNow = (item) => {
                 images: allImages.length > 0 ? allImages : [{
                         url: fileUrl(item),
                         fileName: item.name,
+                        id: item.id,
                     }],
                 initialIndex: Math.max(0, currentIdx),
             });
