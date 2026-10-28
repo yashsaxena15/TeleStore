@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { X, Download, ExternalLink, Star, RotateCcw, Copy, Check, Link as LinkIcon, Folder, Info } from "lucide-react";
+import { X, Download, ExternalLink, Star, RotateCcw, Copy, Check, Link as LinkIcon, Info, ShieldCheck } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { getApiBaseUrl, fetchWithTimeout, api } from "@/lib/api";
 import { cn, formatBytes, copyStreamUrl } from "@/lib/utils";
 import { toast } from "sonner";
 import { Thumbnail } from "./Thumbnail";
+import { FolderIcon } from "./items/FolderIcon";
 import { getTypeInfo, TYPE_TONE } from "./lib/explorerItems";
 import { getItemDuration, isItemStarred } from "./lib/fileCardHelpers";
 
@@ -86,7 +87,7 @@ const ItemDetails = ({ item, selectionCount, selectionSize, thumbnailSrc, locati
     const actionBtn = "h-8 inline-flex items-center gap-1.5 px-2.5 rounded-md border border-border text-xs font-medium hover:bg-muted transition-colors";
     return (<div className="flex flex-col gap-3">
       <div className="relative aspect-[16/10] max-h-40 md:max-h-none rounded-lg border border-border bg-muted/30 overflow-hidden grid place-items-center">
-        {isFolder ? <Folder className="w-12 h-12 text-primary" strokeWidth={1.4}/> : <Thumbnail item={item} size="fill" thumbnailSrc={thumbnailSrc}/>}
+        {isFolder ? <FolderIcon color={item.color} className="w-12 h-12" strokeWidth={1.4}/> : <Thumbnail item={item} size="fill" thumbnailSrc={thumbnailSrc}/>}
         {!isFolder && typeInfo.label && <span className={cn("absolute left-2 bottom-2 px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-background/80", TYPE_TONE[typeInfo.kind])}>{typeInfo.label}</span>}
         {duration && <span className="absolute right-2 bottom-2 px-1.5 py-0.5 rounded bg-black/70 text-white text-[10px] font-mono">{duration}</span>}
       </div>
@@ -108,6 +109,7 @@ const ItemDetails = ({ item, selectionCount, selectionSize, thumbnailSrc, locati
         {duration && (<><dt className="text-muted-foreground">Duration</dt><dd className="font-mono text-[11.5px]">{duration}</dd></>)}
         <dt className="text-muted-foreground">Location</dt><dd className="font-mono text-[11.5px] break-all">{item.file_path || locationPath}</dd>
         <dt className="text-muted-foreground">Modified</dt><dd className="font-mono text-[11.5px]">{formatDateTime(item.modified)}</dd>
+        {item.protected && (<><dt className="text-muted-foreground">Protection</dt><dd className="flex items-center gap-1 text-[11.5px]"><ShieldCheck className="w-3.5 h-3.5 text-primary" aria-hidden="true"/>Protected from deletion</dd></>)}
         {isTrash && item.trashed_at && (<><dt className="text-muted-foreground">Deleted</dt><dd className="font-mono text-[11.5px]">{formatDateTime(item.trashed_at)}</dd></>)}
         {item.message_id && (<><dt className="text-muted-foreground">Telegram</dt><dd className="font-mono text-[11.5px] break-all">message {item.message_id}</dd></>)}
       </dl>

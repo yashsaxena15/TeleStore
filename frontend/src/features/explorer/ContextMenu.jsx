@@ -1,12 +1,25 @@
 import { useEffect, useRef } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { CloudOff, HardDriveDownload, ListPlus, FolderOpen, Pencil, Trash2, Copy, Scissors, Clipboard, Info, Download, Share2, Eye, Star, RefreshCw, Upload, RotateCcw, Archive, Link, ShieldCheck, } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { FOLDER_COLORS } from "./lib/folderColors";
+import { CloudOff, HardDriveDownload, ListPlus, Shield, ShieldOff, Ban, FolderOpen, Pencil, Trash2, Copy, Scissors, Clipboard, Info, Download, Share2, Eye, Star, RefreshCw, Upload, RotateCcw, Archive, Link, ShieldCheck, } from "lucide-react";
+// Folder colour: Default plus the palette, as a row of swatches (like Google Drive)
+const ColorSwatches = ({ current, onPick, className }) => (<div role="group" aria-label="Folder colour" className={className}>
+    <p className="text-xs text-muted-foreground mb-1.5">Folder colour</p>
+    <div className="flex flex-wrap gap-1.5">
+      <button type="button" role="menuitemradio" aria-checked={!current} aria-label="Default colour" title="Default" onClick={() => onPick(null)} className={cn("w-6 h-6 rounded-full border border-border grid place-items-center text-muted-foreground hover:scale-110 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary", !current && "ring-2 ring-primary ring-offset-1 ring-offset-background")}>
+        <Ban className="w-3.5 h-3.5"/>
+      </button>
+      {FOLDER_COLORS.map((c) => (<button key={c.id} type="button" role="menuitemradio" aria-checked={current === c.id} aria-label={c.label} title={c.label} onClick={() => onPick(c.id)} className={cn("w-6 h-6 rounded-full hover:scale-110 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary", current === c.id && "ring-2 ring-primary ring-offset-1 ring-offset-background")} style={{ backgroundColor: c.hex }}/>))}
+    </div>
+  </div>);
+
 export const ContextMenu = ({ x, y, onClose, onRefresh, itemType, itemName, onOpen, onCopy, onCut, onPaste, onDelete, onRename, onNewFolder, onDownload, onUploadFiles, // Destructure the new prop
 onUploadFolder, // Destructure the new prop
 isClipboardPasted, // Destructure the new prop
 hasClipboard, // Destructure the new prop
 disableDelete = false, // Destructure the new prop with default value
-onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false, isVideo = false, onCopyStreamUrl, selectedCount = 1, isStarred = false, onToggleStar, isTrashMode = false, onRestore, isVaultMode = false, onMoveToVault, onMoveToHome, isCloudMode = false, isVirtualFolder = false, isRestrictedEmptyArea = false, onAddToPlaylist, onMakeOffline, onRemoveOffline, }) => {
+onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false, isVideo = false, onCopyStreamUrl, selectedCount = 1, isStarred = false, onToggleStar, isTrashMode = false, onRestore, isVaultMode = false, onMoveToVault, onMoveToHome, isCloudMode = false, isVirtualFolder = false, isRestrictedEmptyArea = false, onAddToPlaylist, onMakeOffline, onRemoveOffline, onProtect, onUnprotect, folderColor, onSetFolderColor, }) => {
     const menuRef = useRef(null);
     const isMobile = useIsMobile();
 
@@ -87,6 +100,14 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                 break;
             case "remove_offline":
                 onRemoveOffline?.();
+                onClose();
+                break;
+            case "protect":
+                onProtect?.();
+                onClose();
+                break;
+            case "unprotect":
+                onUnprotect?.();
                 onClose();
                 break;
             case "restore":
@@ -379,6 +400,15 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                         ...(onRemoveOffline
                             ? [{ icon: CloudOff, label: "Remove offline copy", action: "remove_offline" }]
                             : []),
+                        ...(onProtect
+                            ? [{ icon: Shield, label: "Protect from deletion", action: "protect" }]
+                            : []),
+                        ...(onUnprotect
+                            ? [{ icon: ShieldOff, label: "Remove protection", action: "unprotect" }]
+                            : []),
+                        ...(onSetFolderColor
+                            ? [{ swatches: true, label: "Folder colour", action: "folder_color" }]
+                            : []),
                         ...(isArchive
                             ? [
                                 { divider: true, label: "", action: "" },
@@ -488,6 +518,9 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                 if (item.divider) {
                     return (<div key={`divider-${index}`} className="h-px bg-border/50 my-1 mx-1"/>);
                 }
+                if (item.swatches) {
+                    return <ColorSwatches key="folder_color" className="px-4 py-2.5" current={folderColor} onPick={(c) => { onSetFolderColor?.(c); onClose(); }}/>;
+                }
                 const Icon = item.icon;
                 const isDisabled = item.disabled || (item.action === "paste" && (!hasClipboard || !hasClipboard()));
                 return (<button key={item.action} role="menuitem" tabIndex={isDisabled ? -1 : 0} onClick={() => !isDisabled && handleAction(item.action)} disabled={isDisabled} className={`w-full flex items-center justify-between px-4 py-3 min-h-[44px] rounded-xl text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset ${isDisabled
@@ -511,14 +544,15 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
     }
     // Adjust position to keep menu on screen
     const menuWidth = 280;
-    const menuHeight = menuItems.filter((item) => !item.divider).length * 36 + menuItems.filter((item) => item.divider).length * 9;
+    const menuHeight = menuItems.filter((item) => !item.divider).length * 36 + menuItems.filter((item) => item.divider).length * 9 + (onSetFolderColor ? 24 : 0);
     const adjustedX = Math.min(x, window.innerWidth - menuWidth - 10);
-    const adjustedY = Math.min(y, window.innerHeight - menuHeight - 10);
+    const adjustedY = Math.max(10, Math.min(y, window.innerHeight - menuHeight - 10));
     return (<>
       {/* Backdrop for better visibility */}
       <div className="fixed inset-0 z-40" style={{ background: "transparent" }} onClick={onClose}/>
 
-      <div ref={menuRef} role="menu" aria-label={itemName ? `Actions for ${itemName}` : "Folder actions"} className="fixed z-50 bg-background/80 backdrop-blur-md border border-border/50 rounded-xl shadow-2xl overflow-hidden" style={{
+      <div ref={menuRef} role="menu" aria-label={itemName ? `Actions for ${itemName}` : "Folder actions"} className="fixed z-50 bg-background/80 backdrop-blur-md border border-border/50 rounded-xl shadow-2xl overflow-x-hidden overflow-y-auto" style={{
+            maxHeight: "calc(100vh - 20px)",
             left: `${adjustedX}px`,
             top: `${adjustedY}px`,
             width: `${menuWidth}px`,
@@ -528,6 +562,9 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
           {menuItems.map((item, index) => {
             if (item.divider) {
                 return (<div key={`divider-${index}`} className="h-px bg-border/50 my-1 mx-1"/>);
+            }
+            if (item.swatches) {
+                return <ColorSwatches key="folder_color" className="px-3 py-1.5" current={folderColor} onPick={(c) => { onSetFolderColor?.(c); onClose(); }}/>;
             }
             const Icon = item.icon;
             const isDisabled = item.disabled || (item.action === "paste" && (!hasClipboard || !hasClipboard()));

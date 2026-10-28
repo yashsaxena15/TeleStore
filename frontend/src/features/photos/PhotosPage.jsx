@@ -6,6 +6,7 @@ import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Circle, Download, Images, Loader2, PlayCircle, Star, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { createProtectionGuard, isProtectionCancelled } from "@/features/protection/protection";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -132,9 +133,13 @@ export const PhotosPage = () => {
     const bulk = async (verb, action) => {
         const list = selectedItems();
         const results = await Promise.allSettled(list.map(action));
-        const failed = results.filter((r) => r.status === "rejected").length;
+        const rejected = results.filter((r) => r.status === "rejected");
+        // Protected photos the user didn't confirm for (see features/protection)
+        const kept = rejected.filter((r) => isProtectionCancelled(r.reason)).length;
+        const failed = rejected.length - kept;
+        if (kept) toast.info(kept === list.length ? "Not deleted" : `${kept} protected ${kept === 1 ? "item" : "items"} not deleted`);
         if (failed) toast.error(`${failed} of ${list.length} couldn't be ${verb.toLowerCase()}`);
-        else toast.success(`${verb} ${list.length === 1 ? "1 item" : `${list.length} items`}`);
+        else if (!kept) toast.success(`${verb} ${list.length === 1 ? "1 item" : `${list.length} items`}`);
         clearSelection();
         queryClient.invalidateQueries({ queryKey: ["files"] });
     };
@@ -146,7 +151,7 @@ export const PhotosPage = () => {
           <span className="text-sm font-medium flex-1">{selected.size} selected</span>
           <Button variant="ghost" size="icon" onClick={download} title="Download" aria-label="Download"><Download className="w-4 h-4"/></Button>
           <Button variant="ghost" size="icon" onClick={() => bulk(allStarred ? "Unstarred" : "Starred", (i) => api.toggleStar(i.id, !allStarred))} title={allStarred ? "Unstar" : "Star"} aria-label={allStarred ? "Unstar" : "Star"}><Star className={cn("w-4 h-4", allStarred && "fill-warning text-warning")}/></Button>
-          <Button variant="ghost" size="icon" onClick={() => bulk("Moved to Trash", (i) => api.trashFile(i.id))} title="Move to Trash" aria-label="Move to Trash"><Trash2 className="w-4 h-4"/></Button>
+          <Button variant="ghost" size="icon" onClick={() => { const guarded = createProtectionGuard(); bulk("Moved to Trash", (i) => guarded((token) => api.trashFile(i.id, token))); }} title="Move to Trash" aria-label="Move to Trash"><Trash2 className="w-4 h-4"/></Button>
         </div>) : (<PageHeader icon={Images} title="Photos" subtitle={query.isLoading ? "Loading…" : photosSubtitle(view, total)} actions={<PhotosMenu view={view} onViewChange={changeView}/>}/>)}
 
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar" data-testid="photos-scroll">
