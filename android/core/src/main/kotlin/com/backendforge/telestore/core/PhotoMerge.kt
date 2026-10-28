@@ -52,6 +52,22 @@ data class PhotoDay(val date: LocalDate?, val label: String, val entries: List<P
  * match, the rule the backup itself uses to skip what is already there.
  */
 object PhotoMerge {
+    /**
+     * The phone photos Photos shows: only those in the albums chosen for backup (backed up yet or
+     * not). With none chosen, the backup uses Camera (else the biggest album), and so does this.
+     */
+    fun inBackupAlbums(local: List<LocalPhoto>, chosen: Set<String>, includeVideos: Boolean = true): List<LocalPhoto> {
+        val albums = chosen.ifEmpty { setOfNotNull(defaultAlbum(local)) }
+        return local.filter { it.bucketId in albums && (includeVideos || !it.video) }
+    }
+
+    /** Camera, else the album with the most items (the same pick as PhoneMedia.cameraAlbum). */
+    fun defaultAlbum(local: List<LocalPhoto>): String? {
+        val albums = local.groupBy { it.bucketId }
+        return albums.entries.firstOrNull { (_, items) -> items.first().bucket.equals("Camera", ignoreCase = true) }?.key
+            ?: albums.maxByOrNull { it.value.size }?.key
+    }
+
     fun millisOf(item: FileItem): Long? = DateFormatter.parseIso(item.timelineDate)?.toInstant()?.toEpochMilli()
 
     /**

@@ -124,4 +124,31 @@ class PhotoMergeTest {
         assertEquals("yesterday", BackupSummary.ago(now - 30 * 3_600_000, now))
         assertEquals("4 days ago", BackupSummary.ago(now - 4 * 86_400_000L, now))
     }
+
+    private fun inAlbum(key: String, bucketId: String, bucket: String, video: Boolean = false) =
+        LocalPhoto(key = key, name = "$key.jpg", size = 1, takenAtMillis = 0, video = video, uri = "content://media/$key", bucketId = bucketId, bucket = bucket)
+
+    private val phone = listOf(
+        inAlbum("c1", "cam", "Camera"), inAlbum("c2", "cam", "Camera", video = true),
+        inAlbum("w1", "wa", "WhatsApp Images"), inAlbum("w2", "wa", "WhatsApp Images"), inAlbum("w3", "wa", "WhatsApp Images"),
+        inAlbum("s1", "shots", "Screenshots"),
+    )
+
+    @Test
+    fun `only the albums chosen for backup show`() {
+        assertEquals(listOf("w1", "w2", "w3", "s1"), PhotoMerge.inBackupAlbums(phone, setOf("wa", "shots")).map { it.key })
+    }
+
+    @Test
+    fun `with none chosen it is Camera, like the backup`() {
+        assertEquals(listOf("c1", "c2"), PhotoMerge.inBackupAlbums(phone, emptySet()).map { it.key })
+        // No Camera album: the biggest one
+        assertEquals("wa", PhotoMerge.defaultAlbum(phone.filter { it.bucketId != "cam" }))
+        assertTrue(PhotoMerge.inBackupAlbums(emptyList(), emptySet()).isEmpty())
+    }
+
+    @Test
+    fun `videos stay out when the backup leaves them out`() {
+        assertEquals(listOf("c1"), PhotoMerge.inBackupAlbums(phone, setOf("cam"), includeVideos = false).map { it.key })
+    }
 }

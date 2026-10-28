@@ -72,6 +72,10 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
         scanPhone()
         // A finished backup or upload shows up straight away
         viewModelScope.launch { container.transfers.store.uploaded.collect { refresh() } }
+        // Choosing other albums (or videos on/off) in Backup changes which phone photos show
+        viewModelScope.launch {
+            container.backup.settings.map { it.albums to it.includeVideos }.distinctUntilChanged().drop(1).collect { scanPhone() }
+        }
         // Each photo the backup finishes gets its cloud mark
         viewModelScope.launch {
             container.backup.status.map { it.done to it.running }.distinctUntilChanged().drop(1).collect {
@@ -132,16 +136,17 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
             val context = container.context
             val (canRead, local, keys) = withContext(Dispatchers.IO) {
                 if (!PhoneMedia.canRead(context)) Triple(false, emptyList<LocalPhoto>(), emptySet<String>())
-                else Triple(
-                    true,
-                    PhoneMedia.scan(context).map { p ->
+                else {
+                    val all = PhoneMedia.scan(context).map { p ->
                         LocalPhoto(
                             key = p.key, name = p.name, size = p.size, takenAtMillis = p.takenAt, video = p.video,
                             uri = p.uri.toString(), bucketId = p.bucketId, bucket = p.bucket,
                         )
-                    },
-                    container.backup.backedUpKeys(),
-                )
+                    }
+                    // Only the albums chosen in Backup (WhatsApp, screenshots… stay out unless chosen)
+                    val settings = container.backup.settings.value
+                    Triple(true, PhotoMerge.inBackupAlbums(all, settings.albums, settings.includeVideos), container.backup.backedUpKeys())
+                }
             }
             backedUpKeys = keys
             _state.update { it.copy(local = local, canReadPhone = canRead) }
