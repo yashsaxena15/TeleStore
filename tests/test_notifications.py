@@ -1,5 +1,6 @@
 """Notifications: what the server records, and the API the app and the website read."""
 
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
@@ -13,7 +14,7 @@ REAL_STORAGE_CHECK = event_service.storage_check
 
 
 class FakeCollection:
-    """Enough of Mongo for events and transfers: equality, $in, $nin, $gt, sort by _id, unique dedupe."""
+    """Enough of Mongo for events and transfers: equality, $in, $nin, $gt, $gte, sort by _id, unique dedupe."""
 
     def __init__(self, docs=()):
         self.docs = [dict(d) for d in docs]
@@ -28,6 +29,8 @@ class FakeCollection:
                 if "$nin" in want and have in want["$nin"]:
                     return False
                 if "$gt" in want and not (have is not None and have > want["$gt"]):
+                    return False
+                if "$gte" in want and not (have is not None and have >= want["$gte"]):
                     return False
             elif have != want:
                 return False
@@ -179,6 +182,16 @@ class TestApi:
         assert client.post("/user/notifications/read", json={"ids": [got["items"][0]["id"]]}).json() == {"unread": 1}
         assert client.post("/user/notifications/read", json={"all": True}).json() == {"unread": 0}
         assert events.docs[2]["read"] is False  # not this user's
+
+    def test_old_notifications_stop_counting_as_new(self, client, signed_in):
+        events, _ = signed_in
+        event_service.record("42", "inbox", "Last month")
+        event_service.record("42", "inbox", "Today")
+        events.docs[0]["created_at"] -= timedelta(days=event_service.NEW_DAYS + 1)
+        got = client.get("/user/notifications").json()
+        assert got["unread"] == 1
+        assert [(i["title"], i["read"]) for i in got["items"]] == [("Today", False), ("Last month", True)]
+        assert client.post("/user/notifications/read", json={"ids": []}).json() == {"unread": 1}
 
     def test_signed_out(self, client):
         app.dependency_overrides.pop(require_auth, None)

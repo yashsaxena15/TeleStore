@@ -47,7 +47,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -80,6 +79,7 @@ import com.backendforge.telestore.ui.components.FileThumbnail
 import com.backendforge.telestore.ui.components.folderTint
 import com.backendforge.telestore.ui.components.NewFolderDialog
 import java.util.Calendar
+import com.backendforge.telestore.ui.components.ProgressBar
 
 /** Places Home links to, besides files and folders. */
 enum class HomeShortcut(val label: String) { PLAYLISTS("Playlists"), STARRED("Starred"), RECENT("Recent"), VAULT("Vault"), TRASH("Trash") }
@@ -207,8 +207,9 @@ private fun Header(username: String, unread: Int, onNotifications: () -> Unit, o
                 Icon(Icons.Outlined.Notifications, contentDescription = if (unread > 0) "Notifications, $unread new" else "Notifications")
             }
         }
+        // Room for the badge: "99+" reaches past the bell's button and the avatar hid the "+"
         Box(
-            Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer).clickable(onClick = onAccount),
+            Modifier.padding(start = 12.dp).size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer).clickable(onClick = onAccount),
             contentAlignment = Alignment.Center,
         ) {
             Text(username.firstOrNull()?.uppercase() ?: "?", color = MaterialTheme.colorScheme.onSecondaryContainer, fontWeight = FontWeight.Bold)
@@ -264,7 +265,7 @@ private fun ContinueCard(entry: WatchEntry, api: TeleStoreApi, onClick: () -> Un
                 "${formatTime(entry.leftMs)} left", color = Color.White, style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).background(Color(0x99000000), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
             )
-            LinearProgressIndicator(
+            ProgressBar(
                 progress = { entry.progress }, modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp),
                 trackColor = Color(0x55FFFFFF),
             )

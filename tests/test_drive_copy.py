@@ -104,3 +104,18 @@ def test_the_task_list_never_sends_sign_in_headers():
     task = listing["tasks"][0]
     assert "custom_headers" not in task and "error_detail" not in task
     assert task["error_message"].startswith("Google Drive refused")
+
+
+def test_a_folder_speed_counts_only_files_moving_and_says_when_paused_ones_resume():
+    from datetime import datetime
+    from telestore.services.remote_transfer_manager.manager import RemoteTransferManager
+    coll = MagicMock()
+    coll.aggregate.return_value = [
+        {"_id": {"group": "G", "status": "completed"}, "count": 326, "filesize": 10, "transferred": 10, "speed": 287_000_000, "resumes_at": None},
+        {"_id": {"group": "G", "status": "downloading"}, "count": 1, "filesize": 5, "transferred": 2, "speed": 6_000_000, "resumes_at": None},
+        {"_id": {"group": "G", "status": "paused_quota"}, "count": 2641, "filesize": 0, "transferred": 0, "speed": 0, "resumes_at": datetime(2026, 10, 30, 10, 38)},
+    ]
+    group = RemoteTransferManager._group_summaries(coll, "42", ["G"])["G"]
+    assert group["speed_bps"] == 6_000_000  # not the finished files' last speeds
+    assert group["resumes_at"] == "2026-10-30T10:38:00Z"
+    assert group["counts"] == {"completed": 326, "downloading": 1, "paused_quota": 2641}

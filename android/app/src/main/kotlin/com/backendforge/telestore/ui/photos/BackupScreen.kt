@@ -24,7 +24,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -54,6 +53,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.util.Date
+import com.backendforge.telestore.ui.components.ProgressBar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -130,7 +130,7 @@ fun BackupScreen(container: AppContainer, onBack: () -> Unit) {
                     when {
                         status.running -> {
                             Text("Backing up · ${status.pending} left", style = MaterialTheme.typography.titleSmall)
-                            LinearProgressIndicator(progress = { if (total > 0) status.done.toFloat() / total else 0f }, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+                            ProgressBar(progress = { if (total > 0) status.done.toFloat() / total else 0f }, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
                             status.current?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         }
                         status.message != null -> Text(status.message ?: "", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)

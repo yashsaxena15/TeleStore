@@ -11,7 +11,7 @@ synced playlist, files arriving in the Telegram Inbox, storage almost full and n
 """
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Iterable, List, Optional
 
 from bson import ObjectId
@@ -20,6 +20,7 @@ from d4rk.Logs import setup_logger
 logger = setup_logger("event_service")
 
 KEEP_DAYS = 30
+NEW_DAYS = 7  # older unread events stop counting as new (the badge doesn't sit at 99+ for a month)
 FINAL = ("completed", "failed", "cancelled")
 STORAGE_WARN_AT = 0.9
 _indexed = False
@@ -61,12 +62,28 @@ def record(owner_id: str, kind: str, title: str, body: str = "", target: Optiona
         return False
 
 
+def _new_since() -> datetime:
+    return _now() - timedelta(days=NEW_DAYS)
+
+
+def _unread(owners: List[str]) -> dict:
+    return {"owner_id": {"$in": owners}, "read": False, "created_at": {"$gte": _new_since()}}
+
+
+def _is_new(doc: dict) -> bool:
+    created = doc.get("created_at")
+    if isinstance(created, datetime) and created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    return not doc.get("read") and isinstance(created, datetime) and created >= _new_since()
+
+
 def _json(doc: dict) -> dict:
+    read = not _is_new(doc)
     created = doc.get("created_at")
     if isinstance(created, datetime):
         created = created.astimezone(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds") + "Z"
     return {"id": str(doc["_id"]), "kind": doc.get("kind"), "title": doc.get("title") or "", "body": doc.get("body") or "",
-            "target": doc.get("target"), "created_at": created, "read": bool(doc.get("read"))}
+            "target": doc.get("target"), "created_at": created, "read": read}
 
 
 def listing(owner_ids: Iterable[str], after: Optional[str] = None, limit: int = 30) -> dict:
@@ -81,7 +98,7 @@ def listing(owner_ids: Iterable[str], after: Optional[str] = None, limit: int = 
     limit = max(1, min(100, int(limit or 30)))
     coll = _coll()
     items = [_json(d) for d in coll.find(query).sort("_id", -1).limit(limit)]
-    unread = coll.count_documents({"owner_id": {"$in": owners}, "read": False})
+    unread = coll.count_documents(_unread(owners))
     latest = coll.find_one({"owner_id": {"$in": owners}}, sort=[("_id", -1)])
     return {"items": items, "unread": unread, "latest": str(latest["_id"]) if latest else None}
 
@@ -97,11 +114,11 @@ def mark_read(owner_ids: Iterable[str], ids: Optional[List[str]] = None, everyth
             except Exception:
                 continue
         if not object_ids:
-            return _coll().count_documents(query)
+            return _coll().count_documents(_unread(owners))
         query["_id"] = {"$in": object_ids}
     coll = _coll()
     coll.update_many(query, {"$set": {"read": True}})
-    return coll.count_documents({"owner_id": {"$in": owners}, "read": False})
+    return coll.count_documents(_unread(owners))
 
 
 # ── What gets recorded ──────────────────────────────────────────────────────

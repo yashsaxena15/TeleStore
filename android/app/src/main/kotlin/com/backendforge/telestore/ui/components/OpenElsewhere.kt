@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -94,7 +93,7 @@ private fun OpenElsewhereDialogs(opener: OpenElsewhere) {
                         "${item.name}${item.size?.let { " · ${formatBytes(it)}" } ?: ""}",
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    LinearProgressIndicator(progress = { opener.progress }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
+                    ProgressBar(progress = { opener.progress }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
                 }
             },
             confirmButton = {},

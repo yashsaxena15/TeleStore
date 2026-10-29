@@ -2462,6 +2462,7 @@ class RemoteTransferManager:
                 "filesize": {"$sum": {"$ifNull": ["$filesize", 0]}},
                 "transferred": {"$sum": {"$ifNull": ["$transferred_bytes", 0]}},
                 "speed": {"$sum": {"$ifNull": ["$speed_bps", 0]}},
+                "resumes_at": {"$min": "$cooldown_until"},
             }},
         ])
         summaries: Dict[str, Dict[str, Any]] = {}
@@ -2471,7 +2472,14 @@ class RemoteTransferManager:
             group["counts"][row["_id"]["status"]] = row["count"]
             group["filesize"] += row["filesize"]
             group["transferred_bytes"] += row["transferred"]
-            group["speed_bps"] += row["speed"]
+            # Only files moving now: finished ones can still hold their last speed
+            if row["_id"]["status"] in ("downloading", "uploading_tg"):
+                group["speed_bps"] += row["speed"]
+            # When files paused by Google Drive's daily limit resume by themselves
+            if row["_id"]["status"] == "paused_quota" and isinstance(row.get("resumes_at"), datetime):
+                at = row["resumes_at"]
+                at = at.replace(tzinfo=timezone.utc) if at.tzinfo is None else at.astimezone(timezone.utc)
+                group["resumes_at"] = at.replace(tzinfo=None).isoformat(timespec="seconds") + "Z"
         # Why files failed: the latest reason, so a folder doesn't just say "3 failed"
         for group_id, group in summaries.items():
             if group["counts"].get("failed"):

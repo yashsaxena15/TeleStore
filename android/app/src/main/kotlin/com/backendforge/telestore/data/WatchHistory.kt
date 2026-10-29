@@ -2,6 +2,7 @@ package com.backendforge.telestore.data
 
 import android.content.Context
 import com.backendforge.telestore.core.FileItem
+import com.backendforge.telestore.core.TeleStoreApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,11 +27,14 @@ data class WatchEntry(
     fun asFile() = FileItem(id = fileId, name = name, type = "video", size = size, path = path, thumbnail = thumbnail)
 }
 
-/** Kept on this phone only (SharedPreferences), at most the 200 most recent videos. */
+/**
+ * Kept on this phone only (SharedPreferences), at most the 200 most recent videos. Private Vault
+ * videos are never kept: Continue watching would show them outside the vault.
+ */
 class WatchHistory(context: Context) {
     private val prefs = context.getSharedPreferences("watch_history", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
-    private val _entries = MutableStateFlow(read())
+    private val _entries = MutableStateFlow(readWithoutVault())
     val entries: StateFlow<List<WatchEntry>> = _entries.asStateFlow()
 
     /** Videos started but not finished, newest first. */
@@ -44,17 +48,29 @@ class WatchHistory(context: Context) {
     }
 
     fun save(item: FileItem, positionMs: Long, durationMs: Long) {
-        if (durationMs <= 0) return
+        if (durationMs <= 0 || item.inVault) return
         val entry = WatchEntry(item.id, item.name, item.path, item.size, item.thumbnail, positionMs, durationMs)
         val list = (listOf(entry) + _entries.value.filterNot { it.fileId == item.id }).take(200)
         _entries.value = list
-        prefs.edit().putString(KEY, json.encodeToString(list)).apply()
+        write(list)
     }
 
     fun forget(fileId: String) {
         val list = _entries.value.filterNot { it.fileId == fileId }
         _entries.value = list
+        write(list)
+    }
+
+    private fun write(list: List<WatchEntry>) {
         prefs.edit().putString(KEY, json.encodeToString(list)).apply()
+    }
+
+    /** The saved list, minus vault videos saved before they were left out (forgotten for good). */
+    private fun readWithoutVault(): List<WatchEntry> {
+        val saved = read()
+        val kept = saved.filterNot { TeleStoreApi.inVault(it.path) }
+        if (kept.size != saved.size) write(kept)
+        return kept
     }
 
     private fun read(): List<WatchEntry> =

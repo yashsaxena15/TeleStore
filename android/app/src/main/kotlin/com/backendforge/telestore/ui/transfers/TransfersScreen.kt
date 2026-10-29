@@ -26,7 +26,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -53,6 +52,7 @@ import com.backendforge.telestore.core.ApiException
 import com.backendforge.telestore.core.GroupSummary
 import com.backendforge.telestore.core.RemoteTask
 import com.backendforge.telestore.core.RemoteTaskList
+import com.backendforge.telestore.core.TransferActivity
 import com.backendforge.telestore.data.AppContainer
 import com.backendforge.telestore.transfers.Direction
 import com.backendforge.telestore.transfers.PhoneTransfer
@@ -61,6 +61,7 @@ import com.backendforge.telestore.ui.components.formatBytes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.backendforge.telestore.ui.components.ProgressBar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -104,7 +105,15 @@ fun TransfersScreen(container: AppContainer, onAddLink: () -> Unit = {}) {
         }
     }
 
-    val running = phone.count { !it.status.finished && it.status != TransferStatus.PAUSED }
+    // Running, waiting, and paused by Google Drive's daily limit (which isn't "running")
+    val serverGroups = server?.groups.orEmpty()
+    val serverLoose = server?.tasks.orEmpty().filter { it.groupId == null || it.groupId !in serverGroups }
+    val activity = TransferActivity.summary(
+        running = phone.count { it.status == TransferStatus.RUNNING || it.status == TransferStatus.SAVING } +
+            serverLoose.count { it.status in RemoteTask.RUNNING } + serverGroups.values.sumOf { it.running },
+        waiting = phone.count { it.status == TransferStatus.QUEUED } + serverLoose.count { it.status == "queued" } + serverGroups.values.sumOf { it.waiting },
+        paused = serverLoose.count { it.status == "paused_quota" } + serverGroups.values.sumOf { it.pausedByGoogle },
+    )
     Scaffold(
         floatingActionButton = {
             ExtendedFloatingActionButton(onClick = onAddLink, icon = { Icon(Icons.Filled.Link, contentDescription = null) }, text = { Text("Add from link") })
@@ -114,9 +123,8 @@ fun TransfersScreen(container: AppContainer, onAddLink: () -> Unit = {}) {
                 title = {
                     Column {
                         Text("Transfers")
-                        val activeServer = server?.let { s -> s.tasks.count { it.isActive } + s.groups.values.sumOf { it.active } } ?: 0
                         Text(
-                            "${running + activeServer} running · they keep going with the app closed",
+                            activity.ifEmpty { "Nothing running" },
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -249,13 +257,16 @@ private fun PhoneRow(t: PhoneTransfer, onPause: () -> Unit, onResume: () -> Unit
         }
         if (!t.status.finished) {
             if (t.status == TransferStatus.SAVING || (t.status == TransferStatus.RUNNING && t.size <= 0)) {
-                LinearProgressIndicator(Modifier.fillMaxWidth())
+                ProgressBar(Modifier.fillMaxWidth())
             } else {
-                LinearProgressIndicator(progress = { t.progress }, modifier = Modifier.fillMaxWidth())
+                ProgressBar(progress = { t.progress }, modifier = Modifier.fillMaxWidth())
             }
         }
     }
 }
+
+/** Amber: waiting for Google Drive's limit (the website uses its warning colour the same way). */
+private val PausedColor = Color(0xFFF5B942)
 
 @Composable
 private fun GroupRow(name: String, summary: GroupSummary, running: List<RemoteTask>, onCancel: () -> Unit, onResume: () -> Unit) {
@@ -270,15 +281,32 @@ private fun GroupRow(name: String, summary: GroupSummary, running: List<RemoteTa
                 if (summary.failed > 0) {
                     Text(summary.error ?: "The server didn't say why.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 }
+                // Waiting for Google Drive's 24-hour download limit, not running
+                if (summary.pausedByGoogle > 0) {
+                    val resumes = TransferActivity.resumes(summary.resumesAt) ?: "resumes by itself"
+                    Text(
+                        "${summary.pausedByGoogle} paused by Google Drive's download limit · $resumes",
+                        style = MaterialTheme.typography.bodySmall, color = PausedColor, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
-        LinearProgressIndicator(progress = { if (summary.total > 0) summary.done.toFloat() / summary.total else 0f }, modifier = Modifier.fillMaxWidth())
+        ProgressBar(progress = { if (summary.total > 0) summary.done.toFloat() / summary.total else 0f }, modifier = Modifier.fillMaxWidth())
         running.take(2).forEach {
             Text("↳ ${it.filename ?: "file"} · ${(it.progress ?: 0.0).toInt()}%", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (summary.active == 0 && summary.done < summary.total) OutlinedButton(onClick = onResume) { Text(if (summary.failed > 0) "Retry failed" else "Resume") }
+            // Nothing moving and files left: start them again (paused ones try Google again right away)
+            if (summary.running == 0 && summary.waiting == 0 && summary.done < summary.total) {
+                OutlinedButton(onClick = onResume) {
+                    Text(when {
+                        summary.pausedByGoogle > 0 -> "Resume now"
+                        summary.failed > 0 -> "Retry failed"
+                        else -> "Resume"
+                    })
+                }
+            }
             if (summary.active > 0) OutlinedButton(onClick = onCancel) { Text("Cancel all", color = MaterialTheme.colorScheme.error) }
         }
     }
@@ -307,7 +335,7 @@ private fun ServerRow(task: RemoteTask, onCancel: () -> Unit, onRetry: () -> Uni
             if (task.isFailed) IconButton(onClick = onRetry) { Icon(Icons.Filled.Refresh, contentDescription = "Retry") }
             if (task.isActive) IconButton(onClick = onCancel) { Icon(Icons.Filled.Close, contentDescription = "Cancel") }
         }
-        if (task.isActive) LinearProgressIndicator(progress = { ((task.progress ?: 0.0) / 100).toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+        if (task.isActive) ProgressBar(progress = { ((task.progress ?: 0.0) / 100).toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
     }
 }
 
@@ -333,7 +361,7 @@ private fun ArchiveRow(task: com.backendforge.telestore.core.ArchiveTask, onCanc
             if (task.active) TextButton(onClick = onCancel) { Text("Cancel") }
         }
         if (task.active) {
-            androidx.compose.material3.LinearProgressIndicator(progress = { (task.percent / 100).toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+            ProgressBar(progress = { (task.percent / 100).toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
         }
     }
 }

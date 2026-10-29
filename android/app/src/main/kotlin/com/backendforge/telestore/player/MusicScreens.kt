@@ -64,7 +64,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
@@ -115,6 +114,7 @@ import com.backendforge.telestore.ui.components.rememberPullDownState
 import com.backendforge.telestore.ui.components.swipeSideways
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import com.backendforge.telestore.ui.components.ProgressBar
 
 private val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 private val SLEEP = listOf(0 to "Off", 15 to "15 minutes", 30 to "30 minutes", 45 to "45 minutes", 60 to "1 hour", -1 to "End of song")
@@ -129,7 +129,7 @@ fun MiniPlayer(state: MusicState, controller: MusicController, onOpen: () -> Uni
     Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, tonalElevation = 2.dp) {
         Column {
             val progress = if (state.durationMs > 0) (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f) else 0f
-            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(2.dp))
+            ProgressBar(progress = { progress }, modifier = Modifier.fillMaxWidth().height(2.dp))
             Row(
                 Modifier.fillMaxWidth()
                     .miniPlayerSwipes(onNext = controller::next, onPrevious = controller::previous, onOpen = onOpen)

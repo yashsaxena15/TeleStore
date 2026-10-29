@@ -3,6 +3,7 @@ package com.backendforge.telestore.player
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.os.Bundle
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -107,15 +108,23 @@ class MusicController(private val context: Context) {
         val mediaItems = items.map { item ->
             val uri = localCopy(item) ?: Uri.parse(api.media.file(item).toString())
             val folder = item.path.trimEnd('/').substringAfterLast('/').ifEmpty { "TeleStore" }
+            val artwork = api.media.picture(item)?.toString()
             MediaItem.Builder()
                 .setMediaId(item.id)
                 .setUri(uri)
                 .setRequestMetadata(MediaItem.RequestMetadata.Builder().setMediaUri(uri).build())
                 .setMediaMetadata(
+                    // The lock screen, notification and Bluetooth/car displays get the public name (a
+                    // vault song's stays private); the app's own screens read the real one from the extras
                     MediaMetadata.Builder()
-                        .setTitle(PlayQueue.title(item))
-                        .setArtist(folder)
-                        .setArtworkUri(api.media.picture(item)?.let { Uri.parse(it.toString()) })
+                        .setTitle(PlayQueue.publicTitle(item))
+                        .setArtist(PlayQueue.publicSubtitle(item))
+                        .setArtworkUri(if (item.inVault) null else artwork?.let(Uri::parse))
+                        .setExtras(Bundle().apply {
+                            putString(APP_TITLE, PlayQueue.title(item))
+                            putString(APP_ARTIST, folder)
+                            putString(APP_ARTWORK, artwork)
+                        })
                         .build(),
                 )
                 .build()
@@ -179,15 +188,16 @@ class MusicController(private val context: Context) {
     private fun publish() {
         val c = controller ?: return
         val meta = c.mediaMetadata
+        val app = c.currentMediaItem?.mediaMetadata?.extras
         val queue = (0 until c.mediaItemCount).map { i ->
             val m = c.getMediaItemAt(i).mediaMetadata
-            QueueEntry(m.title?.toString().orEmpty(), m.artist?.toString().orEmpty())
+            QueueEntry(m.extras?.getString(APP_TITLE) ?: m.title?.toString().orEmpty(), m.extras?.getString(APP_ARTIST) ?: m.artist?.toString().orEmpty())
         }
         _state.value = _state.value.copy(
             hasMedia = c.mediaItemCount > 0,
-            title = meta.title?.toString().orEmpty(),
-            artist = meta.artist?.toString().orEmpty(),
-            artworkUri = meta.artworkUri,
+            title = app?.getString(APP_TITLE) ?: meta.title?.toString().orEmpty(),
+            artist = app?.getString(APP_ARTIST) ?: meta.artist?.toString().orEmpty(),
+            artworkUri = app?.getString(APP_ARTWORK)?.let(Uri::parse) ?: meta.artworkUri,
             isPlaying = c.isPlaying,
             buffering = c.playbackState == Player.STATE_BUFFERING,
             positionMs = c.currentPosition.coerceAtLeast(0),
@@ -209,5 +219,12 @@ class MusicController(private val context: Context) {
                 }
             }
         }
+    }
+
+    private companion object {
+        // The real name, folder and cover, for the app's own screens (see play)
+        const val APP_TITLE = "telestore.title"
+        const val APP_ARTIST = "telestore.artist"
+        const val APP_ARTWORK = "telestore.artwork"
     }
 }

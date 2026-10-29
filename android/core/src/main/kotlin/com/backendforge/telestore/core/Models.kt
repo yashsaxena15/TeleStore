@@ -65,6 +65,8 @@ data class FileItem(
     val kind: FileKind get() = FileKinds.of(this)
     /** Can't be trashed or deleted: protected itself or inside a protected folder. */
     val isProtected: Boolean get() = protected || protectedBy != null
+    /** In the Private Vault: never named or remembered outside it (Continue watching, lock screen). */
+    val inVault: Boolean get() = isVault || TeleStoreApi.inVault(path)
 }
 
 @Serializable

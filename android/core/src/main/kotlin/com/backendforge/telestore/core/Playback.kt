@@ -97,4 +97,10 @@ object PlayQueue {
         val dot = item.name.lastIndexOf('.')
         return if (dot > 0) item.name.substring(0, dot) else item.name
     }
+
+    /** What the lock screen, notification and Bluetooth/car displays may show: a vault item's name stays private. */
+    fun publicTitle(item: FileItem): String = if (!item.inVault) title(item) else if (item.kind == FileKind.AUDIO) "Private audio" else "Private video"
+
+    /** The folder shown under the title outside the app; nothing for a vault item. */
+    fun publicSubtitle(item: FileItem): String = if (item.inVault) "TeleStore" else item.path.trimEnd('/').substringAfterLast('/').ifEmpty { "TeleStore" }
 }

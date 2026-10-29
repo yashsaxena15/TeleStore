@@ -8,6 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ArrowUpDown, ArrowUp, ArrowDown, CloudDownload, Pause, Play, X, ChevronUp, ArrowRight, Magnet, FolderArchive } from "lucide-react";
 import { groupRemoteTransfers } from "./transferGrouping";
+import { activitySummary } from "./transferRows";
 
 const ACTIVE_STATUSES = ["uploading", "downloading", "uploading_tg", "paused", "queued", "paused_quota", "discovering"];
 const formatSpeed = (bytesPerSec) => (bytesPerSec > 0 ? `${formatBytes(bytesPerSec)}/s` : "");
@@ -75,7 +76,7 @@ const TransferItem = ({ item, actions }) => {
 export const DockTransfers = ({ alone = false }) => {
     const navigate = useNavigate();
     const manager = useTransferManager();
-    const { uploads, downloads, remoteTransfers, activeUploads, activeDownloads, activeRemote, totalActiveCount, stats, pauseAll, resumeAll } = manager;
+    const { uploads, downloads, remoteTransfers, activeUploads, activeDownloads, activeRemote, totalActiveCount, busyCount, stats, pauseAll, resumeAll } = manager;
     const [open, setOpen] = useState(false);
     const { groupedRemoteItems, singleRemoteItems } = groupRemoteTransfers(remoteTransfers);
     const items = [
@@ -89,15 +90,15 @@ export const DockTransfers = ({ alone = false }) => {
     if (!visible)
         return null;
     const speed = items.reduce((sum, i) => sum + (["uploading", "downloading", "uploading_tg"].includes(i.status) ? i.speed || 0 : 0), 0);
-    const summary = `${totalActiveCount || items.length} active${speed > 0 ? ` · ${formatSpeed(speed)}` : ""}`;
+    const summary = `${activitySummary({ running: stats.running, waiting: stats.waiting, paused: stats.pausedByGoogle }) || `${items.length} active`}${speed > 0 ? ` · ${formatSpeed(speed)}` : ""}`;
     return (<Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button className={cn("h-10 rounded-lg border border-border bg-muted/40 hover:bg-muted flex items-center gap-2 px-2.5 text-xs font-mono shrink-0 transition-colors", alone && "flex-1 justify-between")} aria-label={`Transfers: ${summary}`} aria-expanded={open}>
           <span className="flex items-center gap-2 min-w-0">
-            <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", totalActiveCount > 0 ? "bg-success animate-pulse" : "bg-muted-foreground/60")}/>
+            <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", busyCount > 0 ? "bg-success animate-pulse" : "bg-muted-foreground/60")}/>
             <ArrowUpDown className="w-3.5 h-3.5 shrink-0"/>
             <span className={cn("truncate", !alone && "hidden sm:inline")}>{summary}</span>
-            {!alone && <span className="sm:hidden">{totalActiveCount || items.length}</span>}
+            {!alone && <span className="sm:hidden">{busyCount || items.length}</span>}
           </span>
           <ChevronUp className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform shrink-0", open && "rotate-180")}/>
         </button>

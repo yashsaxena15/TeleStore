@@ -23,7 +23,7 @@ const NewTransferMenu = ({ onPick }) => (<DropdownMenu>
       {TRANSFER_SOURCES.map(({ id, label, icon: Icon }) => (<DropdownMenuItem key={id} onSelect={() => onPick(id)} className="gap-2"><Icon className="w-4 h-4"/>{label}</DropdownMenuItem>))}
     </DropdownMenuContent>
   </DropdownMenu>);
-import { buildTransferItems, countByFilter, matchesFilter, TRANSFER_FILTERS, TRANSFERRING_STATUSES, formatEta, kindLabel, statusInfo, rowActions } from "./transferRows";
+import { buildTransferItems, countByFilter, matchesFilter, TRANSFER_FILTERS, TRANSFERRING_STATUSES, formatEta, kindLabel, statusInfo, rowActions, activitySummary } from "./transferRows";
 
 const TONE_CHIP = {
     primary: "bg-primary/15 text-primary",
@@ -166,7 +166,7 @@ export const Transfers = ({ onNewTransfer }) => {
         }
     };
     return (<div className="flex-1 flex flex-col overflow-hidden bg-background">
-      <PageHeader icon={ArrowUpDown} title="Transfers" subtitle={stats.totalActive > 0 ? `${stats.totalActive} active · uploads, downloads and cloud leeches` : "Uploads, downloads and cloud leeches"} actions={<>
+      <PageHeader icon={ArrowUpDown} title="Transfers" subtitle={activitySummary({ running: stats.running, waiting: stats.waiting, paused: stats.pausedByGoogle }) || "Uploads, downloads and cloud leeches"} actions={<>
           {onNewTransfer && <NewTransferMenu onPick={onNewTransfer}/>}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

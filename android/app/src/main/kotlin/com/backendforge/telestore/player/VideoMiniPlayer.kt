@@ -17,7 +17,6 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -36,6 +35,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import com.backendforge.telestore.ui.components.miniPlayerSwipes
 import com.backendforge.telestore.ui.components.rememberHaptics
+import com.backendforge.telestore.ui.components.ProgressBar
 
 /**
  * A minimized video above the tabs: the picture keeps playing in a small window. Tap or swipe up
@@ -49,7 +49,7 @@ fun VideoMiniPlayer(vm: VideoViewModel, onOpen: () -> Unit, onClose: () -> Unit)
     Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, tonalElevation = 2.dp) {
         Column {
             val progress = if (state.durationMs > 0) (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f) else 0f
-            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(2.dp))
+            ProgressBar(progress = { progress }, modifier = Modifier.fillMaxWidth().height(2.dp))
             Row(
                 Modifier
                     .fillMaxWidth()

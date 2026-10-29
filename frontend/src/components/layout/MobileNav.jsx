@@ -30,7 +30,7 @@ export const MobileNav = ({ selectedFilter, activeView, onNavigateView, onAction
         window.addEventListener(OPEN_NOTIFICATIONS_EVENT, open);
         return () => window.removeEventListener(OPEN_NOTIFICATIONS_EVENT, open);
     }, []);
-    const { totalActiveCount } = useTransferManager();
+    const { busyCount } = useTransferManager();
     const cloudAccounts = useCloudAccounts();
     const isOwner = useIsOwner();
     const profile = useUserProfile();
@@ -50,7 +50,7 @@ export const MobileNav = ({ selectedFilter, activeView, onNavigateView, onAction
             </button>
           </NewMenu>
         </div>
-        <Tab icon={ArrowUpDown} label="Transfers" active={activeView === "transfers"} onClick={() => go("transfers")} badge={totalActiveCount}/>
+        <Tab icon={ArrowUpDown} label="Transfers" active={activeView === "transfers"} onClick={() => go("transfers")} badge={busyCount}/>
         <Tab icon={LayoutGrid} label="More" active={moreActive} onClick={() => setMoreOpen(true)} badge={unread}/>
       </nav>
 

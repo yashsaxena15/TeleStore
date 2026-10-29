@@ -77,7 +77,7 @@ export function groupRemoteTransfers(remoteTransfers) {
         }
         const destPath = subItems[0].destination_path || '/Home';
         const cooldownItem = subItems.find(i => i.cooldown_until);
-        const cooldownUntil = cooldownItem?.cooldown_until;
+        const cooldownUntil = cooldownItem?.cooldown_until || summary?.resumes_at;
         let phase = '';
         if (status === 'discovering') {
             phase = 'Analyzing folder structure in background...';
@@ -147,10 +147,18 @@ export function groupRemoteTransfers(remoteTransfers) {
 
 const ACTIVE_REMOTE = ['queued', 'downloading', 'uploading_tg', 'discovering', 'paused_quota'];
 
+const RUNNING_REMOTE = ['downloading', 'uploading_tg', 'discovering'];
+
 // Active, completed and failed remote tasks: a folder leech's rows are only a sample of its files,
-// so its summary is counted once instead
+// so its summary is counted once instead. Of the active ones: running, waiting, and paused by
+// Google Drive's daily limit (which aren't running, so they aren't shown as such)
 export function countRemoteTasks(remoteTransfers) {
-    const counts = { active: 0, completed: 0, failed: 0 };
+    const counts = { active: 0, completed: 0, failed: 0, running: 0, waiting: 0, pausedQuota: 0 };
+    const add = (status, n) => {
+        if (RUNNING_REMOTE.includes(status)) counts.running += n;
+        else if (status === 'queued') counts.waiting += n;
+        else if (status === 'paused_quota') counts.pausedQuota += n;
+    };
     const seenGroups = new Set();
     remoteTransfers.forEach(r => {
         const summary = r.group_id && r.group_summary;
@@ -158,13 +166,15 @@ export function countRemoteTasks(remoteTransfers) {
             if (seenGroups.has(r.group_id))
                 return;
             seenGroups.add(r.group_id);
-            ACTIVE_REMOTE.forEach(s => { counts.active += summary.counts[s] || 0; });
+            ACTIVE_REMOTE.forEach(s => { counts.active += summary.counts[s] || 0; add(s, summary.counts[s] || 0); });
             counts.completed += summary.counts.completed || 0;
             counts.failed += summary.counts.failed || 0;
             return;
         }
-        if (ACTIVE_REMOTE.includes(r.status))
+        if (ACTIVE_REMOTE.includes(r.status)) {
             counts.active += 1;
+            add(r.status, 1);
+        }
         else if (r.status === 'completed')
             counts.completed += 1;
         else if (r.status === 'failed')
