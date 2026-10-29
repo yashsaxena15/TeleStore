@@ -64,8 +64,10 @@ class RemoteTransferManager:
             # Folder leeches can queue tens of thousands of tasks; keep the Transfers list and claims fast
             coll.create_index([("user_id", 1), ("status", 1), ("group_id", 1)])
             coll.create_index([("group_id", 1), ("status", 1)])
+            # Only this server's own tasks: a worker machine carries on with its own (the watchdog
+            # takes them back if it went quiet)
             coll.update_many(
-                {"status": {"$in": ["downloading", "uploading_tg"]}},
+                {"status": {"$in": ["downloading", "uploading_tg"]}, "claimed_by": {"$in": [None, "master-vm1"]}},
                 {
                     "$set": {
                         "status": "queued",
@@ -125,7 +127,7 @@ class RemoteTransferManager:
                 stale_threshold = now_utc - timedelta(seconds=120)
                 abandoned_res = coll.update_many(
                     {
-                        "status": "downloading",
+                        "status": {"$in": ["downloading", "uploading_tg"]},
                         "claimed_by": {"$nin": [None, "master-vm1"]},
                         "updated_at": {"$lte": stale_threshold}
                     },
@@ -156,9 +158,9 @@ class RemoteTransferManager:
                     for item in queued_tasks:
                         task_id = item["task_id"]
                         if task_id not in self.active_tasks:
-                            # Claim task locally
-                            coll.update_one(
-                                {"task_id": task_id, "status": "queued"},
+                            # Claim task locally (only if no worker took it meanwhile)
+                            claimed = coll.update_one(
+                                {"task_id": task_id, "status": "queued", "claimed_by": {"$exists": False}},
                                 {
                                     "$set": {
                                         "status": "downloading",
@@ -169,6 +171,8 @@ class RemoteTransferManager:
                                     }
                                 }
                             )
+                            if not claimed.modified_count:
+                                continue
                             # Launch task wrapper
                             t = asyncio.create_task(self._execute_task_wrapper(item))
                             self.active_tasks[task_id] = t

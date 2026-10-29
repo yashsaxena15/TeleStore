@@ -211,6 +211,16 @@ async def claim_task(
     }
 
 
+def _still_theirs(task_id: str, worker_id: str) -> dict:
+    """The task, while [worker_id] may still report on it: claimed by it, or put back in the queue
+    (watchdog, server restart) while it was busy and not started again elsewhere. A task another
+    machine has taken, or that was cancelled, failed or finished, isn't theirs any more."""
+    return {"task_id": task_id, "$or": [
+        {"claimed_by": worker_id, "status": {"$in": ["downloading", "uploading_tg"]}},
+        {"claimed_by": {"$exists": False}, "status": "queued"},
+    ]}
+
+
 @router.post("/update-progress")
 async def update_progress(
     body: ProgressUpdateModel,
@@ -220,15 +230,12 @@ async def update_progress(
     coll = get_remote_db()["RemoteTransfers"]
     now = datetime.now(timezone.utc)
 
-    # Check if task was cancelled
-    task = coll.find_one({"task_id": body.task_id}, {"status": 1})
-    if task and task.get("status") in ["cancelled", "failed"]:
-        return {"status": "cancelled"}
-
-    coll.update_one(
-        {"task_id": body.task_id},
+    res = coll.update_one(
+        _still_theirs(body.task_id, body.worker_id),
         {
             "$set": {
+                "status": "downloading",
+                "claimed_by": body.worker_id,
                 "transferred_bytes": body.transferred_bytes,
                 "filesize": body.filesize,
                 "speed_bps": body.speed_bps,
@@ -239,6 +246,8 @@ async def update_progress(
             }
         }
     )
+    if not res.matched_count:  # cancelled, or another machine has it now: the worker stops
+        return {"status": "cancelled"}
     return {"status": "ok"}
 
 
@@ -250,6 +259,15 @@ async def complete_task(
     """Called by the worker when file download and Telegram upload are successfully finished."""
     coll = get_remote_db()["RemoteTransfers"]
     now = datetime.now(timezone.utc)
+
+    # Only the machine that has the task saves it: a late report (another machine took the task over)
+    # would add a second copy of the file
+    if not coll.find_one_and_update(
+        _still_theirs(body.task_id, body.worker_id),
+        {"$set": {"status": "uploading_tg", "claimed_by": body.worker_id, "phase": "Saving…", "updated_at": now}},
+    ):
+        logger.warning(f"[WORKER_LATE] Task {body.task_id} finished on {body.worker_id}, but it isn't theirs any more. Ignored.")
+        return {"status": "ignored"}
 
     # Multi-Range Chunk Part completion:
     if body.is_range_part and body.part_info:
@@ -346,13 +364,18 @@ async def fail_task(
     """Called by worker if download or upload failed."""
     coll = get_remote_db()["RemoteTransfers"]
     now = datetime.now(timezone.utc)
+    theirs = _still_theirs(body.task_id, body.worker_id)
+
+    if not coll.find_one(theirs, {"_id": 1}):  # another machine has it now: its result counts
+        logger.warning(f"[WORKER_LATE] Task {body.task_id} failed on {body.worker_id}, but it isn't theirs any more. Ignored.")
+        return {"status": "ignored"}
 
     if body.is_quota_error:
         # Put task in 24h cooldown paused_quota
         cooldown_until = now + timedelta(hours=24)
         target_time = cooldown_until.strftime("%H:%M UTC")
         coll.update_one(
-            {"task_id": body.task_id},
+            theirs,
             {
                 "$set": {
                     "status": "paused_quota",
@@ -367,7 +390,7 @@ async def fail_task(
         logger.warning(f"[WORKER_QUOTA] Task {body.task_id} hit Google Drive quota on {body.worker_id}. Paused for 24h.")
     else:
         coll.update_one(
-            {"task_id": body.task_id},
+            theirs,
             {
                 "$set": {
                     "status": "failed",

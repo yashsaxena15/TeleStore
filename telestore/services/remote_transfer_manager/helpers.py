@@ -52,12 +52,18 @@ _GOOGLE_ERRORS = (
 )
 
 
+# A bare timeout, as older workers report it ("TimeoutError()")
+_TIMEOUT = re.compile(r"^\W*([\w.]+\.)?(TimeoutError|ServerTimeoutError|ReadTimeout|ConnectTimeout)\b")
+
+
 def friendly_error(raw: Optional[str]) -> Optional[str]:
     """One readable sentence for errors that arrive as raw HTTP/JSON (mostly Google Drive's);
     anything else is returned as it was."""
     if not raw:
         return raw
     text = str(raw)
+    if _TIMEOUT.search(text):
+        return "The transfer timed out (the connection stopped sending data). Tap Retry."
     looks_raw = "{" in text or "HTTP 4" in text or "HTTP 5" in text
     if not looks_raw:
         return text
