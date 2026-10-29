@@ -671,6 +671,9 @@ class TeleStoreApi(
         const val DEVICE = "android"
         const val HOME = "/Home"
         const val VAULT = "/Vault"
+
+        /** [path] is the Private Vault or a folder inside it. */
+        fun inVault(path: String): Boolean = path == VAULT || path.startsWith("$VAULT/")
         private val JSON = "application/json".toMediaType()
         private val OCTET = "application/octet-stream".toMediaType()
         private val EMPTY_JSON = "{}".toRequestBody(JSON)

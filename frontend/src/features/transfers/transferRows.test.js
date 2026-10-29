@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildTransferItems, countByFilter, matchesFilter, formatEta, statusInfo, rowActions, kindLabel } from "./transferRows";
+import { buildTransferItems, countByFilter, matchesFilter, formatEta, statusInfo, rowActions, kindLabel, activitySummary } from "./transferRows";
 import { countRemoteTasks } from "./transferGrouping";
 
 const uploads = [
@@ -80,6 +80,27 @@ describe("a folder leech sent as a summary", () => {
         expect(group.phase).toBe("2 of 3 files failed: Google Drive refused the download (its sign-in had expired). Tap Retry.");
     });
     it("counts active, completed and failed from the summary once", () => {
-        expect(countRemoteTasks([...rows, { task_id: "s", status: "queued" }])).toEqual({ active: 31002, completed: 6800, failed: 199 });
+        expect(countRemoteTasks([...rows, { task_id: "s", status: "queued" }])).toMatchObject({ active: 31002, completed: 6800, failed: 199 });
+    });
+    it("doesn't count files paused by Google's limit as running", () => {
+        const summary = { total: 3000, counts: { completed: 326, downloading: 1, queued: 2, paused_quota: 2641 }, filesize: 0, transferred_bytes: 0, speed_bps: 0 };
+        const counts = countRemoteTasks([
+            { task_id: "a", status: "downloading", group_id: "g", group_summary: summary },
+            { task_id: "b", status: "queued", group_id: "g", group_summary: summary },
+            { task_id: "c", status: "uploading_tg" },
+        ]);
+        expect(counts).toMatchObject({ active: 2645, running: 2, waiting: 2, pausedQuota: 2641 });
+        expect(activitySummary({ running: counts.running, waiting: counts.waiting, paused: counts.pausedQuota })).toBe("2 running · 2 waiting · 2,641 paused by Google's limit");
+    });
+    it("says nothing when nothing is left to do", () => {
+        expect(activitySummary({})).toBe("");
+        expect(activitySummary({ paused: 5 })).toBe("5 paused by Google's limit");
+    });
+    it("shows when a paused folder resumes, from the server's summary", () => {
+        const summary = { total: 2, counts: { completed: 1, paused_quota: 1 }, filesize: 0, transferred_bytes: 0, speed_bps: 0, resumes_at: "2026-10-30T10:38:00Z" };
+        const group = buildTransferItems([], [], [{ task_id: "p", id: "p", filename: "a.zip", status: "completed", group_id: "q", group_name: "Tools", group_summary: summary }]).find((i) => i.id === "q");
+        expect(group.status).toBe("paused_quota");
+        expect(group.cooldown_until).toBe("2026-10-30T10:38:00Z");
+        expect(group.phase).toMatch(/^Google Drive quota limit reached\. Auto-resumes at /);
     });
 });

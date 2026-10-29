@@ -77,7 +77,7 @@ export const Sidebar = ({ selectedFilter, activeView = "files", onNavigateView, 
     const cloudAccounts = useCloudAccounts();
     const isOwner = useIsOwner();
     const profile = useUserProfile();
-    const { totalActiveCount } = useTransferManager();
+    const { busyCount } = useTransferManager();
     const collapsed = isCollapsed;
 
     const [disconnectingAccount, setDisconnectingAccount] = useState(null);
@@ -178,9 +178,9 @@ export const Sidebar = ({ selectedFilter, activeView = "files", onNavigateView, 
         <button onClick={() => onNavigateView("transfers")} className={`${navClass(activeView === "transfers", collapsed)} relative`} title={collapsed ? "Transfers" : undefined} aria-label="Transfers">
           <ArrowUpDown className="w-4 h-4 shrink-0"/>
           {!collapsed && <span className="truncate">Transfers</span>}
-          {totalActiveCount > 0 && (collapsed
+          {busyCount > 0 && (collapsed
             ? <span className="absolute top-1 right-1.5 w-2 h-2 rounded-full bg-primary animate-pulse"/>
-            : <span className="ml-auto text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">{totalActiveCount}</span>)}
+            : <span className="ml-auto text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">{busyCount}</span>)}
         </button>
         <button onClick={() => onNavigateView("storage")} className={navClass(activeView === "storage", collapsed)} title={collapsed ? "Storage" : undefined} aria-label="Storage">
           <HardDrive className="w-4 h-4 shrink-0"/>

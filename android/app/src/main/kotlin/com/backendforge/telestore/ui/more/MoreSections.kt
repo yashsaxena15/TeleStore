@@ -10,7 +10,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -37,6 +36,7 @@ import com.backendforge.telestore.ui.components.formatBytes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.util.Locale
+import com.backendforge.telestore.ui.components.ProgressBar
 
 @Composable
 fun SectionLabel(text: String) {
@@ -83,7 +83,7 @@ fun StorageSection(container: AppContainer) {
                     style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
                 )
                 if (s.quotaBytes > 0) {
-                    LinearProgressIndicator(progress = { s.usedFraction.coerceAtLeast(0.005f) }, modifier = Modifier.fillMaxWidth())
+                    ProgressBar(progress = { s.usedFraction.coerceAtLeast(0.005f) }, modifier = Modifier.fillMaxWidth())
                     Text("${formatBytes(s.freeBytes)} free", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Text(

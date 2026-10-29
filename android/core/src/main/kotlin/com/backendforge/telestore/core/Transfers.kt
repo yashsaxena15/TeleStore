@@ -13,6 +13,12 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
+import java.text.NumberFormat
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import okhttp3.Request
 import java.io.IOException
 import java.io.OutputStream
@@ -78,6 +84,32 @@ data class RemoteTask(
 
     companion object {
         val ACTIVE = setOf("queued", "downloading", "uploading_tg", "discovering", "paused_quota")
+        /** Actually moving right now (not waiting or paused). */
+        val RUNNING = setOf("downloading", "uploading_tg", "discovering")
+    }
+}
+
+/** The Transfers header's words, the same as the website's. */
+object TransferActivity {
+    /** "2 running · 5 waiting · 2,641 paused by Google's limit"; empty when nothing is left to do. */
+    fun summary(running: Int, waiting: Int, paused: Int): String {
+        val n = NumberFormat.getIntegerInstance(Locale.ENGLISH)
+        return listOfNotNull(
+            "${n.format(running)} running".takeIf { running > 0 },
+            "${n.format(waiting)} waiting".takeIf { waiting > 0 },
+            "${n.format(paused)} paused by Google's limit".takeIf { paused > 0 },
+        ).joinToString(" · ")
+    }
+
+    /** "resumes at 4:08 PM", or "resumes tomorrow at 4:08 PM", from the server's UTC time; null when unknown. */
+    fun resumes(isoUtc: String?, zone: ZoneId = ZoneId.systemDefault(), today: LocalDate = LocalDate.now(zone), locale: Locale = Locale.getDefault()): String? {
+        val at = isoUtc?.let { runCatching { Instant.parse(it) }.getOrNull() }?.atZone(zone) ?: return null
+        val time = at.format(DateTimeFormatter.ofPattern("h:mm a", locale))
+        return when (at.toLocalDate()) {
+            today -> "resumes at $time"
+            today.plusDays(1) -> "resumes tomorrow at $time"
+            else -> "resumes ${at.format(DateTimeFormatter.ofPattern("d MMM", locale))} at $time"
+        }
     }
 }
 
@@ -91,10 +123,16 @@ data class GroupSummary(
     @SerialName("speed_bps") val speed: Double = 0.0,
     /** Why files failed (the latest reason), when some did. */
     val error: String? = null,
+    /** When files paused by Google Drive's download limit resume by themselves (UTC, ISO), when some are. */
+    @SerialName("resumes_at") val resumesAt: String? = null,
 ) {
     val done: Int get() = counts["completed"] ?: 0
     val failed: Int get() = counts["failed"] ?: 0
     val active: Int get() = RemoteTask.ACTIVE.sumOf { counts[it] ?: 0 }
+    val running: Int get() = RemoteTask.RUNNING.sumOf { counts[it] ?: 0 }
+    val waiting: Int get() = counts["queued"] ?: 0
+    /** Waiting for Google Drive's 24-hour download limit to reset. */
+    val pausedByGoogle: Int get() = counts["paused_quota"] ?: 0
 }
 
 @Serializable

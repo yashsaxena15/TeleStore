@@ -254,10 +254,12 @@ class VideoViewModel(private val container: AppContainer) : ViewModel() {
             .setMediaId(item.id)
             .setUri(local?.toString() ?: next.url.toString())
             .setMediaMetadata(
+                // Shown on the lock screen, in the notification and on Bluetooth/car displays: a vault
+                // video's name and picture stay private (the player's own screen shows the real name)
                 MediaMetadata.Builder()
-                    .setTitle(PlayQueue.title(item))
-                    .setArtist(item.path.trimEnd('/').substringAfterLast('/').ifEmpty { "TeleStore" })
-                    .setArtworkUri(api.media.picture(item)?.let { Uri.parse(it.toString()) })
+                    .setTitle(PlayQueue.publicTitle(item))
+                    .setArtist(PlayQueue.publicSubtitle(item))
+                    .setArtworkUri(if (item.inVault) null else api.media.picture(item)?.let { Uri.parse(it.toString()) })
                     .build(),
             )
             .build()

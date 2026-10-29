@@ -31,7 +31,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -72,6 +71,7 @@ import com.backendforge.telestore.ui.components.FolderPickerSheet
 import com.backendforge.telestore.ui.components.formatBytes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import com.backendforge.telestore.ui.components.ProgressBar
 
 /** Runs [block], turning failures into a message for the user. */
 private suspend fun <T> attempt(onError: (String) -> Unit, block: suspend () -> T): T? = try {
@@ -126,7 +126,7 @@ fun DriveAccountsScreen(container: AppContainer, onBack: () -> Unit, onOpen: (Cl
                             TextButton(onClick = { disconnect = acc }) { Text("Disconnect") }
                         }
                         quotas[acc.id]?.let { q ->
-                            LinearProgressIndicator(progress = { q.usedFraction }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp))
+                            ProgressBar(progress = { q.usedFraction }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp))
                             Text("${formatBytes(q.usage)} of ${formatBytes(q.limit)} used", style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
                         }

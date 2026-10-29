@@ -20,6 +20,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.ui.graphics.TransformOrigin
 import com.backendforge.telestore.ui.viewers.DocumentScreen
 import com.backendforge.telestore.ui.viewers.ArchiveScreen
+import com.backendforge.telestore.ui.components.PrivateWhile
 import com.backendforge.telestore.ui.components.rememberOpenElsewhere
 import android.net.Uri
 import com.backendforge.telestore.data.CrashReporter
@@ -75,6 +76,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -167,14 +169,18 @@ fun MainScreen(
     val currentRoute = navBackStackEntry?.destination?.route ?: ""
     val currentPathArg = navBackStackEntry?.arguments?.getString("path")
 
-    val selectedTab = when {
+    val routeTab = when {
         currentRoute.startsWith("home_") -> MainTab.HOME
         currentRoute.startsWith("photos_") -> MainTab.PHOTOS
         currentRoute.startsWith("files_") -> MainTab.FILES
         currentRoute == "transfers" -> MainTab.TRANSFERS
         currentRoute.startsWith("more_") -> MainTab.MORE
-        else -> MainTab.HOME
+        else -> null
     }
+    // Screens any tab can open (Playlists, Notifications, Vault…) keep the tab they were opened from lit
+    var lastTab by remember { mutableStateOf(MainTab.HOME) }
+    SideEffect { if (routeTab != null) lastTab = routeTab }
+    val selectedTab = routeTab ?: lastTab
 
     val isSearch = currentRoute == "search"
     // The players take the whole screen: no tabs, no mini player
@@ -206,6 +212,11 @@ fun MainScreen(
             lifecycleOwner.lifecycle.removeObserver(observer)
             videos.close()
         }
+    }
+    // A vault video keeps the window private (no screenshots, blank in Recents), full screen or minimized
+    video?.let { vm ->
+        val playing by vm.state.collectAsStateWithLifecycle()
+        PrivateWhile(playing.item?.inVault == true)
     }
 
     fun openVideo(queue: List<FileItem>, index: Int) {

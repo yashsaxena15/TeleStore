@@ -3,7 +3,6 @@ package com.backendforge.telestore.ui.vault
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.backendforge.telestore.ui.components.rememberHaptics
-import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,7 +50,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -69,9 +67,9 @@ import com.backendforge.telestore.core.TeleStoreApi
 import com.backendforge.telestore.core.VaultPin
 import com.backendforge.telestore.core.VaultStatus
 import com.backendforge.telestore.data.AppContainer
-import com.backendforge.telestore.player.findActivity
 import com.backendforge.telestore.ui.components.FileInfoSheet
 import com.backendforge.telestore.ui.components.FileRow
+import com.backendforge.telestore.ui.components.PrivateWhile
 import com.backendforge.telestore.ui.components.NewFolderDialog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -248,7 +246,6 @@ fun VaultScreen(
     onDownload: (FileItem) -> Unit,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
-    val activity = LocalContext.current.findActivity()
     val lifecycle = LocalLifecycleOwner.current
     var menu by remember { mutableStateOf<FileItem?>(null) }
     var info by remember { mutableStateOf<FileItem?>(null) }
@@ -257,14 +254,11 @@ fun VaultScreen(
     var recoveryEmail by remember { mutableStateOf(false) }
 
     // No screenshots, and a blank preview in Recents, while the vault is on screen; lock when the app is left
-    DisposableEffect(activity, lifecycle) {
-        activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    PrivateWhile(true)
+    DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) vm.lockQuietly() }
         lifecycle.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycle.lifecycle.removeObserver(observer)
-            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        }
+        onDispose { lifecycle.lifecycle.removeObserver(observer) }
     }
 
     val inSubfolder = state.step == VaultStep.OPEN && state.path.trimEnd('/') != TeleStoreApi.VAULT

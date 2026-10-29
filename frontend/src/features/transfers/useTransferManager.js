@@ -66,12 +66,19 @@ export const useTransferManager = () => {
     // Folder leeches send a summary instead of every file, so counts come from it
     const remoteCounts = useMemo(() => countRemoteTasks(remoteTransfers), [remoteTransfers]);
     const totalActiveCount = activeUploads.length + activeDownloads.length + remoteCounts.active;
+    // Moving now, waiting their turn, and paused by Google Drive's daily limit (not counted as busy)
+    const running = uploads.filter(u => u.status === 'uploading').length + downloads.filter(d => d.status === 'downloading').length + remoteCounts.running;
+    const waiting = uploads.filter(u => u.status === 'queued').length + downloads.filter(d => d.status === 'queued').length + remoteCounts.waiting;
+    const busyCount = running + waiting;
     const stats = useMemo(() => {
         return {
             activeUploads: activeUploads.length,
             activeDownloads: activeDownloads.length,
             activeRemote: remoteCounts.active,
             totalActive: totalActiveCount,
+            running,
+            waiting,
+            pausedByGoogle: remoteCounts.pausedQuota,
             completedUploads: uploads.filter(u => u.status === 'completed').length,
             completedDownloads: downloads.filter(d => d.status === 'completed').length,
             completedRemote: remoteCounts.completed,
@@ -80,7 +87,7 @@ export const useTransferManager = () => {
             failedRemote: remoteCounts.failed,
             pausedCount: uploads.filter(u => u.status === 'paused').length + downloads.filter(d => d.status === 'paused').length
         };
-    }, [uploads, downloads, remoteCounts, activeUploads, activeDownloads, totalActiveCount]);
+    }, [uploads, downloads, remoteCounts, activeUploads, activeDownloads, totalActiveCount, running, waiting]);
     // Upload Actions
     const pauseUpload = useCallback((id) => uploadManager.pauseUpload(id), []);
     const resumeUpload = useCallback((id) => uploadManager.resumeUpload(id), []);
@@ -163,6 +170,7 @@ export const useTransferManager = () => {
         activeDownloads,
         activeRemote,
         totalActiveCount,
+        busyCount,
         stats,
         pauseUpload,
         resumeUpload,

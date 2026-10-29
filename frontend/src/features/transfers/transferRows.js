@@ -103,3 +103,10 @@ export function rowActions(item) {
         showInFolder: s === "completed" && item.type === "download" && Boolean(item.savePath),
     };
 }
+
+// "2 running · 5 waiting · 2,641 paused by Google's limit" (empty when nothing is left to do)
+export const activitySummary = ({ running = 0, waiting = 0, paused = 0 }) => [
+    running > 0 && `${running.toLocaleString("en")} running`,
+    waiting > 0 && `${waiting.toLocaleString("en")} waiting`,
+    paused > 0 && `${paused.toLocaleString("en")} paused by Google's limit`,
+].filter(Boolean).join(" · ");

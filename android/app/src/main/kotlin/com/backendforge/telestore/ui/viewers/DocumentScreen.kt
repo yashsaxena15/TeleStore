@@ -38,7 +38,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -87,6 +86,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import com.backendforge.telestore.ui.components.ProgressBar
 
 /** What the viewer shows once the file is on the phone. */
 private sealed interface Loaded {
@@ -184,7 +184,7 @@ fun DocumentScreen(container: AppContainer, item: FileItem?, onBack: () -> Unit,
                     }
                     else -> Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Getting the file…", style = MaterialTheme.typography.bodyMedium)
-                        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
+                        ProgressBar(progress = { progress }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
                     }
                 }
                 is Loaded.Pdf -> PdfPages(content.file)
