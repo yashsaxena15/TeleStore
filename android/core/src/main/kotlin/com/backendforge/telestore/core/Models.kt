@@ -90,3 +90,19 @@ data class MessageReply(val message: String? = null)
 data class StarReply(val starred: Boolean = false)
 
 enum class SortBy(val wire: String) { NAME("name"), DATE("date"), SIZE("size"), TAKEN("taken") }
+
+/** What a folder holds, counting its subfolders (GET /folders/stats). */
+@Serializable
+data class FolderStats(
+    @SerialName("total_size") val size: Long = 0,
+    @SerialName("total_files") val files: Int = 0,
+    @SerialName("total_subfolders") val folders: Int = 0,
+) {
+    /** "1,240 files · 35 folders" (the size is formatted by the app). */
+    val counts: String get() = listOfNotNull(
+        plural(files, "file"),
+        folders.takeIf { it > 0 }?.let { plural(it, "folder") },
+    ).joinToString(" · ")
+
+    private fun plural(n: Int, word: String) = "%,d %s".format(java.util.Locale.US, n, if (n == 1) word else word + "s")
+}

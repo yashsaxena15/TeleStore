@@ -996,7 +996,7 @@ test.describe("protect from deletion, folder colours and photo details", () => {
         expect(await sent(request, "/files/trash")).toEqual([]);
     });
 
-    test("items inside a protected folder say so and can't be trashed", async ({ page, request }) => {
+    test("only the protected folder itself is kept: what's inside trashes as usual", async ({ page, request }) => {
         await page.goto("/");
         await expect(async () => {
             await row(page, "Movies").click({ button: "right" });
@@ -1007,11 +1007,12 @@ test.describe("protect from deletion, folder colours and photo details", () => {
         await row(page, "Movies").dblclick();
         await expect(row(page, "Arrival.2016.1080p.mkv")).toBeVisible();
         await row(page, "Arrival.2016.1080p.mkv").click({ button: "right" });
-        const note = page.getByRole("menuitem", { name: "Protected by folder “Movies”" });
-        await expect(note).toBeVisible();
-        await expect(note).toBeDisabled();
-        await expect(page.getByRole("menuitem", { name: /Move to Trash/ })).toHaveCount(0);
-        await expect(page.getByRole("menuitem", { name: "Remove protection" })).toHaveCount(0);
+        await expect(page.getByRole("menuitem", { name: /Protected by folder/ })).toHaveCount(0);
+        await page.getByRole("menuitem", { name: /Move to Trash/ }).click();
+        const confirm = page.getByRole("alertdialog");
+        if (await confirm.isVisible().catch(() => false))
+            await confirm.getByRole("button", { name: /Delete|Move to Trash|Trash/ }).last().click();
+        await expect.poll(async () => (await sent(request, "/files/trash")).length).toBe(1);
     });
 
     test("folders show their colour and the menu changes it", async ({ page, request }) => {

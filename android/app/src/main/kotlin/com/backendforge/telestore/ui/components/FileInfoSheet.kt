@@ -22,6 +22,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.backendforge.telestore.core.DateFormatter
 import com.backendforge.telestore.core.FileItem
+import com.backendforge.telestore.core.FolderStats
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CancellationException
 import com.backendforge.telestore.core.TeleStoreApi
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -76,6 +83,28 @@ fun FileInfoSheet(
                 val sizeBytes = item.size ?: 0L
                 val byteCount = if (sizeBytes > 0) " ($sizeBytes bytes)" else ""
                 InfoRow(label = "Size", value = "${formatBytes(item.size)}$byteCount")
+            } else if (!item.trashed) {
+                // Counted on the server, subfolders included
+                var stats by remember(item.id) { mutableStateOf<FolderStats?>(null) }
+                var failed by remember(item.id) { mutableStateOf(false) }
+                LaunchedEffect(item.id) {
+                    try {
+                        stats = api.folderStats(item)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        failed = true
+                    }
+                }
+                val s = stats
+                InfoRow(
+                    label = "Size",
+                    value = when {
+                        s != null -> "${formatBytes(s.size)} · ${s.counts}"
+                        failed -> "Couldn't count it"
+                        else -> "Counting…"
+                    },
+                )
             }
             InfoRow(label = "Location", value = item.path.ifEmpty { "/" })
             val modified = DateFormatter.formatFull(item.modified)

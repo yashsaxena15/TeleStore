@@ -60,17 +60,15 @@ let UNLOCK = null; // the file_id the last unlock was for, until it's spent
 const ALL = () => Object.values(FOLDERS).flat();
 const byId = (id) => ALL().find((f) => f.id === id);
 const fullPath = (f) => `${f.file_path}/${f.file_name}`;
-// The protected folder an item is inside (its name), or null
-const protectedBy = (f) => ALL().find((d) => d.file_type === "folder" && PROTECTED.has(d.id) && `${f.file_path}/`.startsWith(`${fullPath(d)}/`))?.file_name || null;
+// Like the server: only the item itself is protected (what's inside a protected folder isn't),
+// and a folder can't be deleted while it holds something protected
 const lockedReason = (f) => {
     if (!f) return null;
     if (PROTECTED.has(f.id)) return `“${f.file_name}” is protected. Remove protection first.`;
-    const by = protectedBy(f);
-    if (by) return `“${f.file_name}” is inside the protected folder “${by}”. Remove the folder's protection first.`;
     const inner = f.file_type === "folder" && ALL().find((x) => PROTECTED.has(x.id) && `${x.file_path}/`.startsWith(`${fullPath(f)}/`));
     return inner ? `“${f.file_name}” contains a protected item (“${inner.file_name}”). Remove its protection first.` : null;
 };
-const withMarks = (f) => ({ ...f, protected: PROTECTED.has(f.id), protected_by: PROTECTED.has(f.id) ? null : protectedBy(f), color: f.file_type === "folder" ? (COLORS[f.id] || null) : null });
+const withMarks = (f) => ({ ...f, protected: PROTECTED.has(f.id), color: f.file_type === "folder" ? (COLORS[f.id] || null) : null });
 // Photo details (EXIF) for team-offsite.jpg
 const PHOTO_INFO = {
     f8: { width: 4032, height: 3024, megapixels: 12.2, camera_make: "Apple", camera_model: "iPhone 13", lens: "iPhone 13 back dual wide camera 5.1mm f/1.6", aperture: 1.8, exposure: 1 / 120, iso: 100, focal_length: 4.2, flash: false, taken_at: "2026-10-12T17:45:00", latitude: 15.55271, longitude: 73.75169, altitude: 12, format: "JPEG", file_size: 4_800_000, file_name: "team-offsite.jpg", folder: "/Home" },

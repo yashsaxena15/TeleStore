@@ -94,23 +94,26 @@ def unlock(client, file_id, password="right-pass"):
 
 
 class TestWhatIsProtected:
-    def test_the_item_a_folder_it_is_in_and_a_folder_holding_it(self, files):
+    def test_only_the_item_and_a_folder_holding_it(self, files):
         taxes = files.add("Taxes", kind="folder", protected=True)
-        inside = files.add("2024.pdf", path="/Home/Taxes/Old")
+        inside = files.add("2024.pdf", path="/Home/Taxes")
+        deeper = files.add("Old", kind="folder", path="/Home/Taxes")
         holder = files.add("Docs", kind="folder")
-        files.add("passport.pdf", path="/Home/Docs", protected=True)
-        loose = files.add("notes.txt")
+        files.add("passport.pdf", path="/Home/Docs/Scans", protected=True)
         assert protection_service.blocker(taxes, ["42"]) == "“Taxes” is protected. Remove protection first."
-        assert protection_service.blocker(inside, ["42"]) == "“2024.pdf” is inside the protected folder “Taxes”. Remove the folder's protection first."
+        # What's inside a protected folder deletes as usual
+        assert protection_service.blocker(inside, ["42"]) is None
+        assert protection_service.blocker(deeper, ["42"]) is None
+        # A folder can't take a protected item with it
         assert protection_service.blocker(holder, ["42"]) == "“Docs” contains a protected item (“passport.pdf”). Remove its protection first."
-        assert protection_service.blocker(loose, ["42"]) is None
-        # A neighbour whose name merely starts the same isn't inside
-        assert protection_service.blocker(files.add("x", path="/Home/Taxes2"), ["42"]) is None
+        # A neighbour whose name merely starts the same isn't a holder
+        assert protection_service.blocker(files.add("Doc", kind="folder"), ["42"]) is None
 
-    def test_a_trashed_item_remembers_where_it_was(self, files):
-        files.add("Taxes", kind="folder", protected=True)
-        doc = files.add("2024.pdf", path="/Trash", trashed=True, original_path="/Home/Taxes")
-        assert "protected folder “Taxes”" in protection_service.blocker(doc, ["42"])
+    def test_the_contents_of_a_protected_folder_can_be_trashed(self, client, bob):
+        bob.add("Movies", kind="folder", protected=True)
+        film = bob.add("film.mkv", path="/Home/Movies")
+        assert client.post("/files/trash", json={"file_id": str(film["_id"])}).status_code == 200
+        assert film["trashed"] is True
 
 
 class TestDeleting:
@@ -211,14 +214,6 @@ class TestProtecting:
     def test_a_trashed_item_cannot_be_protected(self, client, bob):
         doc = bob.add("old.txt", trashed=True)
         assert client.post("/files/protect", json={"file_id": str(doc["_id"]), "protected": True}).status_code == 400
-
-
-def test_listing_marks_items_inside_protected_folders():
-    folders = protection_service.ProtectedFolders([{"file_name": "Taxes", "file_path": "/Home"}])
-    assert folders.covering("/Home/Taxes") == "Taxes"
-    assert folders.covering("/Home/Taxes/2024") == "Taxes"
-    assert folders.covering("/Home") is None
-    assert folders.covering("/Home/Taxes2") is None
 
 
 class TestColours:

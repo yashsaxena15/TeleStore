@@ -3,8 +3,9 @@
 from anywhere (app, website, WebDAV). To delete it the user first removes the protection, which
 needs their password (or, for accounts without one, a code sent by email).
 
-Protection covers what's inside a protected folder too, and a folder that holds something
-protected can't be deleted either. A confirmation unlocks removing protection from one item,
+Protection is for the item itself: the files and folders inside a protected folder can be
+deleted as usual. A folder that holds something protected can't be deleted (it would take the
+protected item with it). A confirmation unlocks removing protection from one item,
 once: it can never be used to delete anything.
 """
 
@@ -36,50 +37,18 @@ def full_path(doc: dict) -> str:
     return f"{parent}/{doc.get('file_name') or ''}"
 
 
-def _under(path: Optional[str], folder: str) -> bool:
-    path = (path or "/").rstrip("/") or "/"
-    return path == folder or path.startswith(folder + "/")
-
-
 def _inside_query(folder: str) -> dict:
     return {"$regex": f"^{re.escape(folder)}(/|$)"}
 
 
-class ProtectedFolders:
-    """An account's protected folders, read once (a folder listing asks for every item)."""
-
-    def __init__(self, folders: list):
-        self.folders = [(full_path(f), f.get("file_name") or "A folder") for f in folders]
-
-    def covering(self, path: Optional[str]) -> Optional[str]:
-        """The name of a protected folder that [path] is inside (or is), if any."""
-        return next((name for folder, name in self.folders if _under(path, folder)), None)
-
-
-def protected_folders_of(owner_ids: Iterable[str]) -> ProtectedFolders:
-    try:
-        return ProtectedFolders(list(database.Files.find({"owner_id": {"$in": list(owner_ids)}, "file_type": "folder", "protected": True})))
-    except Exception as e:  # a listing still works without the marks
-        logger.warning(f"Couldn't read protected folders: {e}")
-        return ProtectedFolders([])
-
-
-def protecting_folder(path: Optional[str], owner_ids: Iterable[str]) -> Optional[str]:
-    """The name of a protected folder that [path] is inside (or is), if any."""
-    return protected_folders_of(owner_ids).covering(path)
-
-
 def blocker(doc: dict, owner_ids: Iterable[str]) -> Optional[str]:
-    """Why [doc] can't be deleted, as a sentence, or None when it's free to go: it is protected,
-    it is inside a protected folder, or (a folder) it holds something protected."""
+    """Why [doc] can't be deleted, as a sentence, or None when it's free to go: it is protected
+    itself, or (a folder) it holds something protected, which would go with it. What's inside a
+    protected folder is not protected: only the folder itself can't be deleted."""
     owners = list(owner_ids)
     name = doc.get("file_name") or "This item"
     if doc.get("protected"):
         return f"“{name}” is protected. Remove protection first."
-    # Trashed items remember where they were
-    folder = protecting_folder(doc.get("original_path") if doc.get("trashed") else doc.get("file_path"), owners)
-    if folder:
-        return f"“{name}” is inside the protected folder “{folder}”. Remove the folder's protection first."
     if doc.get("file_type") == "folder":
         inside = full_path(doc)
         found = database.Files.find_one({"owner_id": {"$in": owners}, "protected": True, "$or": [
@@ -100,7 +69,7 @@ def refuse(doc: Optional[dict], owner_ids: Iterable[str]) -> None:
 
 def kept_in_trash(owner_ids: Iterable[str]) -> list:
     """Trashed items Empty Trash leaves alone: protected ones (from before protection blocked
-    trashing) and anything that was inside a protected folder."""
+    trashing) and folders holding them."""
     owners = list(owner_ids)
     return [d for d in database.Files.find({"owner_id": {"$in": owners}, "trashed": True}) if blocker(d, owners)]
 

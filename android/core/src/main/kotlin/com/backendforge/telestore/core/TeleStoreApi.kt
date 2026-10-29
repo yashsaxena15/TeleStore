@@ -384,6 +384,10 @@ class TeleStoreApi(
 
     // ── Folder downloads and server transfers ──────────────────────────────────
     /** A folder is downloaded as one or more ZIP files of up to 2 GB each. */
+    /** How much a folder holds, subfolders included. */
+    suspend fun folderStats(folder: FileItem): FolderStats =
+        get(url("folders/stats").newBuilder().addQueryParameter("id", folder.id).build())
+
     suspend fun folderDownloadInfo(folderPath: String): FolderDownloadInfo =
         get(url("folders/download-info").newBuilder().addQueryParameter("path", folderPath).build())
 
