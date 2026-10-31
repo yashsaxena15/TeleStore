@@ -6,7 +6,7 @@ import { api, getApiBaseUrl } from "@/lib/api";
 import { isSavedOffline, offlineUrlSync, prepareOfflineUrls } from "@/features/offline/offlineStore";
 import { getItemKey } from "../lib/fileCardHelpers";
 
-export function createOpenItem({ cloudAccountId, items, lastOpenTimeRef, onDownload, onNavigate, playMedia, setArchiveInspect, setDocumentReader, setImageViewer, setIsSelectionMode, setLastSelectedIndex, setSelectedItems }) {
+export function createOpenItem({ canArchive = true, cloudAccountId, items, lastOpenTimeRef, onDownload, onNavigate, playMedia, setArchiveInspect, setDocumentReader, setImageViewer, setIsSelectionMode, setLastSelectedIndex, setSelectedItems }) {
 const handleItemOpen = (item) => {
     const now = Date.now();
     if (now - lastOpenTimeRef.current < 250)
@@ -166,7 +166,8 @@ const openNow = (item) => {
             extension: ext,
         });
     }
-    else if (isArchive) {
+    // Looking inside needs archive tools; when the owner turned them off the archive downloads like any file
+    else if (isArchive && canArchive) {
         setArchiveInspect({
             fileId: getItemKey(item),
             fileName: item.name,

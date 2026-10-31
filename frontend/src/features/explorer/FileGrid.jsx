@@ -31,6 +31,7 @@ import { isProtectedItem, protectedSelectionReason } from "@/features/protection
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, } from "@/components/ui/alert-dialog";
 import authService from "@/features/auth/authService";
 import { isItemStarred, getItemKey } from "@/features/explorer/lib/fileCardHelpers";
+import { useFeatures } from "@/features/settings/useFeatures";
 
 // Heavy viewers are split into their own chunks and load on first open
 const ImageViewer = lazy(() => import("@/features/viewers/ImageViewer").then((m) => ({ default: m.ImageViewer })));
@@ -60,6 +61,8 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
     const [documentReader, setDocumentReader] = useState(null);
     const [archiveInspect, setArchiveInspect] = useState(null);
     const [compressDialog, setCompressDialog] = useState(false);
+    // Compress, extract and look inside: the owner can turn them off
+    const { archives: canArchive } = useFeatures();
     const { playMedia } = useMediaPlayer();
     const [isDragActive, setIsDragActive] = useState(false); // Add drag active state
     const [dropTarget, setDropTarget] = useState(null); // Track drop target
@@ -423,7 +426,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             index,
         });
     };
-    const handleItemOpen = createOpenItem({ cloudAccountId, items, lastOpenTimeRef, onDownload, onNavigate, playMedia, setArchiveInspect, setDocumentReader, setImageViewer, setIsSelectionMode, setLastSelectedIndex, setSelectedItems });
+    const handleItemOpen = createOpenItem({ canArchive, cloudAccountId, items, lastOpenTimeRef, onDownload, onNavigate, playMedia, setArchiveInspect, setDocumentReader, setImageViewer, setIsSelectionMode, setLastSelectedIndex, setSelectedItems });
     const openDetails = (item) => {
         const idx = items.findIndex((it) => getItemKey(it) === getItemKey(item));
         if (idx !== -1)
@@ -489,7 +492,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
             default: return undefined;
         }
     };
-    const selectionActions = getSelectionActions(section, { count: selectedList.length, allStarred: selectedList.length > 0 && selectedList.every(isItemStarred), playable: selectedList.length > 0 && selectedList.every(canAddToPlaylist), offline: offlineChoice(), protectedCount: selectedList.filter(isProtectedItem).length });
+    const selectionActions = getSelectionActions(section, { count: selectedList.length, allStarred: selectedList.length > 0 && selectedList.every(isItemStarred), playable: selectedList.length > 0 && selectedList.every(canAddToPlaylist), offline: offlineChoice(), protectedCount: selectedList.filter(isProtectedItem).length }).filter((a) => canArchive || a.id !== "compress");
     const locationPath = currentApiPath || (currentPath && currentPath.length > 0 ? `/${currentPath.join("/")}` : "/Home");
     const pickerStartPath = /^\/(Home|Vault)(\/|$)/.test(locationPath) ? locationPath : "/Home";
     // Keep stateRef fresh for capture-phase keyboard navigation

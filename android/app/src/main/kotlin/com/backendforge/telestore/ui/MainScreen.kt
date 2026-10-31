@@ -196,6 +196,7 @@ fun MainScreen(
     // The video player outlives its screen: pulled down, it keeps playing in a mini player
     val videos = remember { VideoHost(container) }
     val video by videos.player.collectAsStateWithLifecycle()
+    val features by container.features.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         // Leaving the app: keep the sound (Play in background) or pause; coming back shows the picture
@@ -253,9 +254,10 @@ fun MainScreen(
                 container.playback.openPhotos(queue, index)
                 navController.navigate(ROUTE_PHOTOS)
             }
+            // Looking inside needs archive tools; when the owner turned them off it opens like any file
             FileKind.ARCHIVE -> {
                 container.playback.document = item
-                navController.navigate(ROUTE_ARCHIVE)
+                navController.navigate(if (features.archives) ROUTE_ARCHIVE else ROUTE_DOCUMENT)
             }
             FileKind.FOLDER -> return false
             // Documents show in the app; anything else offers another app
@@ -497,6 +499,10 @@ fun MainScreen(
             else -> navController.navigate(ROUTE_NOTIFICATIONS) { launchSingleTop = true }
         }
     }
+    // What this account may use: asked whenever the app comes on screen (the owner may have changed it)
+    LaunchedEffect(session.token) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) { container.refreshFeatures() }
+    }
     // While the app is on screen, new server notifications show within 30 seconds
     LaunchedEffect(session.token) {
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -631,6 +637,7 @@ fun MainScreen(
                         val vm: FolderViewModel = viewModel(key = "home-$path-${session.token}") { FolderViewModel(container, initialPath = path) }
                         FolderScreen(
                             onAddToPlaylist = { container.playlists.requestAdd(it) },
+                            canArchive = features.archives,
                             vm = vm,
                             api = container.api(),
                             onNavigateFolder = { navigateToFolder("home", it) },
@@ -681,6 +688,7 @@ fun MainScreen(
                         val vm: FolderViewModel = viewModel(key = "photos-$path-${session.token}") { FolderViewModel(container, initialPath = path) }
                         FolderScreen(
                             onAddToPlaylist = { container.playlists.requestAdd(it) },
+                            canArchive = features.archives,
                             vm = vm,
                             api = container.api(),
                             onNavigateFolder = { navigateToFolder("photos", it) },
@@ -708,6 +716,7 @@ fun MainScreen(
                         val vm: FolderViewModel = viewModel(key = "files-$path-${session.token}") { FolderViewModel(container, initialPath = path) }
                         FolderScreen(
                             onAddToPlaylist = { container.playlists.requestAdd(it) },
+                            canArchive = features.archives,
                             vm = vm,
                             api = container.api(),
                             onNavigateFolder = { navigateToFolder("files", it) },
@@ -779,6 +788,7 @@ fun MainScreen(
                         }
                         FolderScreen(
                             onAddToPlaylist = { container.playlists.requestAdd(it) },
+                            canArchive = features.archives,
                             vm = vm,
                             api = container.api(),
                             onNavigateFolder = { navigateToFolder("more", it) },

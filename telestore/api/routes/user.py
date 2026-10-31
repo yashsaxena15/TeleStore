@@ -5,7 +5,7 @@ from pydantic import BaseModel
 import datetime
 from typing import Optional, List
 
-from telestore.security.credentials import account_flags, is_owner_account, require_auth, User
+from telestore.security.credentials import ARCHIVE_CHOICES, account_flags, archive_choice, archives_allowed, is_owner_account, is_owner_user, require_auth, User
 from telestore.db import database
 from telestore.utils.passwords import hash_password
 from telestore.security.attempt_limiter import TooManyAttempts, password_limiter, wait_message
@@ -43,6 +43,9 @@ class UserResponse(BaseModel):
     # transfers into Telegram and archives. Missing values mean allowed.
     active: bool = True
     can_upload: bool = True
+    # Compress/extract: "default" follows Settings › Server, "allow" or "block" decide for this user
+    archives: str = "default"
+    archives_allowed: bool = True
     is_owner: bool = False
     # Setup: uploads need a verified Telegram account and an index chat
     has_telegram: bool = False
@@ -65,6 +68,7 @@ class UpdateUserRequest(BaseModel):
     email: Optional[str] = None
     active: Optional[bool] = None
     can_upload: Optional[bool] = None
+    archives: Optional[str] = None  # "default", "allow" or "block"
     permissions: Optional[UserPermission] = None  # old clients; no longer used
 
 
@@ -86,6 +90,8 @@ def _user_response(doc: dict, id_value: str, user_type: str, **overrides) -> "Us
         telegram_username=doc.get("telegram_username"),
         active=active,
         can_upload=can_upload,
+        archives=archive_choice(doc),
+        archives_allowed=archives_allowed(doc),
         is_owner=is_owner_account(username, doc),
         has_telegram=bool(doc.get("telegram_user_id")),
         has_index_chat=doc.get("index_chat_id") is not None,
@@ -265,6 +271,10 @@ async def update_user(request: Request, user_id_param: str, user_request: Update
             update_data["active"] = user_request.active
         if user_request.can_upload is not None:
             update_data["can_upload"] = user_request.can_upload
+        if user_request.archives is not None:
+            if user_request.archives not in ARCHIVE_CHOICES:
+                raise HTTPException(status_code=400, detail="archives must be default, allow or block")
+            update_data["archives"] = user_request.archives
         if update_data:
             success = database.Users.update_user_by_identifier(user_id_param, update_data)
             if not success:
@@ -453,6 +463,12 @@ async def get_user_profile(request: Request, user: User = Depends(require_auth))
     except Exception as e:
         logger.error(f"Error fetching user profile: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/features")
+async def my_features(user: User = Depends(require_auth)):
+    """What this account may use, so the app and website show only those options."""
+    return {"archives": user.archives, "is_owner": is_owner_user(user)}
+
 
 @router.get("/is-owner", response_model=IsOwnerResponse)
 async def is_user_owner(request: Request, user: User = Depends(require_auth)):

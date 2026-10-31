@@ -219,6 +219,10 @@ class TeleStoreApi(
     // ── Settings ────────────────────────────────────────────────────────────────
     suspend fun profile(): UserProfile = get(url("user/profile"))
     suspend fun isOwner(): Boolean = get<OwnerReply>(url("user/is-owner")).isOwner
+    suspend fun features(): Features = get(url("user/features"))
+    suspend fun serverSettings(): ServerSettings = get(url("system/settings"))
+    suspend fun setArchivesEnabled(on: Boolean): ServerSettings =
+        put(url("system/settings"), buildJsonObject { put("archives_enabled", on) })
 
     /** [user]: an id from the user list, or the signed-in username for your own password. Empty [current] when you have none yet. */
     suspend fun changePassword(user: String, current: String, new: String): MessageReply =
@@ -270,11 +274,12 @@ class TeleStoreApi(
             put("can_upload", canUpload)
         })
 
-    suspend fun updateUser(id: String, email: String? = null, active: Boolean? = null, canUpload: Boolean? = null): ManagedUser =
+    suspend fun updateUser(id: String, email: String? = null, active: Boolean? = null, canUpload: Boolean? = null, archives: ArchiveChoice? = null): ManagedUser =
         put(url("user").newBuilder().addPathSegment(id).build(), buildJsonObject {
             email?.let { put("email", it.trim()) }
             active?.let { put("active", it) }
             canUpload?.let { put("can_upload", it) }
+            archives?.let { put("archives", it.wire) }
         })
 
     suspend fun removeUser(id: String) = delete(url("user").newBuilder().addPathSegment(id).build())

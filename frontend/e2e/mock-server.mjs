@@ -57,6 +57,8 @@ const resetProtection = () => {
 };
 resetProtection();
 let UNLOCK = null; // the file_id the last unlock was for, until it's spent
+// Settings › Server: compress & extract for everyone (the features reply follows it)
+let SERVER = { archives_enabled: true };
 const ALL = () => Object.values(FOLDERS).flat();
 const byId = (id) => ALL().find((f) => f.id === id);
 const fullPath = (f) => `${f.file_path}/${f.file_name}`;
@@ -359,6 +361,10 @@ const mutation = (req, res, url, body) => {
     if (url.pathname === "/vault/unlock") {
         return send(res, 429, { detail: "Too many wrong attempts. Try again in 1 minute." }, "application/json");
     }
+    if (url.pathname === "/system/settings" && req.method === "PUT") {
+        SERVER = { ...SERVER, ...JSON.parse(body || "{}") };
+        return send(res, 200, SERVER);
+    }
     if (url.pathname === "/user" && req.method === "POST") {
         const data = JSON.parse(body || "{}");
         return send(res, 200, { id: "u9", username: data.username, email: data.email, active: true, can_upload: data.can_upload !== false, has_telegram: false, has_index_chat: false, user_type: "local", created_at: "2026-10-21" });
@@ -379,6 +385,7 @@ http.createServer((req, res) => {
                 resetDevices();
                 resetProtection();
                 UNLOCK = null;
+                SERVER = { archives_enabled: true };
             }
             return send(res, 200, requests);
         }
@@ -390,6 +397,8 @@ http.createServer((req, res) => {
         if (ROUTES[url.pathname]) return send(res, 200, ROUTES[url.pathname]);
         if (url.pathname === "/files") return send(res, 200, listFiles(url));
         if (url.pathname === "/user/notifications") return send(res, 200, notificationsJson());
+        if (url.pathname === "/system/settings") return send(res, 200, SERVER);
+        if (url.pathname === "/user/features") return send(res, 200, { archives: SERVER.archives_enabled, is_owner: true });
         const photoInfo = /^\/files\/([^/]+)\/photo-info$/.exec(url.pathname);
         if (photoInfo) return PHOTO_INFO[photoInfo[1]] ? send(res, 200, PHOTO_INFO[photoInfo[1]]) : send(res, 422, { detail: "Not an image" });
         if (url.pathname === "/auth/devices") return send(res, 200, { devices: DEVICES });

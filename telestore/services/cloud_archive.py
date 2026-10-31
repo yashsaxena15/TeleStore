@@ -213,6 +213,22 @@ async def inspect_archive(
                 pass
 
 
+async def unpacked_size(archive_path: str) -> Optional[int]:
+    """What the archive holds once unpacked, from its own file list (None when 7z can't list it)."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "7z", "l", "-slt", "-p-", archive_path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return None
+        return sum(f["size"] for f in parse_7z_list_output(stdout.decode("utf-8", errors="replace")) if not f["is_dir"])
+    except Exception as e:
+        logger.warning(f"Couldn't list {archive_path} to measure it: {e}")
+        return None
+
+
 async def extract_with_7z_or_fallback(archive_path: str, extract_dir: str) -> bool:
     """
     Extracts an archive using 7z at low CPU priority (nice -n 10) to protect 1 vCPU,
@@ -313,6 +329,15 @@ async def execute_task_extract(task_id: str, payload: Dict[str, Any], manager: A
 
         if manager.is_cancelled(task_id):
             raise asyncio.CancelledError("Task cancelled by user")
+
+        # Unpacking writes everything inside at once (next to the archive): check that it fits before
+        # starting, using the archive's own file list rather than its size
+        from telestore.services.archive_task_manager import check_disk_safety
+        inside = await unpacked_size(temp_archive)
+        if inside is not None:
+            fits, why, _ = check_disk_safety(inside + 2 * 1024 * 1024 * 1024)
+            if not fits:
+                raise RuntimeError(f"Not enough disk space to unpack '{archive_name}' ({inside / 2**30:.1f} GB inside). {why}")
 
         # Stage 2: Extracting (nice -n 10)
         manager.update_task_progress(task_id, stage="extracting", progress_percent=42.0)

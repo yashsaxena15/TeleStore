@@ -119,6 +119,8 @@ fun FolderScreen(
     onOpenWith: ((FileItem) -> Unit)? = null,
     /** Music and videos: opens "Add to playlist" for them. */
     onAddToPlaylist: ((List<FileItem>) -> Unit)? = null,
+    /** Compress to ZIP is offered (the owner can turn it off). */
+    canArchive: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -326,7 +328,7 @@ fun FolderScreen(
                                 icon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = null) },
                                 label = { Text("Playlist") },
                             )
-                        } else {
+                        } else if (canArchive) {
                             NavigationBarItem(
                                 selected = false,
                                 onClick = { compressItems = selected },
@@ -586,7 +588,7 @@ fun FolderScreen(
             onCopyToDrive = onCopyToDrive,
             onShare = onShare,
             onOpenWith = onOpenWith,
-            onCompress = { compressItems = listOf(it) },
+            onCompress = if (canArchive) { { compressItems = listOf(it) } } else null,
             onAddToPlaylist = onAddToPlaylist?.let { add -> { item: FileItem -> add(listOf(item)) } },
             isOffline = if (target.isFolder) FolderPaths.childPath(target) in offlineFolders else target.id in offlineIds,
             onToggleOffline = onToggleOffline,

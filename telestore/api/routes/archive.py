@@ -6,7 +6,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from telestore.security.credentials import require_auth, require_upload, User
+from telestore.security.credentials import require_archives, require_auth, require_upload, User
 from telestore.db import database
 from d4rk.Logs import setup_logger
 from telestore.services.byte_streamer import ByteStreamer
@@ -58,10 +58,15 @@ def _own_item(request: Request, user: User, item_id: str) -> dict:
 async def inspect_archive_endpoint(
     file_id: str,
     request: Request,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_archives)
 ):
     """Inspects the files and folders inside an archive without extracting it (supports .zip, .rar, .7z, .tar)."""
     doc = _own_item(request, user, file_id)
+
+    # Listing reads the whole archive onto the server's disk first
+    is_safe, err_msg, _ = check_disk_safety(int(doc.get("file_size") or 0) + 512 * 1024 * 1024)
+    if not is_safe:
+        raise HTTPException(status_code=400, detail=err_msg)
 
     bot_manager = getattr(request.app.state, 'bot_manager', None)
     if not bot_manager:
@@ -93,7 +98,8 @@ async def inspect_archive_endpoint(
 async def extract_archive_endpoint(
     body: ExtractRequest,
     request: Request,
-    user: User = Depends(require_upload)
+    user: User = Depends(require_upload),
+    _allowed: User = Depends(require_archives),
 ):
     """
     Initiates asynchronous cloud extraction.
@@ -102,8 +108,9 @@ async def extract_archive_endpoint(
     doc = _own_item(request, user, body.file_id)
 
     archive_size = int(doc.get("file_size") or 0)
-    # Estimated peak disk space: archive size on disk + 2 GB buffer for single currently uploading file
-    estimated_peak = archive_size + (2 * 1024 * 1024 * 1024)
+    # Estimated peak disk space: the archive plus at least as much unpacked next to it, + 2 GB for the
+    # file being uploaded (the job checks the real unpacked size again once it can list the archive)
+    estimated_peak = 2 * archive_size + (2 * 1024 * 1024 * 1024)
 
     # 1. PREFLIGHT DISK SAFETY GUARD (Strict 25 GB reserve)
     is_safe, err_msg, disk_info = check_disk_safety(estimated_peak)
@@ -142,7 +149,8 @@ async def extract_archive_endpoint(
 async def compress_archive_endpoint(
     body: CompressRequest,
     request: Request,
-    user: User = Depends(require_upload)
+    user: User = Depends(require_upload),
+    _allowed: User = Depends(require_archives),
 ):
     """
     Initiates asynchronous cloud compression into a ZIP archive.

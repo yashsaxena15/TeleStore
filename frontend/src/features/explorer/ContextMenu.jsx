@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { FOLDER_COLORS } from "./lib/folderColors";
+import { useFeatures } from "@/features/settings/useFeatures";
 import { CloudOff, HardDriveDownload, ListPlus, Shield, ShieldOff, Ban, FolderOpen, Pencil, Trash2, Copy, Scissors, Clipboard, Info, Download, Share2, Eye, Star, RefreshCw, Upload, RotateCcw, Archive, Link, ShieldCheck, } from "lucide-react";
 // Folder colour: Default plus the palette, as a row of swatches (like Google Drive)
 const ColorSwatches = ({ current, onPick, className }) => (<div role="group" aria-label="Folder colour" className={className}>
@@ -22,6 +23,8 @@ disableDelete = false, // Destructure the new prop with default value
 onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false, isVideo = false, onCopyStreamUrl, selectedCount = 1, isStarred = false, onToggleStar, isTrashMode = false, onRestore, isVaultMode = false, onMoveToVault, onMoveToHome, isCloudMode = false, isVirtualFolder = false, isRestrictedEmptyArea = false, onAddToPlaylist, onMakeOffline, onRemoveOffline, onProtect, onUnprotect, folderColor, onSetFolderColor, hideDelete = false, protectionNote, }) => {
     const menuRef = useRef(null);
     const isMobile = useIsMobile();
+    // Compress, extract and look inside: the owner can turn them off
+    const { archives: canArchive } = useFeatures();
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -413,7 +416,7 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                         ...(onSetFolderColor
                             ? [{ swatches: true, label: "Folder colour", action: "folder_color" }]
                             : []),
-                        ...(isArchive
+                        ...(isArchive && canArchive
                             ? [
                                 { divider: true, label: "", action: "" },
                                 {
@@ -428,12 +431,16 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                                 },
                             ]
                             : []),
-                        { divider: true, label: "", action: "" },
-                        {
-                            icon: Archive,
-                            label: selectedCount > 1 ? `Compress to ZIP (${selectedCount})` : "Compress to ZIP",
-                            action: "compress",
-                        },
+                        ...(canArchive
+                            ? [
+                                { divider: true, label: "", action: "" },
+                                {
+                                    icon: Archive,
+                                    label: selectedCount > 1 ? `Compress to ZIP (${selectedCount})` : "Compress to ZIP",
+                                    action: "compress",
+                                },
+                            ]
+                            : []),
                         { divider: true, label: "", action: "" },
                         {
                             icon: Copy,

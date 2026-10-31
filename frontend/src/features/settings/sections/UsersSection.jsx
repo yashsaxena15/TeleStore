@@ -13,6 +13,7 @@ import logger from "@/lib/logger";
 import { cn } from "@/lib/utils";
 import { SettingsPanel, Field, Segmented } from "../SettingsUi";
 import { errorMessage } from "../errorMessage";
+import { refreshFeatures } from "../useFeatures";
 
 const MIN_PASSWORD = 6;
 const LOGIN_TYPES = [{ value: "local", label: "Username & password" }, { value: "google", label: "Google sign-in" }];
@@ -157,6 +158,13 @@ const setupStatus = (user) => {
     return { ready: true, label: "Ready to upload", hint: "Telegram connected and index chat set." };
 };
 
+// A user's compress & extract: follow Settings › Server, or decide for this user
+const ARCHIVE_CHOICES = [
+    { value: "default", label: "Follow server" },
+    { value: "allow", label: "Always allow" },
+    { value: "block", label: "Block" },
+];
+
 export const UsersSection = () => {
     const me = useUserProfile();
     const [users, setUsers] = useState([]);
@@ -165,6 +173,7 @@ export const UsersSection = () => {
     const [editing, setEditing] = useState(null);
     const [passwordFor, setPasswordFor] = useState(null);
     const [deleting, setDeleting] = useState(null);
+    const [server, setServer] = useState(null);
     useEffect(() => {
         api.getUsers()
             .then((r) => setUsers(r.users))
@@ -173,7 +182,24 @@ export const UsersSection = () => {
             toast.error("Couldn't load users");
         })
             .finally(() => setLoading(false));
+        api.fetchServerSettings().then(setServer).catch(() => setServer(null));
     }, []);
+    // Settings › Server: compress & extract for everyone who follows it
+    const setArchivesForEveryone = async (on) => {
+        const before = server;
+        setServer({ ...server, archives_enabled: on });
+        try {
+            setServer(await api.updateServerSettings({ archives_enabled: on }));
+            toast.success(on ? "Compress and extract turned on" : "Compress and extract turned off");
+            // Who follows the server setting just changed with it
+            api.getUsers().then((r) => setUsers(r.users)).catch(() => {});
+            refreshFeatures();
+        }
+        catch (err) {
+            setServer(before);
+            toast.error(errorMessage(err, "Couldn't change it"));
+        }
+    };
     // Saves email / Active / Can upload; the table shows the change right away and rolls back on failure
     const saveUser = async (user, patch) => {
         const before = users;
@@ -183,11 +209,16 @@ export const UsersSection = () => {
         if (patch.email !== undefined) body.email = patch.email;
         if (patch.active !== undefined) body.active = patch.active;
         if (patch.canUpload !== undefined) body.can_upload = patch.canUpload;
+        if (patch.archives !== undefined) body.archives = patch.archives;
         try {
             await api.updateUser(user.id, body);
             if (patch.email) toast.success("Email updated");
             if (patch.active !== undefined) toast.success(patch.active ? `${user.username || user.email} can sign in again` : `${user.username || user.email} is turned off`);
             if (patch.canUpload !== undefined) toast.success(patch.canUpload ? `Uploads turned on for ${user.username || user.email}` : `Uploads turned off for ${user.username || user.email}`);
+            if (patch.archives !== undefined) {
+                toast.success(`Compress & extract for ${user.username || user.email}: ${ARCHIVE_CHOICES.find((c) => c.value === patch.archives).label.toLowerCase()}`);
+                if (user.username === me?.username) refreshFeatures();
+            }
         }
         catch (err) {
             setUsers(before);
@@ -207,7 +238,16 @@ export const UsersSection = () => {
         }
     };
     const added = (raw) => setUsers((list) => [...list, mapUser(raw)]);
+    // What a choice means right now (follow-server users change with the switch)
+    const archivesOn = (choice) => (choice === "allow" ? true : choice === "block" ? false : server?.archives_enabled !== false);
     return (<SettingsPanel icon={Users} title="Users" description="Each person has their own private library; nobody sees anyone else's files." actions={<Button size="sm" className="h-8" onClick={() => setAddOpen(true)}><UserPlus className="w-3.5 h-3.5 mr-1.5"/>Add user</Button>}>
+      {server && (<div className="flex items-start justify-between gap-4 rounded-lg border border-border px-3 py-2.5 mb-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Compress &amp; extract</p>
+            <p className="text-xs text-muted-foreground">For everyone set to follow this. They use the server's disk and CPU for a long time.</p>
+          </div>
+          <Switch className="mt-0.5 shrink-0" checked={server.archives_enabled !== false} onCheckedChange={setArchivesForEveryone} aria-label="Compress and extract for everyone"/>
+        </div>)}
       {loading ? (<p className="text-sm text-muted-foreground">Loading users…</p>) : users.length === 0 ? (<p className="text-sm text-muted-foreground">No users yet.</p>) : (<div className="-mx-4 -mb-4 overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -216,6 +256,7 @@ export const UsersSection = () => {
                 <th className="font-semibold px-2 py-2 hidden md:table-cell">Telegram</th>
                 <th className="font-semibold px-2 py-2 text-center w-16" title="Turned-off accounts can't sign in. Their files are kept.">Active</th>
                 <th className="font-semibold px-2 py-2 text-center w-20" title="Uploads, cloud leeches, Drive transfers and compressing">Can upload</th>
+                <th className="font-semibold px-2 py-2 w-36" title="Compress to ZIP, Extract and look inside archives">Compress &amp; extract</th>
                 <th className="w-12"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
@@ -237,6 +278,12 @@ export const UsersSection = () => {
                     <td className="px-2 py-2.5 hidden md:table-cell whitespace-nowrap text-muted-foreground">{user.telegramUsername ? `@${user.telegramUsername}` : user.hasTelegram ? "Connected" : "Not connected"}</td>
                     <td className="px-2 py-2.5 text-center" title={locked ? "The owner account can't be turned off" : undefined}><Switch checked={user.active} disabled={locked} onCheckedChange={(v) => saveUser(user, { active: v })} aria-label={`${name} is active`}/></td>
                     <td className="px-2 py-2.5 text-center" title={locked ? "The owner account can always upload" : undefined}><Switch checked={user.canUpload} disabled={locked} onCheckedChange={(v) => saveUser(user, { canUpload: v })} aria-label={`${name} can upload`}/></td>
+                    <td className="px-2 py-2.5 whitespace-nowrap">
+                      <select value={user.archives} onChange={(e) => saveUser(user, { archives: e.target.value, archivesAllowed: archivesOn(e.target.value) })} aria-label={`Compress and extract for ${name}`} className="h-8 rounded-md border border-border bg-background px-2 text-xs">
+                        {ARCHIVE_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                      </select>
+                      <span className={cn("ml-2 text-[11px]", user.archivesAllowed ? "text-success" : "text-muted-foreground")}>{user.archivesAllowed ? "On" : "Off"}</span>
+                    </td>
                     <td className="pr-3 py-2.5 text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>

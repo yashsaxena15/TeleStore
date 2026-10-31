@@ -11,6 +11,7 @@ from typing import List
 from telestore.security.credentials import require_upload, User
 from telestore.db import database
 from telestore.services.pipeline_uploader import upload_part_task
+from telestore.services.disk_budget import AsyncPartSlots
 from telestore.services.priority_manager import priority_manager
 
 # For thumbnail route
@@ -72,7 +73,8 @@ async def upload_file(
         current_part_written = 0
         total_written = 0
         upload_tasks: List[asyncio.Task] = []
-        disk_semaphore = asyncio.Semaphore(2)  # Max 2 active parts on VM disk
+        # Max 2 active parts on disk, each reserved from the server's disk budget
+        disk_semaphore = AsyncPartSlots(expected_total=file.size or 0)
         await disk_semaphore.acquire()
 
         file_extension = os.path.splitext(file.filename)[1].lower()
@@ -293,5 +295,7 @@ async def upload_file(
                 pass
         raise HTTPException(status_code=500, detail=str(e))
     finally:
+        if 'disk_semaphore' in locals():
+            disk_semaphore.close()  # give back what a failed upload still held
         if 'upload_id' in locals() and upload_id:
             priority_manager.notify_user_upload_finished(upload_id)

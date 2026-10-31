@@ -206,6 +206,9 @@ export const mapUser = (user) => ({
     telegramUsername: user.telegram_username,
     active: user.active !== false,
     canUpload: user.can_upload !== false,
+    // Compress & extract: "default" follows Settings › Server, "allow" or "block" decide for this user
+    archives: user.archives || 'default',
+    archivesAllowed: user.archives_allowed !== false,
     isOwner: Boolean(user.is_owner),
     hasTelegram: Boolean(user.has_telegram),
     hasIndexChat: Boolean(user.has_index_chat),
@@ -285,6 +288,11 @@ export const api = {
     },
     addUser: (userData) => post('/user', userData, { timeout: 3000, fallback: 'Failed to add user' }),
     updateUser: (userId, userData) => put(`/user/${userId}`, userData, { timeout: 3000, fallback: 'Failed to update user' }),
+    // What this account may use (the owner can turn off compress and extract)
+    fetchFeatures: () => request('/user/features', { soft: null }),
+    // Settings › Server (owner only)
+    fetchServerSettings: () => request('/system/settings', { fallback: "Couldn't load server settings" }),
+    updateServerSettings: (changes) => put('/system/settings', changes, { fallback: "Couldn't change server settings" }),
     async deleteUser(userId) {
         await request(`/user/${userId}`, { method: 'DELETE', timeout: 3000, fallback: 'Failed to delete user' });
     },
