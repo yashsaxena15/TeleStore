@@ -52,8 +52,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.backendforge.telestore.core.ArchiveChoice
 import com.backendforge.telestore.core.MIN_PASSWORD
 import com.backendforge.telestore.core.ManagedUser
+import com.backendforge.telestore.core.ServerSettings
 import com.backendforge.telestore.data.AppContainer
 import com.backendforge.telestore.ui.components.ConfirmDialog
 import kotlinx.coroutines.launch
@@ -70,10 +72,27 @@ fun UsersScreen(container: AppContainer, myUsername: String, onBack: () -> Unit)
     var emailFor by remember { mutableStateOf<ManagedUser?>(null) }
     var passwordFor by remember { mutableStateOf<ManagedUser?>(null) }
     var removing by remember { mutableStateOf<ManagedUser?>(null) }
+    var server by remember { mutableStateOf<ServerSettings?>(null) }
     fun say(text: String) = scope.launch { snackbar.showSnackbar(text) }
 
     LaunchedEffect(Unit) {
         attempt("Couldn't load users.", { error = it }) { container.api().users() }?.let { users = it.users }
+        server = runCatching { container.api().serverSettings() }.getOrNull()
+    }
+
+    /** Settings › Server: compress and extract for everyone who follows it. */
+    fun setArchivesForEveryone(on: Boolean) {
+        val before = server
+        server = ServerSettings(archivesEnabled = on)
+        scope.launch {
+            var failed = false
+            attempt("Couldn't change it.", { failed = true; server = before; say(it) }) { container.api().setArchivesEnabled(on) }
+            if (failed) return@launch
+            say(if (on) "Compress and extract turned on" else "Compress and extract turned off")
+            // Who follows the server setting just changed with it
+            runCatching { container.api().users() }.onSuccess { users = it.users }
+            container.refreshFeatures()
+        }
     }
 
     /** Shows the change at once and puts it back if the server refuses. */
@@ -109,6 +128,19 @@ fun UsersScreen(container: AppContainer, myUsername: String, onBack: () -> Unit)
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                server?.let { settings ->
+                    item {
+                        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp)) {
+                                SwitchLine(
+                                    "Compress & extract",
+                                    "For everyone set to follow this. They use the server's disk and CPU for a long time.",
+                                    settings.archivesEnabled, true, { setArchivesForEveryone(it) },
+                                )
+                            }
+                        }
+                    }
+                }
                 item {
                     Text(
                         "Each person has their own private library; nobody sees anyone else's files.",
@@ -128,6 +160,17 @@ fun UsersScreen(container: AppContainer, myUsername: String, onBack: () -> Unit)
                         onUpload = { on ->
                             change(user, user.copy(canUpload = on), if (on) "Uploads turned on for ${user.name}" else "Uploads turned off for ${user.name}") {
                                 container.api().updateUser(user.id, canUpload = on)
+                            }
+                        },
+                        onArchives = { choice ->
+                            val allowed = when (choice) {
+                                ArchiveChoice.ALLOW -> true
+                                ArchiveChoice.BLOCK -> false
+                                ArchiveChoice.DEFAULT -> server?.archivesEnabled ?: user.archivesAllowed
+                            }
+                            change(user, user.copy(archives = choice.wire, archivesAllowed = allowed), "Compress & extract for ${user.name}: ${choice.label.lowercase()}") {
+                                container.api().updateUser(user.id, archives = choice)
+                                if (user.username == myUsername) container.refreshFeatures()
                             }
                         },
                         onEmail = { emailFor = user },
@@ -207,6 +250,7 @@ private fun UserCard(
     isMe: Boolean,
     onActive: (Boolean) -> Unit,
     onUpload: (Boolean) -> Unit,
+    onArchives: (ArchiveChoice) -> Unit,
     onEmail: () -> Unit,
     onPassword: () -> Unit,
     onRemove: () -> Unit,
@@ -253,6 +297,30 @@ private fun UserCard(
             }
             SwitchLine("Active", if (user.locked) "The owner account can't be turned off" else "Turned-off accounts can't sign in. Their files are kept.", user.active, !user.locked, onActive)
             SwitchLine("Can upload", if (user.locked) "The owner account can always upload" else "Uploads, leeches, Drive transfers and compressing", user.canUpload, !user.locked, onUpload)
+            ArchivesLine(ArchiveChoice.of(user.archives), user.archivesAllowed, onArchives)
+        }
+    }
+}
+
+/** Compress & extract for one user: follow the server setting, or always allow / block. */
+@Composable
+private fun ArchivesLine(choice: ArchiveChoice, allowed: Boolean, onChange: (ArchiveChoice) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(end = 4.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text("Compress & extract", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                (if (allowed) "On" else "Off") + if (choice == ArchiveChoice.DEFAULT) " · follows the server setting" else "",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Box {
+            TextButton(onClick = { open = true }) { Text(choice.label) }
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                ArchiveChoice.entries.forEach { option ->
+                    DropdownMenuItem(text = { Text(option.label) }, onClick = { open = false; if (option != choice) onChange(option) })
+                }
+            }
         }
     }
 }

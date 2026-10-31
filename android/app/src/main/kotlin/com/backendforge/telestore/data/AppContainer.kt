@@ -53,6 +53,9 @@ class AppContainer(val context: Context) {
     /** Unread server notifications (the badge on More › Notifications). */
     val unreadNotifications = MutableStateFlow(0)
 
+    /** What this account may use (the owner can turn off compress and extract); refreshed by [refreshFeatures]. */
+    val features = MutableStateFlow(com.backendforge.telestore.core.Features())
+
     /** Folders kept offline, synced by the background check. */
     val offlineFolders by lazy { com.backendforge.telestore.transfers.OfflineFolders(context.applicationContext, transfers) }
 
@@ -86,10 +89,17 @@ class AppContainer(val context: Context) {
                     transfers.clearOffline()
                     settings.lastNotificationSeen = null
                     unreadNotifications.value = 0
+                    features.value = com.backendforge.telestore.core.Features()
                     protection.clear()
                 }
             }
         }
+    }
+
+    /** Asks the server what this account may use; keeps the last answer when it can't be reached. */
+    fun refreshFeatures() {
+        if (session.state.value == null) return
+        scope.launch { runCatching { api().features() }.onSuccess { features.value = it } }
     }
 
     /** Locks the Private Vault on the server (the app was left); never throws. */

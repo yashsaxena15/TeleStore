@@ -26,6 +26,8 @@ class User(BaseModel):
     # Set by the owner in Settings › Users (missing means allowed)
     active: bool = True
     can_upload: bool = True
+    # Compress, extract and look inside archives (Settings › Server, and per user)
+    archives: bool = True
 
 # Fallback admin, used only when the username is not in the database.
 # Both values come from .env (DEFAULT_ADMIN_PASSWORD is required by telestore.config).
@@ -135,6 +137,9 @@ def verify_google_token(token: str) -> Optional[dict]:
 
 ACCOUNT_DISABLED = "This account has been turned off. Ask the owner to turn it back on."
 UPLOADS_DISABLED = "Uploading is turned off for this account. Ask the owner to turn it on."
+ARCHIVES_DISABLED = "Compress and extract are turned off by the owner."
+# A user's archive tools: follow the server's switch, or always allow / block them for this user
+ARCHIVE_CHOICES = ("default", "allow", "block")
 
 
 def is_owner_account(username: Optional[str], user_data: Optional[dict]) -> bool:
@@ -189,12 +194,27 @@ def is_admin(request: Request) -> bool:
     
     return False
 
+def archive_choice(user_data: Optional[dict]) -> str:
+    choice = (user_data or {}).get("archives")
+    return choice if choice in ARCHIVE_CHOICES else "default"
+
+
+def archives_allowed(user_data: Optional[dict]) -> bool:
+    """Compress, extract and look inside: the user's own setting, else the server's switch."""
+    choice = archive_choice(user_data)
+    if choice != "default":
+        return choice == "allow"
+    from telestore.services import server_settings
+    return bool(server_settings.get()["archives_enabled"])
+
+
 def _with_account_flags(user: User, user_data: Optional[dict]) -> User:
     active, can_upload = account_flags(user.username, user_data)
     if not active:
         # A turned-off account stops working on its next request, even with an open session
         raise HTTPException(status_code=403, detail=ACCOUNT_DISABLED)
     user.active, user.can_upload = active, can_upload
+    user.archives = archives_allowed(user_data)
     return user
 
 
@@ -268,6 +288,23 @@ def get_current_user(request: Request) -> Optional[str]:
             return "admin"
         return username
     return None
+
+
+def require_archives(user: User = Depends(require_auth)) -> User:
+    """For compress, extract and look inside, which the owner can turn off (for everyone or one user)."""
+    if not user.archives:
+        raise HTTPException(status_code=403, detail=ARCHIVES_DISABLED)
+    return user
+
+
+def is_owner_user(user: User) -> bool:
+    return is_owner_account(user.username, {"telegram_user_id": user.telegram_user_id})
+
+
+def require_owner(user: User = Depends(require_auth)) -> User:
+    if not is_owner_user(user):
+        raise HTTPException(status_code=403, detail="Only the owner can change this.")
+    return user
 
 
 def require_upload(user: User = Depends(require_auth)) -> User:

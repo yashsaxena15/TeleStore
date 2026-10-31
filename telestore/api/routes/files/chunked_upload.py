@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from telestore.api.routes.files.common import logger, router
 from telestore.db import database
 from telestore.security.credentials import User, require_auth, require_upload
+from telestore.services.disk_budget import DISK_BUDGET
 from telestore.services.pipeline_uploader import upload_part_task
 from telestore.services.priority_manager import priority_manager
 
@@ -70,6 +71,22 @@ def _part_path(session: dict, part: int) -> str:
     return os.path.join(session["dir"], f"part_{part + 1}.tmp")
 
 
+def _part_bytes(session: dict, part: int) -> int:
+    return min(CHUNKS_PER_PART * CHUNK_SIZE, session["filesize"] - part * CHUNKS_PER_PART * CHUNK_SIZE)
+
+
+def _release_part(session: dict, part: int) -> None:
+    """Gives a part's share of the server's disk budget back (it reached Telegram, or the upload ended)."""
+    amount = session.get("reserved", {}).pop(part, 0)
+    if amount:
+        DISK_BUDGET.release(amount)
+
+
+def _release_all(session: dict) -> None:
+    for part in list(session.get("reserved", {})):
+        _release_part(session, part)
+
+
 def _session_for(upload_id: str, user: User) -> dict:
     session = _active_upload_sessions.get(upload_id)
     if not session or session["user_id"] != str(user.telegram_user_id):
@@ -89,6 +106,7 @@ def _expire_idle_sessions() -> None:
             if not t.done():
                 t.cancel()
         shutil.rmtree(s["dir"], ignore_errors=True)
+        _release_all(s)
 
 
 def _status(session: dict) -> dict:
@@ -163,6 +181,7 @@ async def init_chunked_upload(req: InitUploadRequest, user: User = Depends(requi
         "part_counts": {},
         "part_tasks": {},
         "open_parts": set(),  # parts with data on disk not yet sent to Telegram (and deleted)
+        "reserved": {},  # part -> bytes taken from the server's disk budget
         "dir": tg_files_dir,
         "lock": asyncio.Lock(),
         "error": None,
@@ -196,10 +215,13 @@ async def _store_chunk(request: Request, session: dict, index: int, data: bytes,
     async with session["lock"]:
         if index in session["received"] or part in session["part_tasks"]:
             return {"status": "duplicate", **_status(session)}
-        if part not in session["open_parts"] and len(session["open_parts"]) >= MAX_PARTS_ON_DISK:
-            # The disk holds enough parts; ask the browser to send this one a bit later
-            return JSONResponse(status_code=429, headers={"Retry-After": str(RETRY_AFTER_S)},
-                                content={"detail": "Waiting for earlier parts to reach Telegram", "retry_after": RETRY_AFTER_S})
+        if part not in session["open_parts"]:
+            # The disk holds enough parts (this upload's, or the whole server's budget); ask the
+            # browser or app to send this one a bit later
+            if len(session["open_parts"]) >= MAX_PARTS_ON_DISK or not DISK_BUDGET.try_reserve(_part_bytes(session, part)):
+                return JSONResponse(status_code=429, headers={"Retry-After": str(RETRY_AFTER_S)},
+                                    content={"detail": "Waiting for earlier parts to reach Telegram", "retry_after": RETRY_AFTER_S})
+            session["reserved"][part] = _part_bytes(session, part)
         session["open_parts"].add(part)
 
     await asyncio.to_thread(_write_at, _part_path(session, part), (index % CHUNKS_PER_PART) * CHUNK_SIZE, data)
@@ -246,6 +268,7 @@ async def _send_part(request: Request, session: dict, part: int, user: User) -> 
 
     def finished(t: asyncio.Task):
         session["open_parts"].discard(part)
+        _release_part(session, part)
         if t.cancelled():
             return
         if t.exception():
@@ -318,6 +341,7 @@ async def _process_upload_completion(upload_id: str, session: dict) -> None:
         session["error"] = session.get("error") or str(e)
     finally:
         shutil.rmtree(session.get("dir", ""), ignore_errors=True)
+        _release_all(session)
         priority_manager.notify_user_upload_finished(upload_id)
 
 
@@ -373,6 +397,7 @@ async def abort_chunked_upload(req: AbortUploadRequest, user: User = Depends(req
             if not t.done():
                 t.cancel()
         shutil.rmtree(session.get("dir", ""), ignore_errors=True)
+        _release_all(session)
     shutil.rmtree(os.path.join(os.getcwd(), "tg_files", f"chunk_{upload_id}"), ignore_errors=True)
     logger.info(f"Upload session {upload_id} aborted by user and disk storage purged.")
     return {"status": "aborted", "upload_id": upload_id, "message": "Upload aborted and temporary files cleaned up."}

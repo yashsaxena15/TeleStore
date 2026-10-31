@@ -27,6 +27,29 @@ data class UserProfile(
 @Serializable
 data class OwnerReply(@SerialName("is_owner") val isOwner: Boolean = false)
 
+/** GET /user/features: what this account may use, so only those options are shown. */
+@Serializable
+data class Features(
+    /** Compress to ZIP, Extract and Look inside (the owner can turn them off). */
+    val archives: Boolean = true,
+    @SerialName("is_owner") val isOwner: Boolean = false,
+)
+
+/** Settings › Server (owner only): GET/PUT /system/settings. */
+@Serializable
+data class ServerSettings(@SerialName("archives_enabled") val archivesEnabled: Boolean = true)
+
+/** A user's archive tools: follow Settings › Server, or decide for this user. */
+enum class ArchiveChoice(val wire: String, val label: String) {
+    DEFAULT("default", "Follow server setting"),
+    ALLOW("allow", "Always allow"),
+    BLOCK("block", "Block");
+
+    companion object {
+        fun of(wire: String?): ArchiveChoice = entries.firstOrNull { it.wire == wire } ?: DEFAULT
+    }
+}
+
 @Serializable
 data class IndexChat(@SerialName("index_chat_id") val chatId: Long? = null)
 
@@ -50,6 +73,10 @@ data class ManagedUser(
     @SerialName("telegram_username") val telegramUsername: String? = null,
     val active: Boolean = true,
     @SerialName("can_upload") val canUpload: Boolean = true,
+    /** "default" (follows Settings › Server), "allow" or "block". */
+    @SerialName("archives") val archives: String = "default",
+    /** Whether compress and extract work for them right now. */
+    @SerialName("archives_allowed") val archivesAllowed: Boolean = true,
     @SerialName("is_owner") val isOwner: Boolean = false,
     @SerialName("has_telegram") val hasTelegram: Boolean = false,
     @SerialName("has_index_chat") val hasIndexChat: Boolean = false,

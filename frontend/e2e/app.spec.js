@@ -99,6 +99,25 @@ test.describe("users and connection", () => {
         expect(JSON.parse(add.body)).toMatchObject({ username: "newbie", can_upload: false });
     });
 
+    test("the owner turns compress & extract off for everyone or one user", async ({ page, request }) => {
+        await page.goto("/");
+        await row(page, "Documents").click({ button: "right" });
+        await expect(page.getByRole("menuitem", { name: "Compress to ZIP" })).toBeVisible();
+        await page.keyboard.press("Escape");
+
+        await page.goto("/settings?tab=users");
+        await page.getByRole("switch", { name: "Compress and extract for everyone" }).click();
+        await expect.poll(async () => (await mutations(request)).find((r) => r.path === "/system/settings")?.body).toBe('{"archives_enabled":false}');
+        await page.getByLabel("Compress and extract for family").selectOption("block");
+        await expect.poll(async () => (await mutations(request)).filter((r) => r.path === "/user/u2").map((r) => r.body)).toContain('{"archives":"block"}');
+
+        // Gone from the file menu once it's off
+        await page.goto("/");
+        await row(page, "Documents").click({ button: "right" });
+        await expect(page.getByRole("menuitem", { name: "Move to Trash" }).or(page.getByRole("menuitem", { name: "Delete" })).first()).toBeVisible();
+        await expect(page.getByRole("menuitem", { name: "Compress to ZIP" })).toHaveCount(0);
+    });
+
     test("connection page in a browser shows only the index chat", async ({ page }) => {
         await page.goto("/settings?tab=connection");
         await expect(page.getByText("Index chat", { exact: true })).toBeVisible();

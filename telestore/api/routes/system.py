@@ -2,7 +2,8 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from telestore.security.credentials import require_auth, User
+from telestore.security.credentials import require_auth, require_owner, User
+from telestore.services import server_settings
 from d4rk.Logs import setup_logger
 import subprocess
 import os
@@ -12,6 +13,21 @@ logger = setup_logger("system_routes")
 
 # Create router with updated prefix
 router = APIRouter(prefix="/system", tags=["System"])
+
+class ServerSettingsUpdate(BaseModel):
+    archives_enabled: bool | None = None
+
+
+@router.get("/settings")
+async def get_server_settings(user: User = Depends(require_owner)):
+    """Settings › Server (owner only)."""
+    return server_settings.get()
+
+
+@router.put("/settings")
+async def update_server_settings(body: ServerSettingsUpdate, user: User = Depends(require_owner)):
+    return server_settings.update(**body.model_dump())
+
 
 @router.get("/workloads")
 async def get_workloads(request: Request, user: User = Depends(require_auth)):

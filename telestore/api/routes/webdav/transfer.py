@@ -18,6 +18,7 @@ import glob
 from telestore.services.byte_streamer import get_byte_streamer
 from telestore.services.streaming_utils import RangeNotSatisfiable, parse_byte_range, resolve_mime_type
 from telestore.services.pipeline_uploader import upload_part_task
+from telestore.services.disk_budget import AsyncPartSlots
 
 from telestore.api.routes.webdav.browser import get_directory_items, render_webdav_html
 from telestore.api.routes.webdav.common import format_dav_date, logger, resolve_section_item
@@ -207,7 +208,9 @@ async def handle_put(request: Request, segments: List[str], owner_id: str, defau
     current_part_written = 0
     total_written = 0
     upload_tasks: List[asyncio.Task] = []
-    disk_semaphore = asyncio.Semaphore(2)  # Max 2 parts buffered on VM disk (~3.9 GB cap)
+    # Max 2 parts buffered on disk, each reserved from the server's disk budget (sized by Content-Length)
+    content_length = request.headers.get("content-length", "")
+    disk_semaphore = AsyncPartSlots(expected_total=int(content_length) if content_length.isdigit() else 0)
     await disk_semaphore.acquire()  # Acquire buffer slot for Part 1
 
     # Categorize file type upfront
@@ -452,6 +455,7 @@ async def handle_put(request: Request, segments: List[str], owner_id: str, defau
         for t in upload_tasks:
             if not t.done():
                 t.cancel()
+        disk_semaphore.close()  # give back what a failed upload still held
         active_dav_uploads.discard(upload_id)
         # Clean up any leftover temporary files for this upload session
         for tmp in glob.glob(os.path.join(tg_files_dir, f"dav_{upload_id}_part_*.tmp")):

@@ -18,6 +18,7 @@ import requests
 
 from telestore.db import database
 from telestore.services.pipeline_uploader import upload_part_task
+from telestore.services.disk_budget import AsyncPartSlots, ThreadPartSlots
 from telestore.services.priority_manager import priority_manager
 from telestore.services.torrent_manager import torrent_manager, parse_torrent_bytes
 
@@ -1296,90 +1297,96 @@ class RemoteTransferManager:
             "speed_bps": 0
         })
 
-        def _download_chunk():
-            req_headers = {
-                "User-Agent": MODERN_USER_AGENT,
-                "Range": f"bytes={range_start}-{range_end}"
-            }
-            if task_doc.get("custom_headers"):
-                req_headers.update(task_doc["custom_headers"])
+        # The part is downloaded whole before it goes to Telegram: reserve its size from the disk budget
+        part_slot = AsyncPartSlots(expected_total=part_size, per_job=1, cancelled=cancel_event.is_set)
+        await part_slot.acquire()
+        try:
+            def _download_chunk():
+                req_headers = {
+                    "User-Agent": MODERN_USER_AGENT,
+                    "Range": f"bytes={range_start}-{range_end}"
+                }
+                if task_doc.get("custom_headers"):
+                    req_headers.update(task_doc["custom_headers"])
 
-            with requests.get(source_url, stream=True, timeout=60, headers=req_headers) as resp:
-                if resp.status_code not in [200, 206]:
-                    resp.raise_for_status()
+                with requests.get(source_url, stream=True, timeout=60, headers=req_headers) as resp:
+                    if resp.status_code not in [200, 206]:
+                        resp.raise_for_status()
 
-                transferred = 0
-                start_time = time.time()
-                last_rep = start_time
+                    transferred = 0
+                    start_time = time.time()
+                    last_rep = start_time
 
-                with open(part_file_path, "wb") as pf:
-                    for chunk in resp.iter_content(chunk_size=2 * 1024 * 1024):
-                        if cancel_event.is_set():
-                            raise InterruptedError("Cancelled by user")
+                    with open(part_file_path, "wb") as pf:
+                        for chunk in resp.iter_content(chunk_size=2 * 1024 * 1024):
+                            if cancel_event.is_set():
+                                raise InterruptedError("Cancelled by user")
 
-                        if priority_manager.is_user_upload_active():
-                            self._update_task(task_id, {
-                                "status": "paused",
-                                "phase": "Paused: Prioritizing User Upload 👤",
-                                "speed_bps": 0
-                            })
-                            while priority_manager.is_user_upload_active() and not cancel_event.is_set():
-                                priority_manager.wait_if_user_upload_active(timeout=1.0)
-                            self._update_task(task_id, {
-                                "status": "downloading",
-                                "phase": f"[master-vm1] Resumed Part {part_index}/{total_parts} ▶️"
-                            })
-
-                        if chunk:
-                            pf.write(chunk)
-                            transferred += len(chunk)
-                            now = time.time()
-                            if now - last_rep >= 1.0:
-                                last_rep = now
-                                dt = max(0.1, now - start_time)
-                                speed = int(transferred / dt)
-                                prog = min(99.0, round((transferred / part_size) * 100, 1)) if part_size > 0 else 0
-                                eta = int((part_size - transferred) / speed) if (speed > 0 and part_size > transferred) else 0
+                            if priority_manager.is_user_upload_active():
                                 self._update_task(task_id, {
-                                    "transferred_bytes": transferred,
-                                    "filesize": part_size,
-                                    "progress": prog,
-                                    "speed_bps": speed,
-                                    "eta_seconds": eta,
-                                    "phase": f"[master-vm1] Leeching Part {part_index}/{total_parts} @ {speed/1024/1024:.1f} MB/s ({prog}%)"
+                                    "status": "paused",
+                                    "phase": "Paused: Prioritizing User Upload 👤",
+                                    "speed_bps": 0
+                                })
+                                while priority_manager.is_user_upload_active() and not cancel_event.is_set():
+                                    priority_manager.wait_if_user_upload_active(timeout=1.0)
+                                self._update_task(task_id, {
+                                    "status": "downloading",
+                                    "phase": f"[master-vm1] Resumed Part {part_index}/{total_parts} ▶️"
                                 })
 
-                return transferred
+                            if chunk:
+                                pf.write(chunk)
+                                transferred += len(chunk)
+                                now = time.time()
+                                if now - last_rep >= 1.0:
+                                    last_rep = now
+                                    dt = max(0.1, now - start_time)
+                                    speed = int(transferred / dt)
+                                    prog = min(99.0, round((transferred / part_size) * 100, 1)) if part_size > 0 else 0
+                                    eta = int((part_size - transferred) / speed) if (speed > 0 and part_size > transferred) else 0
+                                    self._update_task(task_id, {
+                                        "transferred_bytes": transferred,
+                                        "filesize": part_size,
+                                        "progress": prog,
+                                        "speed_bps": speed,
+                                        "eta_seconds": eta,
+                                        "phase": f"[master-vm1] Leeching Part {part_index}/{total_parts} @ {speed/1024/1024:.1f} MB/s ({prog}%)"
+                                    })
 
-        downloaded_bytes = await asyncio.to_thread(_download_chunk)
+                    return transferred
 
-        if cancel_event.is_set():
-            raise InterruptedError("Cancelled by user")
+            downloaded_bytes = await asyncio.to_thread(_download_chunk)
 
-        self._update_task(task_id, {
-            "status": "uploading_tg",
-            "phase": f"[master-vm1] Uploading Part {part_index}/{total_parts} to Telegram Cloud ☁️",
-            "progress": 99.0
-        })
+            if cancel_event.is_set():
+                raise InterruptedError("Cancelled by user")
 
-        caption = f"{filename} (Part {part_index})"
-        ftype = get_file_type(filename)
+            self._update_task(task_id, {
+                "status": "uploading_tg",
+                "phase": f"[master-vm1] Uploading Part {part_index}/{total_parts} to Telegram Cloud ☁️",
+                "progress": 99.0
+            })
 
-        res = await upload_part_task(
-            part_file_path=part_file_path,
-            part_index=part_index,
-            file_name=filename,
-            start_byte=range_start,
-            part_size=downloaded_bytes,
-            chat_id=chat_id,
-            bot_manager=bot_manager,
-            fallback_client=client,
-            caption=caption,
-            semaphore=None,
-            is_single_part=False,
-            file_type=ftype,
-            progress=None
-        )
+            caption = f"{filename} (Part {part_index})"
+            ftype = get_file_type(filename)
+
+            res = await upload_part_task(
+                part_file_path=part_file_path,
+                part_index=part_index,
+                file_name=filename,
+                start_byte=range_start,
+                part_size=downloaded_bytes,
+                chat_id=chat_id,
+                bot_manager=bot_manager,
+                fallback_client=client,
+                caption=caption,
+                semaphore=part_slot,
+                is_single_part=False,
+                file_type=ftype,
+                progress=None
+            )
+        finally:
+            part_slot.close()  # a failed or cancelled part gives its share back
 
         try:
             shutil.rmtree(tg_dir, ignore_errors=True)
@@ -1495,7 +1502,9 @@ class RemoteTransferManager:
         last_progress_time = [time.time()]
         last_dl = [0]
         last_up = [0]
-        disk_semaphore = threading.Semaphore(2)  # Cap VM disk buffer to max 2 parts (~3.9GB)
+        # Max 2 parts on disk, each reserved from the server's disk budget
+        disk_semaphore = ThreadPartSlots(expected_total=int(estimated_total[0] or 0))
+        budget_slots = [disk_semaphore]
 
         def get_file_type(fname: str) -> str:
             ext = os.path.splitext(fname)[1].lower()
@@ -1823,7 +1832,8 @@ class RemoteTransferManager:
 
                         mp_upload_tasks = []
                         mp_bytes_map = {}
-                        mp_disk_sem = threading.Semaphore(2)
+                        mp_disk_sem = ThreadPartSlots(expected_total=int(actual_size or 0))
+                        budget_slots.append(mp_disk_sem)
 
                         def _on_mp_part_ready(part_path, p_idx, s_byte, p_sz, is_fin, is_single):
                             caption = f"{f_name} (Part {p_idx})"
@@ -2272,6 +2282,8 @@ class RemoteTransferManager:
             raise
         finally:
             writer.cleanup()
+            for slots in budget_slots:
+                slots.close()  # give back what a failed or cancelled transfer still held
 
     def _update_task(self, task_id: str, updates: dict):
         try:
