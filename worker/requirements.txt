@@ -1,4 +1,4 @@
-pyrogram>=2.0.106
+pyrofork==2.3.68  # the same Telegram library as the server; older Pyrogram rejects new (larger) chat IDs
 tgcrypto>=1.2.5
 aiohttp>=3.9.0
 requests>=2.31.0
