@@ -11,6 +11,8 @@ import com.backendforge.telestore.core.Memory
 import com.backendforge.telestore.core.PhotoDay
 import com.backendforge.telestore.core.PhotoEntry
 import com.backendforge.telestore.core.PhotoMerge
+import com.backendforge.telestore.core.PhotosLayout
+import com.backendforge.telestore.core.PhotosVisibility
 import com.backendforge.telestore.core.ProtectedDelete
 import com.backendforge.telestore.core.SortBy
 import com.backendforge.telestore.core.Timeline
@@ -49,7 +51,6 @@ data class PhotosState(
     val selected: Set<String> = emptySet(),
     /** Places under each day's heading, by [PhotoDay.date] ("" when unknown); filled in as days show. */
     val places: Map<java.time.LocalDate, String> = emptyMap(),
-    val columns: Int = 3,
     val message: String? = null,
 ) {
     val selecting: Boolean get() = selected.isNotEmpty()
@@ -81,6 +82,10 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
         // Choosing other albums (or videos on/off) in Backup changes which phone photos show
         viewModelScope.launch {
             container.backup.settings.map { it.albums to it.includeVideos }.distinctUntilChanged().drop(1).collect { scanPhone() }
+        }
+        // So do the "content from other apps" switches on the Photos view page
+        viewModelScope.launch {
+            container.settings.photosView.map { it.copy(layout = PhotosLayout.DAY, stackSimilar = false) }.distinctUntilChanged().drop(1).collect { scanPhone() }
         }
         // Each photo the backup finishes gets its cloud mark
         viewModelScope.launch {
@@ -150,9 +155,10 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
                             uri = p.uri.toString(), bucketId = p.bucketId, bucket = p.bucket,
                         )
                     }
-                    // Only the albums chosen in Backup (WhatsApp, screenshots… stay out unless chosen)
+                    // The albums chosen in Backup, plus other apps' albums as "Photos view" allows
                     val settings = container.backup.settings.value
-                    Triple(true, PhotoMerge.inBackupAlbums(all, settings.albums, settings.includeVideos), container.backup.backedUpKeys())
+                    val keys = container.backup.backedUpKeys()
+                    Triple(true, PhotosVisibility.visible(all, settings.albums, settings.includeVideos, container.settings.photosView.value, keys), keys)
                 }
             }
             backedUpKeys = keys
@@ -232,15 +238,21 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /** Pinch: 3, 4, 5 or 7 photos per row. */
-    fun zoom(bigger: Boolean) = _state.update {
-        val steps = listOf(3, 4, 5, 7)
-        val i = steps.indexOf(it.columns).coerceAtLeast(0)
-        it.copy(columns = steps[(if (bigger) i - 1 else i + 1).coerceIn(0, steps.lastIndex)])
+    /** Pinch: Month → Day → Comfortable (bigger photos), and back. Remembered like the Photos view page. */
+    fun zoom(bigger: Boolean) {
+        val view = container.settings.photosView.value
+        val next = if (bigger) view.layout.bigger() else view.layout.smaller()
+        if (next != view.layout) container.settings.setPhotosView(view.copy(layout = next))
     }
 
     fun toggle(entry: PhotoEntry) = _state.update {
         it.copy(selected = if (entry.id in it.selected) it.selected - entry.id else it.selected + entry.id)
+    }
+
+    /** A stack of similar photos is picked (or dropped) as one. */
+    fun toggleStack(entries: List<PhotoEntry>) = _state.update {
+        val ids = entries.map { e -> e.id }.toSet()
+        it.copy(selected = if (it.selected.containsAll(ids)) it.selected - ids else it.selected + ids)
     }
 
     fun toggleDay(day: PhotoDay) = _state.update {

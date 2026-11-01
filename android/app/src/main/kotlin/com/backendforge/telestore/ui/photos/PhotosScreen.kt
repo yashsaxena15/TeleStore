@@ -37,10 +37,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -68,6 +65,8 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Layers
+import androidx.compose.material.icons.automirrored.outlined.ViewQuilt
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.PhotoAlbum
 import androidx.compose.material.icons.outlined.PlayCircle
@@ -137,6 +136,10 @@ import com.backendforge.telestore.core.Memory
 import com.backendforge.telestore.core.PhotoDay
 import com.backendforge.telestore.core.PhotoEntry
 import com.backendforge.telestore.core.PhotoHeadings
+import com.backendforge.telestore.core.PhotoStacks
+import com.backendforge.telestore.core.PhotoTiles
+import com.backendforge.telestore.core.PhotosLayout
+import com.backendforge.telestore.core.TileBlock
 import com.backendforge.telestore.core.Timeline
 import com.backendforge.telestore.data.AppContainer
 import com.backendforge.telestore.data.PhotoSource
@@ -150,13 +153,17 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import kotlin.math.roundToInt
 
-/** A row of the timeline grid: a month title, a day heading, or one photo. */
+/** A row of the timeline: a month title, a day heading, or a row of photo tiles. */
 private sealed interface Cell {
-    data class Month(val title: String, val dayIndex: Int) : Cell
+    val key: String
+    data class Month(val title: String, val dayIndex: Int) : Cell { override val key get() = "month-$dayIndex" }
     /** Carries its own day: looking it up by position in the (changing) list of days crashed on refresh. */
-    data class Header(val dayIndex: Int, val day: PhotoDay) : Cell
-    data class Photo(val entry: PhotoEntry, val dayIndex: Int, val date: LocalDate?) : Cell
+    data class Header(val dayIndex: Int, val day: PhotoDay) : Cell { override val key get() = "day-$dayIndex-${day.label}" }
+    data class Tiles(val block: TileBlock<Tile>, val dayIndex: Int, val date: LocalDate?, override val key: String) : Cell
 }
+
+/** One tile: a photo, or a stack of similar ones shown by its first. */
+private data class Tile(val entry: PhotoEntry, val stack: List<PhotoEntry>)
 
 /** The ring's colour when backup is fine. */
 private val BackedUpGreen = Color(0xFF34A853)
@@ -184,6 +191,8 @@ fun PhotosScreen(
     onOpenFolder: (String) -> Unit,
     /** The Files tab ("Import from Files"). */
     onOpenFiles: () -> Unit,
+    /** The "Photos view" page (layout, stacks, other apps). */
+    onPhotosView: () -> Unit,
 ) = PhotosTheme {
     val state by vm.state.collectAsStateWithLifecycle()
     val haptics = rememberHaptics()
@@ -193,7 +202,7 @@ fun PhotosScreen(
     val backup by container.backup.status.collectAsStateWithLifecycle()
     val session by container.session.state.collectAsStateWithLifecycle()
     val api = container.api()
-    val grid = rememberLazyGridState()
+    val grid = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var accountSheet by remember { mutableStateOf(false) }
@@ -220,28 +229,42 @@ fun PhotosScreen(
         onDispose { owner.lifecycle.removeObserver(observer) }
     }
 
-    val cells = remember(state.days) {
+    val view by container.settings.photosView.collectAsStateWithLifecycle()
+    val monthView = view.layout == PhotosLayout.MONTH
+    val cells = remember(state.days, view.layout, view.stackSimilar) {
+        fun tiles(entries: List<PhotoEntry>) =
+            if (view.stackSimilar) PhotoStacks.group(entries, { it.takenAtMillis }, { it.video }).map { Tile(it.first(), it) }
+            else entries.map { Tile(it, listOf(it)) }
         buildList {
-            var previous: LocalDate? = null
-            state.days.forEachIndexed { d, day ->
-                PhotoHeadings.monthTitle(previous, day.date)?.let { add(Cell.Month(it, d)) }
-                add(Cell.Header(d, day))
-                day.entries.forEach { add(Cell.Photo(it, d, day.date)) }
-                if (day.date != null) previous = day.date
+            if (monthView) {
+                // Month: one title per month and small rows of 5, no day headings
+                var start = 0
+                while (start < state.days.size) {
+                    val first = state.days[start].date
+                    var end = start + 1
+                    while (end < state.days.size && sameMonth(state.days[end].date, first)) end++
+                    add(Cell.Month(PhotoHeadings.monthLabel(first), start))
+                    PhotoTiles.grid(tiles(state.days.subList(start, end).flatMap { it.entries }), 5).forEachIndexed { n, block ->
+                        add(Cell.Tiles(block, start, first, "rows-$start-$n"))
+                    }
+                    start = end
+                }
+            } else {
+                var previous: LocalDate? = null
+                state.days.forEachIndexed { d, day ->
+                    PhotoHeadings.monthTitle(previous, day.date)?.let { add(Cell.Month(it, d)) }
+                    add(Cell.Header(d, day))
+                    val dayTiles = tiles(day.entries)
+                    val blocks = if (view.layout == PhotosLayout.COMFORTABLE) PhotoTiles.comfortable(dayTiles) else PhotoTiles.grid(dayTiles, 3)
+                    blocks.forEachIndexed { n, block -> add(Cell.Tiles(block, d, day.date, "rows-$d-$n")) }
+                    if (day.date != null) previous = day.date
+                }
             }
         }
     }
-    // Which day each grid row belongs to (for the date shown while scrolling)
-    val dayOfKey = remember(cells) {
-        cells.associate { c ->
-            when (c) {
-                is Cell.Month -> "month-${c.dayIndex}" to c.dayIndex
-                is Cell.Header -> "day-${c.dayIndex}-${c.day.label}" to c.dayIndex
-                is Cell.Photo -> c.entry.id to c.dayIndex
-            }
-        }
-    }
-    val nearEnd by remember { derivedStateOf { (grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) > grid.layoutInfo.totalItemsCount - 40 } }
+    // Which day each row belongs to (for the date shown while scrolling)
+    val dayOfKey = remember(cells) { cells.associate { it.key to it.dayIndex() } }
+    val nearEnd by remember { derivedStateOf { (grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) > grid.layoutInfo.totalItemsCount - 15 } }
     LaunchedEffect(nearEnd, state.items.size) { if (nearEnd) vm.loadMore() }
     val scrolled by remember { derivedStateOf { grid.firstVisibleItemIndex > 0 || grid.firstVisibleItemScrollOffset > 0 } }
 
@@ -310,10 +333,8 @@ fun PhotosScreen(
                 }
             } else {
                 BoxWithConstraints(Modifier.fillMaxSize()) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(state.columns),
+                    LazyColumn(
                         state = grid,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                         contentPadding = PaddingValues(top = headerHeight, bottom = 24.dp),
                         modifier = Modifier.fillMaxSize().pointerInput(Unit) {
@@ -334,7 +355,7 @@ fun PhotosScreen(
                         },
                     ) {
                         if (!state.canReadPhone && !accessCardClosed && !state.selecting) {
-                            item(span = { GridItemSpan(maxLineSpan) }, key = "phone-access") {
+                            item(key = "phone-access") {
                                 Notice(
                                     icon = Icons.Filled.PhotoLibrary,
                                     title = "Show photos on this phone",
@@ -344,7 +365,7 @@ fun PhotosScreen(
                             }
                         }
                         state.error?.let { error ->
-                            item(span = { GridItemSpan(maxLineSpan) }, key = "server-error") {
+                            item(key = "server-error") {
                                 Notice(
                                     icon = Icons.Filled.CloudOff, title = "Couldn't load your backed-up photos", text = error,
                                     action = "Retry", onAction = { vm.loadMore() }, onClose = null, isError = true,
@@ -352,12 +373,12 @@ fun PhotosScreen(
                             }
                         }
                         if (state.memories.isNotEmpty() && !state.selecting) {
-                            item(span = { GridItemSpan(maxLineSpan) }, key = "memories") { Memories(state.memories, api, onOpenFile) }
+                            item(key = "memories") { Memories(state.memories, api, onOpenFile) }
                         }
                         cells.forEach { cell ->
                             when (cell) {
-                                is Cell.Month -> item(span = { GridItemSpan(maxLineSpan) }, key = "month-${cell.dayIndex}") { MonthTitle(cell.title) }
-                                is Cell.Header -> item(span = { GridItemSpan(maxLineSpan) }, key = "day-${cell.dayIndex}-${cell.day.label}") {
+                                is Cell.Month -> item(key = cell.key) { MonthTitle(cell.title, big = !monthView) }
+                                is Cell.Header -> item(key = cell.key) {
                                     val day = cell.day
                                     LaunchedEffect(day.date, day.entries.size) { vm.loadPlaces(day) }
                                     DayHeader(
@@ -369,29 +390,32 @@ fun PhotosScreen(
                                         onDownloadDay = { vm.downloadDay(day) },
                                     )
                                 }
-                                is Cell.Photo -> item(key = cell.entry.id) {
-                                    PhotoCell(
-                                        entry = cell.entry,
-                                        api = api,
-                                        backupOn = backupSettings.enabled,
-                                        selecting = state.selecting,
-                                        selected = cell.entry.id in state.selected,
-                                        onClick = { if (state.selecting) vm.toggle(cell.entry) else open(cell.entry) },
-                                        onLongClick = { vm.toggle(cell.entry) },
-                                    )
+                                is Cell.Tiles -> item(key = cell.key) {
+                                    TileRow(cell.block) { tile, modifier ->
+                                        PhotoCell(
+                                            tile = tile,
+                                            modifier = modifier,
+                                            api = api,
+                                            backupOn = backupSettings.enabled,
+                                            selecting = state.selecting,
+                                            selected = tile.stack.all { it.id in state.selected },
+                                            onClick = { if (state.selecting) vm.toggleStack(tile.stack) else open(tile.entry) },
+                                            onLongClick = { vm.toggleStack(tile.stack) },
+                                        )
+                                    }
                                 }
                             }
                         }
-                        if (state.loading) item(span = { GridItemSpan(maxLineSpan) }) {
+                        if (state.loading) item {
                             Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(24.dp)) }
                         }
                     }
 
                     // The day being scrolled through, floating at the top left (as in Google Photos)
-                    val topKey = grid.layoutInfo.visibleItemsInfo.firstOrNull { it.offset.y >= with(density) { headerHeight.roundToPx() } - it.size.height / 2 }?.key
+                    val topKey = grid.layoutInfo.visibleItemsInfo.firstOrNull { it.offset >= with(density) { headerHeight.roundToPx() } - it.size / 2 }?.key
                     val floatingDay = (topKey as? String)?.let { dayOfKey[it] }?.let { state.days.getOrNull(it) }
                     // Not while the day's own heading (or its month) is the top row: it says the same
-                    val topIsPhoto = (topKey as? String)?.let { !it.startsWith("day-") && !it.startsWith("month-") } == true
+                    val topIsPhoto = (topKey as? String)?.startsWith("rows-") == true
                     AnimatedVisibility(
                         visible = recentlyScrolled && scrolled && floatingDay != null && topIsPhoto,
                         enter = fadeIn(), exit = fadeOut(),
@@ -399,15 +423,18 @@ fun PhotosScreen(
                     ) {
                         floatingDay?.let { day ->
                             Column {
-                                Text(day.label, color = Color.White, style = MaterialTheme.typography.titleLarge.copy(shadow = OverPhoto, fontSize = 20.sp))
-                                day.date?.let { state.places[it] }?.takeIf { it.isNotEmpty() }?.let {
+                                Text(
+                                    if (monthView) PhotoHeadings.monthLabel(day.date) else day.label,
+                                    color = Color.White, style = MaterialTheme.typography.titleLarge.copy(shadow = OverPhoto, fontSize = 20.sp),
+                                )
+                                if (!monthView) day.date?.let { state.places[it] }?.takeIf { it.isNotEmpty() }?.let {
                                     Text(it, color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodyLarge.copy(shadow = OverPhoto), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                             }
                         }
                     }
 
-                    if (grid.layoutInfo.totalItemsCount > 60) {
+                    if (grid.layoutInfo.totalItemsCount > 25) {
                         AnimatedVisibility(visible = recentlyScrolled || scrubbing, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopEnd)) {
                             DateScrubber(
                                 top = headerHeight,
@@ -415,13 +442,7 @@ fun PhotosScreen(
                                 fraction = if (grid.layoutInfo.totalItemsCount > 0) grid.firstVisibleItemIndex.toFloat() / grid.layoutInfo.totalItemsCount else 0f,
                                 label = { f ->
                                     val i = (f * cells.size).toInt().coerceIn(0, (cells.size - 1).coerceAtLeast(0))
-                                    val date = when (val c = cells.getOrNull(i)) {
-                                        is Cell.Header -> c.day.date
-                                        is Cell.Photo -> c.date
-                                        is Cell.Month -> state.days.getOrNull(c.dayIndex)?.date
-                                        null -> null
-                                    }
-                                    Timeline.month(date)
+                                    Timeline.month(cells.getOrNull(i)?.let { state.days.getOrNull(it.dayIndex())?.date })
                                 },
                                 onScrub = { f -> scope.launch { grid.scrollToItem((f * grid.layoutInfo.totalItemsCount).toInt().coerceAtLeast(0)) } },
                                 onDragging = { scrubbing = it },
@@ -487,6 +508,7 @@ fun PhotosScreen(
             freeable = state.freeable,
             onBackUpNow = { accountSheet = false; BackupWorker.runNow(context, backupSettings) },
             onAlbums = { accountSheet = false; onAlbums() },
+            onPhotosView = { accountSheet = false; onPhotosView() },
             onSettings = { accountSheet = false; onBackup() },
             onDismiss = { accountSheet = false },
         )
@@ -507,6 +529,15 @@ fun PhotosScreen(
 }
 
 private fun PhotoEntry.toSource() = PhotoSource(item = server, localUri = local?.let { Uri.parse(it.uri) }, name = name)
+
+private fun Cell.dayIndex(): Int = when (this) {
+    is Cell.Month -> dayIndex
+    is Cell.Header -> dayIndex
+    is Cell.Tiles -> dayIndex
+}
+
+private fun sameMonth(a: LocalDate?, b: LocalDate?): Boolean =
+    a == b || (a != null && b != null && a.year == b.year && a.month == b.month)
 
 /** Plays a video that's only on the phone in the phone's own player. */
 private fun openOnPhone(context: Context, uri: String) {
@@ -669,6 +700,7 @@ private fun AccountSheet(
     freeable: Int,
     onBackUpNow: () -> Unit,
     onAlbums: () -> Unit,
+    onPhotosView: () -> Unit,
     onSettings: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -686,6 +718,7 @@ private fun AccountSheet(
             }
             if (backupOn) SheetRow(Icons.Filled.CloudUpload, "Back up now", enabled = !running, onClick = onBackUpNow)
             SheetRow(Icons.Outlined.PhotoAlbum, "Albums", onClick = onAlbums)
+            SheetRow(Icons.AutoMirrored.Outlined.ViewQuilt, "Photos view", onClick = onPhotosView)
             SheetRow(Icons.Filled.Settings, if (backupOn) "Backup settings" else "Turn on backup", onClick = onSettings)
             // Backup settings has the "Remove from this phone" button
             if (freeable > 0) SheetRow(Icons.Filled.PhoneAndroid, "Free up space · $freeable on this phone are backed up", onClick = onSettings)
@@ -804,12 +837,14 @@ private fun Memories(memories: List<Memory>, api: com.backendforge.telestore.cor
     }
 }
 
-/** "October", "March 2025": above the first day of each earlier month. */
+/** "October", "March 2025": big above the first day of each earlier month; smaller in Month view. */
 @Composable
-private fun MonthTitle(title: String) {
+private fun MonthTitle(title: String, big: Boolean) {
     Text(
-        title, style = MaterialTheme.typography.displaySmall.copy(fontSize = 34.sp), fontWeight = FontWeight.Normal,
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 28.dp, bottom = 2.dp),
+        title,
+        style = if (big) MaterialTheme.typography.displaySmall.copy(fontSize = 34.sp) else MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
+        fontWeight = FontWeight.Normal,
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = if (big) 28.dp else 20.dp, bottom = if (big) 2.dp else 10.dp),
     )
 }
 
@@ -854,10 +889,33 @@ private fun DayHeader(label: String, places: String, allSelected: Boolean, canDo
     }
 }
 
+/** Lays out one row of tiles: even squares, one wide photo, or a big square beside two small ones. */
+@Composable
+private fun TileRow(block: TileBlock<Tile>, tile: @Composable (Tile, Modifier) -> Unit) {
+    val gap = 2.dp
+    when (block) {
+        is TileBlock.Row -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+            block.items.forEach { tile(it, Modifier.weight(1f).aspectRatio(1f)) }
+            repeat(block.columns - block.items.size) { Spacer(Modifier.weight(1f)) }
+        }
+        is TileBlock.Hero -> tile(block.item, Modifier.fillMaxWidth().aspectRatio(1.5f))
+        is TileBlock.Feature -> BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val small = (maxWidth - gap * 2) / 3
+            val big = small * 2 + gap
+            Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                if (block.bigOnLeft) tile(block.big, Modifier.size(big))
+                Column(verticalArrangement = Arrangement.spacedBy(gap)) { block.small.forEach { tile(it, Modifier.size(small)) } }
+                if (!block.bigOnLeft) tile(block.big, Modifier.size(big))
+            }
+        }
+    }
+}
+
 @kotlin.OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun PhotoCell(
-    entry: PhotoEntry,
+    tile: Tile,
+    modifier: Modifier,
     api: com.backendforge.telestore.core.TeleStoreApi,
     backupOn: Boolean,
     selecting: Boolean,
@@ -865,12 +923,13 @@ private fun PhotoCell(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
+    val entry = tile.entry
     val haptics = rememberHaptics()
     val inset by SelectionMotion.inset(selected)
     val highlight by SelectionMotion.background(selected)
     val local = entry.local
     val server = entry.server
-    Box(Modifier.aspectRatio(1f).background(highlight).combinedClickable(onClick = onClick, onLongClick = { haptics.longPress(); onLongClick() })) {
+    Box(modifier.background(highlight).combinedClickable(onClick = onClick, onLongClick = { haptics.longPress(); onLongClick() })) {
         // The photo shrinks into a rounded tile when selected, and back out with a spring
         Box(Modifier.fillMaxSize().padding(inset).clip(RoundedCornerShape(inset)).background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
             // The phone's copy when there is one: no download, and it works offline
@@ -885,6 +944,18 @@ private fun PhotoCell(
                 Icons.Outlined.PlayCircle, contentDescription = "Video", tint = Color.White,
                 modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).size(24.dp),
             )
+        } else if (tile.stack.size > 1) {
+            // A stack of similar photos: how many are in it
+            Row(
+                Modifier.align(Alignment.TopEnd).padding(6.dp).background(Color(0x66000000), RoundedCornerShape(10.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Outlined.Layers, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                Text(
+                    "${tile.stack.size}", color = Color.White, style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(start = 3.dp).semantics { contentDescription = "${tile.stack.size} similar photos" },
+                )
+            }
         }
         if (entry.starred && !selecting) {
             Icon(Icons.Filled.Star, contentDescription = "Starred", tint = Color.White, modifier = Modifier.align(Alignment.BottomStart).padding(6.dp).size(18.dp))

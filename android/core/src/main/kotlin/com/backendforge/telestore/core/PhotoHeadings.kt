@@ -24,6 +24,13 @@ object PhotoHeadings {
         return if (date.year == today.year) MONTH.format(date) else MONTH_YEAR.format(date)
     }
 
+    /** Month view's titles: "November" this year, "March 2025" before, "Undated". */
+    fun monthLabel(date: LocalDate?, today: LocalDate = LocalDate.now()): String = when {
+        date == null -> "Undated"
+        date.year == today.year -> MONTH.format(date)
+        else -> MONTH_YEAR.format(date)
+    }
+
     /** "Backing up 11 photos", "Backing up 1 photo", "Getting ready to back up". */
     fun backupTitle(pending: Int): String = when {
         pending <= 0 -> "Getting ready to back up"

@@ -28,6 +28,13 @@ class PhotoHeadingsTest {
     }
 
     @Test
+    fun `month view names every month`() {
+        assertEquals("November", PhotoHeadings.monthLabel(today, today))
+        assertEquals("March 2025", PhotoHeadings.monthLabel(LocalDate.of(2025, 3, 9), today))
+        assertEquals("Undated", PhotoHeadings.monthLabel(null, today))
+    }
+
+    @Test
     fun `backup title counts the photos left`() {
         assertEquals("Backing up 11 photos", PhotoHeadings.backupTitle(11))
         assertEquals("Backing up 1 photo", PhotoHeadings.backupTitle(1))

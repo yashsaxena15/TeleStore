@@ -49,6 +49,8 @@ import com.backendforge.telestore.ui.photos.AlbumsScreen
 import com.backendforge.telestore.ui.photos.BackupScreen
 import com.backendforge.telestore.ui.photos.PhotosScreen
 import com.backendforge.telestore.ui.photos.PhotosTheme
+import com.backendforge.telestore.ui.photos.PhotosViewScreen
+import com.backendforge.telestore.ui.photos.CustomizeAppsScreen
 import com.backendforge.telestore.ui.photos.PhotosViewModel
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -678,8 +680,13 @@ fun MainScreen(
                             onNotifications = { navController.navigate(ROUTE_NOTIFICATIONS) },
                             onOpenFolder = { navigateToFolder("photos", it) },
                             onOpenFiles = { navigateToTab(MainTab.FILES) },
+                            onPhotosView = { navController.navigate("photos_view") },
                         )
                     }
+                    composable("photos_view") {
+                        PhotosTheme { PhotosViewScreen(container, onBack = { navController.popBackStack() }, onCustomizeApps = { navController.navigate("photos_apps") }) }
+                    }
+                    composable("photos_apps") { PhotosTheme { CustomizeAppsScreen(container, onBack = { navController.popBackStack() }) } }
                     composable("photos_backup") { PhotosTheme { BackupScreen(container, onBack = { navController.popBackStack() }) } }
                     composable("photos_albums") {
                         PhotosTheme { AlbumsScreen(container, onBack = { navController.popBackStack() }, onOpenFolder = { navigateToFolder("photos", it) }) }
