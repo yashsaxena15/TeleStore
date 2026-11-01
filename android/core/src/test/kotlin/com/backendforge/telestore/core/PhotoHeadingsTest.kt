@@ -28,6 +28,27 @@ class PhotoHeadingsTest {
     }
 
     @Test
+    fun `viewer header reads like Google Photos`() {
+        val zone = java.time.ZoneId.of("Asia/Kolkata")
+        // 2026-11-01 18:35 in India
+        val millis = java.time.ZonedDateTime.of(2026, 11, 1, 18, 35, 0, 0, zone).toInstant().toEpochMilli()
+        assertEquals("Nov 1", PhotoHeadings.viewerDay(millis, today, zone))
+        assertEquals("Nov 1, 2026", PhotoHeadings.viewerDay(millis, LocalDate.of(2027, 1, 5), zone))
+        assertNull(PhotoHeadings.viewerDay(null, today, zone))
+        assertEquals("6:35 PM • Gandhinagar, Gujarat", PhotoHeadings.viewerLine(millis, "Gandhinagar, Gujarat", zone))
+        assertEquals("6:35 PM", PhotoHeadings.viewerLine(millis, " ", zone))
+        assertEquals("Ahmedabad", PhotoHeadings.viewerLine(null, "Ahmedabad", zone))
+    }
+
+    @Test
+    fun `details chips read like Google Photos`() {
+        val info = PhotoInfo(width = 4096, height = 2304, aperture = 1.5, exposure = 1 / 105.0, focalLength = 4.95, iso = 80)
+        assertEquals(listOf("ƒ/1.5", "1/105s", "4.95 mm", "ISO80"), PhotoDetails.exposureCells(info))
+        assertEquals(listOf("9.4 MP", "4096 x 2304"), PhotoDetails.fileChips(info))
+        assertEquals(emptyList<String>(), PhotoDetails.exposureCells(PhotoInfo()))
+    }
+
+    @Test
     fun `month view names every month`() {
         assertEquals("November", PhotoHeadings.monthLabel(today, today))
         assertEquals("March 2025", PhotoHeadings.monthLabel(LocalDate.of(2025, 3, 9), today))

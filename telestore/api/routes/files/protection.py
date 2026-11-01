@@ -125,6 +125,60 @@ def folder_color(body: ColorRequest, user: User = Depends(require_auth)):
     return {"color": body.color}
 
 
+class PhotoMetaRequest(BaseModel):
+    """Only the fields sent are changed; null clears caption, place and location."""
+    archived: Optional[bool] = None
+    caption: Optional[str] = None
+    taken_at: Optional[str] = None
+    place: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+
+@router.post("/{file_id}/photo-meta")
+async def photo_meta(file_id: str, body: PhotoMetaRequest, user: User = Depends(require_auth)):
+    """Photos' own details on a file: archived, caption, when and where it was taken."""
+    from datetime import datetime, timezone
+
+    doc = _own(file_id, user)
+    if doc.get("file_type") == "folder":
+        raise HTTPException(status_code=400, detail="Folders have no photo details.")
+    sent = body.model_fields_set
+    changes: dict = {}
+    if "archived" in sent:
+        changes["archived"] = bool(body.archived)
+    if "caption" in sent:
+        caption = (body.caption or "").strip()
+        if len(caption) > 2000:
+            raise HTTPException(status_code=400, detail="Captions can be up to 2000 characters.")
+        changes["caption"] = caption or None
+    if "taken_at" in sent:
+        try:
+            when = datetime.fromisoformat((body.taken_at or "").replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="That date isn't valid.")
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        changes["taken_at"] = when.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    if "place" in sent:
+        changes["place"] = (body.place or "").strip()[:200] or None
+    if "latitude" in sent or "longitude" in sent:
+        lat, lon = body.latitude, body.longitude
+        if (lat is None) != (lon is None) or (lat is not None and not (-90 <= lat <= 90 and -180 <= lon <= 180)):
+            raise HTTPException(status_code=400, detail="That location isn't valid.")
+        changes["latitude"], changes["longitude"] = lat, lon
+    if changes:
+        database.Files.update_one({"_id": doc["_id"]}, {"$set": changes})
+    return {
+        "archived": changes.get("archived", bool(doc.get("archived", False))),
+        "caption": changes.get("caption", doc.get("caption")),
+        "taken_at": changes.get("taken_at", doc.get("taken_at")),
+        "place": changes.get("place", doc.get("place")),
+        "latitude": changes.get("latitude", doc.get("latitude")),
+        "longitude": changes.get("longitude", doc.get("longitude")),
+    }
+
+
 @router.get("/{file_id}/photo-info")
 async def photo_info(file_id: str, request: Request, user: User = Depends(require_auth)):
     """Camera, exposure, size, date and location from the photo itself (read once, then kept)."""
@@ -150,4 +204,10 @@ async def photo_info(file_id: str, request: Request, user: User = Depends(requir
             raise HTTPException(status_code=422, detail="This photo's details couldn't be read.")
         database.Files.update_one({"_id": doc["_id"]}, {"$set": {"photo_info": info}})
     parent = doc.get("file_path") or "/"
-    return {**info, "file_name": doc.get("file_name"), "file_size": doc.get("file_size"), "folder": parent, "taken_at": info.get("taken_at") or doc.get("taken_at")}
+    out = {**info, "file_name": doc.get("file_name"), "file_size": doc.get("file_size"), "folder": parent,
+           # A date or place the owner set wins over the photo's own
+           "taken_at": doc.get("taken_at") or info.get("taken_at"),
+           "caption": doc.get("caption"), "place": doc.get("place"), "archived": bool(doc.get("archived", False))}
+    if doc.get("latitude") is not None and doc.get("longitude") is not None:
+        out["latitude"], out["longitude"] = doc["latitude"], doc["longitude"]
+    return out

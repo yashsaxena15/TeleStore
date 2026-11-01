@@ -78,6 +78,7 @@ dependencies {
     implementation(libs.androidx.palette)
     // Photo details (camera, exposure, location) read from photos on the phone
     implementation(libs.androidx.exifinterface)
+    implementation(libs.androidx.print)
     // App lock: fingerprint, face or the phone's PIN (BiometricPrompt needs a FragmentActivity)
     implementation(libs.androidx.biometric)
     implementation(libs.androidx.fragment)

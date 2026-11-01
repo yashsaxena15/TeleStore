@@ -1,8 +1,5 @@
 package com.backendforge.telestore.ui.photos
 
-import android.content.ActivityNotFoundException
-import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -67,6 +64,7 @@ import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudDone
+import androidx.compose.material.icons.outlined.Collections
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Layers
@@ -305,18 +303,12 @@ fun PhotosScreen(
     // The albums for "Add to album" load as a selection starts
     LaunchedEffect(state.selecting) { if (state.selecting) vm.loadAlbums() }
 
+    // Photos and videos open in the same viewer, swiping through the whole timeline as in Google Photos
     fun open(entry: PhotoEntry) {
-        val server = entry.server
-        when {
-            entry.video && server != null -> onOpenFile(server, state.items)
-            // A video only on the phone: the phone's own player
-            entry.video -> entry.local?.let { openOnPhone(context, it.uri) }
-            else -> {
-                val photos = state.entries.filter { !it.video }
-                val index = photos.indexOfFirst { it.id == entry.id }.coerceAtLeast(0)
-                onOpenPhotos(photos.map { it.toSource() }, index)
-            }
-        }
+        val all = state.entries
+        val index = all.indexOfFirst { it.id == entry.id }.coerceAtLeast(0)
+        val placeOf = state.places
+        onOpenPhotos(all.map { e -> e.toSource(placeOf) }, index)
     }
 
     fun backUpNow() {
@@ -494,6 +486,7 @@ fun PhotosScreen(
                     TopBar(
                         ring = ring, panelOpen = panelOpen, initial = initial,
                         onPanel = { panelOpen = !panelOpen },
+                        onCollections = onAlbums,
                         onCreate = { createSheet = true },
                         onNotifications = onNotifications,
                         onAccount = { accountSheet = true },
@@ -608,7 +601,16 @@ fun PhotosScreen(
     }
 }
 
-private fun PhotoEntry.toSource() = PhotoSource(item = server, localUri = local?.let { Uri.parse(it.uri) }, name = name)
+private fun PhotoEntry.toSource(places: Map<LocalDate, String>) = PhotoSource(
+    item = server,
+    localUri = local?.let { Uri.parse(it.uri) },
+    name = name,
+    takenAtMillis = takenAtMillis,
+    // The owner's own place for the photo first, else the day's places
+    place = server?.place ?: takenAtMillis?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toLocalDate() }?.let { places[it] },
+    video = video,
+    backedUp = backedUp,
+)
 
 private fun Cell.dayIndex(): Int = when (this) {
     is Cell.Month -> dayIndex
@@ -619,19 +621,18 @@ private fun Cell.dayIndex(): Int = when (this) {
 private fun sameMonth(a: LocalDate?, b: LocalDate?): Boolean =
     a == b || (a != null && b != null && a.year == b.year && a.month == b.month)
 
-/** Plays a video that's only on the phone in the phone's own player. */
-private fun openOnPhone(context: Context, uri: String) {
-    val intent = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(uri), "video/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    try {
-        context.startActivity(intent)
-    } catch (e: ActivityNotFoundException) {
-        Toast.makeText(context, "No app on this phone can play this video.", Toast.LENGTH_SHORT).show()
-    }
-}
-
 /** Backup pill (or the logo when all is backed up) on the left; +, bell and account on the right. */
 @Composable
-private fun TopBar(ring: BackupRing, panelOpen: Boolean, initial: String, onPanel: () -> Unit, onCreate: () -> Unit, onNotifications: () -> Unit, onAccount: () -> Unit) {
+private fun TopBar(
+    ring: BackupRing,
+    panelOpen: Boolean,
+    initial: String,
+    onPanel: () -> Unit,
+    onCollections: () -> Unit,
+    onCreate: () -> Unit,
+    onNotifications: () -> Unit,
+    onAccount: () -> Unit,
+) {
     Row(Modifier.fillMaxWidth().height(64.dp).padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         when {
             panelOpen -> Surface(onClick = onPanel, shape = CircleShape, color = MaterialTheme.colorScheme.background, modifier = Modifier.size(44.dp)) {
@@ -647,6 +648,7 @@ private fun TopBar(ring: BackupRing, panelOpen: Boolean, initial: String, onPane
             else -> BackupPill(ring, onPanel)
         }
         Spacer(Modifier.weight(1f))
+        IconButton(onClick = onCollections) { Icon(Icons.Outlined.Collections, contentDescription = "Collections", modifier = Modifier.size(26.dp)) }
         IconButton(onClick = onCreate) { Icon(Icons.Outlined.Add, contentDescription = "Create", modifier = Modifier.size(28.dp)) }
         IconButton(onClick = onNotifications) { Icon(Icons.Outlined.Notifications, contentDescription = "Notifications", modifier = Modifier.size(26.dp)) }
         Avatar(initial, ring, onAccount)
@@ -797,7 +799,7 @@ private fun AccountSheet(
                 }
             }
             if (backupOn) SheetRow(Icons.Filled.CloudUpload, "Back up now", enabled = !running, onClick = onBackUpNow)
-            SheetRow(Icons.Outlined.PhotoAlbum, "Albums", onClick = onAlbums)
+            SheetRow(Icons.Outlined.Collections, "Collections", onClick = onAlbums)
             SheetRow(Icons.AutoMirrored.Outlined.ViewQuilt, "Photos view", onClick = onPhotosView)
             SheetRow(Icons.Filled.Settings, if (backupOn) "Backup settings" else "Turn on backup", onClick = onSettings)
             // Backup settings has the "Remove from this phone" button

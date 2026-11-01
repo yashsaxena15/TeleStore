@@ -24,6 +24,22 @@ object PhotoHeadings {
         return if (date.year == today.year) MONTH.format(date) else MONTH_YEAR.format(date)
     }
 
+    private val VIEWER_DAY = DateTimeFormatter.ofPattern("MMM d", Locale.US)
+    private val VIEWER_DAY_YEAR = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.US)
+    private val VIEWER_TIME = DateTimeFormatter.ofPattern("h:mm a", Locale.US)
+
+    /** The viewer's title: "Nov 1" this year, "Nov 1, 2025" before; null when undated. */
+    fun viewerDay(millis: Long?, today: LocalDate = LocalDate.now(), zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String? {
+        val at = millis?.takeIf { it > 0 }?.let { java.time.Instant.ofEpochMilli(it).atZone(zone) } ?: return null
+        return if (at.year == today.year) VIEWER_DAY.format(at) else VIEWER_DAY_YEAR.format(at)
+    }
+
+    /** The viewer's second line: "6:35 PM • Gandhinagar, Gujarat" (either part alone). */
+    fun viewerLine(millis: Long?, place: String?, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
+        val time = millis?.takeIf { it > 0 }?.let { VIEWER_TIME.format(java.time.Instant.ofEpochMilli(it).atZone(zone)) }
+        return listOfNotNull(time, place?.trim()?.ifBlank { null }).joinToString(" • ")
+    }
+
     /** Month view's titles: "November" this year, "March 2025" before, "Undated". */
     fun monthLabel(date: LocalDate?, today: LocalDate = LocalDate.now()): String = when {
         date == null -> "Undated"

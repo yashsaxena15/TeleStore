@@ -44,7 +44,12 @@ class FileData:
     taken_at: str = None  # when a photo/video was taken (from the phone's backup), ISO UTC
     protected: bool = False  # deleting needs the password (Protect from deletion)
     color: str = None  # a folder's colour ("red", "blue"…), None for the default
-    
+    archived: bool = False  # hidden from the Photos timeline (Photos' Archive)
+    caption: str = None  # the owner's caption on a photo (not the Telegram message's)
+    place: str = None  # where a photo was taken, as set by the owner ("Gandhinagar, Gujarat")
+    latitude: float = None  # the owner's location for the photo (overrides the photo's own GPS)
+    longitude: float = None
+
 class Files(Collection):
     def __init__(self,collection: Collection) -> None:
         super().__init__(
@@ -347,6 +352,9 @@ class Files(Collection):
         # Starred path
         elif path in ["starred", "/starred", "/Home/Starred", "Starred", "/Starred"]:
             query = build_query({"starred": True, "trashed": {"$ne": True}, "is_vault": {"$ne": True}, "file_path": {"$not": {"$regex": "^/?Vault"}}})
+        # Photos' Archive: photos and videos hidden from the timeline
+        elif path in ["archive", "/archive", "/Home/Archive", "Archive", "/Archive"]:
+            query = build_query({"archived": True, "trashed": {"$ne": True}, "is_vault": {"$ne": True}, "file_path": {"$not": {"$regex": "^/?Vault"}}})
         # Telegram Inbox path
         elif path in ["inbox", "/inbox", "Telegram Inbox", "/Telegram Inbox", "/Home/Telegram Inbox", "inbox/"]:
             query = build_query({"file_path": "/Telegram Inbox", "trashed": {"$ne": True}, "is_vault": {"$ne": True}})
@@ -363,7 +371,8 @@ class Files(Collection):
             # since some uploads (e.g. over WebDAV) are stored as "document" whatever they are
             kind_rule = KIND_FILTERS.get((kind or "").lower())
             if (kind or "").lower() == "media":
-                # Photos and videos together (the app's Photos timeline)
+                # Photos and videos together (the app's Photos timeline); archived ones stay out
+                query["archived"] = {"$ne": True}
                 query["$or"] = [
                     {"file_type": {"$in": ["photo", "video"]}},
                     {"file_name": {"$regex": KIND_FILTERS["photo"][1], "$options": "i"}},
@@ -418,6 +427,11 @@ class Files(Collection):
                 taken_at=file_dict.get("taken_at"),
                 protected=bool(file_dict.get("protected", False)),
                 color=file_dict.get("color"),
+                archived=bool(file_dict.get("archived", False)),
+                caption=file_dict.get("caption"),
+                place=file_dict.get("place"),
+                latitude=file_dict.get("latitude"),
+                longitude=file_dict.get("longitude"),
             )
 
         if page is not None or page_size is not None:

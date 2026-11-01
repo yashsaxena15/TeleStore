@@ -45,7 +45,7 @@ import com.backendforge.telestore.ui.vault.VaultScreen
 import com.backendforge.telestore.ui.vault.VaultViewModel
 import com.backendforge.telestore.ui.links.AddLinkScreen
 import com.backendforge.telestore.ui.links.AddLinkViewModel
-import com.backendforge.telestore.ui.photos.AlbumsScreen
+import com.backendforge.telestore.ui.photos.CollectionsScreen
 import com.backendforge.telestore.ui.photos.BackupScreen
 import com.backendforge.telestore.ui.photos.PhotosScreen
 import com.backendforge.telestore.ui.photos.PhotosTheme
@@ -689,7 +689,17 @@ fun MainScreen(
                     composable("photos_apps") { PhotosTheme { CustomizeAppsScreen(container, onBack = { navController.popBackStack() }) } }
                     composable("photos_backup") { PhotosTheme { BackupScreen(container, onBack = { navController.popBackStack() }) } }
                     composable("photos_albums") {
-                        PhotosTheme { AlbumsScreen(container, onBack = { navController.popBackStack() }, onOpenFolder = { navigateToFolder("photos", it) }) }
+                        PhotosTheme {
+                            CollectionsScreen(
+                                container,
+                                onBack = { navController.popBackStack() },
+                                onOpenFolder = { navigateToFolder("photos", it) },
+                                onOpenPhotos = { sources, index ->
+                                    container.playback.openPhotoSources(sources, index)
+                                    navController.navigate(ROUTE_PHOTOS)
+                                },
+                            )
+                        }
                     }
                     composable(
                         route = "photos_folder?path={path}",
@@ -844,7 +854,7 @@ fun MainScreen(
                     PhotoViewerScreen(
                         photos = container.playback.photos,
                         startIndex = container.playback.photoIndex,
-                        api = container.api(),
+                        container = container,
                         onBack = { navController.popBackStack() },
                         offlineCopy = { container.transfers.store.offlineCopy(context, it.id) },
                     )

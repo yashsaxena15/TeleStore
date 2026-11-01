@@ -43,6 +43,34 @@ class OpenElsewhere internal constructor(
     fun openWith(item: FileItem) = fetchThen(item) { FileCache.viewIntent(it, "Open ${item.name} with") }
 
     /**
+     * Gets [item] onto the phone (same progress dialog), then hands its local copy to [use]: for
+     * actions that need a file, like printing or "Use as".
+     */
+    fun withLocalFile(item: FileItem, use: (com.backendforge.telestore.data.LocalFile) -> Unit) {
+        job?.cancel()
+        fetching = item
+        progress = 0f
+        error = null
+        job = scope.launch {
+            try {
+                val file = container.files.fetch(item) { progress = it }
+                fetching = null
+                try {
+                    use(file)
+                } catch (e: ActivityNotFoundException) {
+                    error = "No app on this phone can do that with ${item.name}."
+                }
+            } catch (e: CancellationException) {
+                fetching = null
+                throw e
+            } catch (e: Exception) {
+                fetching = null
+                error = (e as? ApiException)?.message ?: "Couldn't get ${item.name}."
+            }
+        }
+    }
+
+    /**
      * Shares several photos at once: [phone] are sent as they are, [server] are fetched first (with
      * the same progress dialog, one by one). [mime] is the shared type: images, videos, or anything.
      */

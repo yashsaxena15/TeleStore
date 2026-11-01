@@ -85,6 +85,8 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
         scanPhone()
         // A finished backup or upload shows up straight away
         viewModelScope.launch { container.transfers.store.uploaded.collect { refresh() } }
+        // So does anything changed in the viewer (archived, trashed, added to an album, new date)
+        viewModelScope.launch { container.photosChanged.collect { refresh() } }
         // Choosing other albums (or videos on/off) in Backup changes which phone photos show
         viewModelScope.launch {
             container.backup.settings.map { it.albums to it.includeVideos }.distinctUntilChanged().drop(1).collect { scanPhone() }
