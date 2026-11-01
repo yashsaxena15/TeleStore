@@ -194,7 +194,7 @@ class TestTransfer:
                 patch.object(mgr, "_update_task") as update:
             asyncio.run(mgr._run_download_and_upload(self._task(), MagicMock(is_set=lambda: False)))
         assert upload.call_args.kwargs["is_single_part"] and upload.call_args.kwargs["file_type"] == "video"
-        kwargs = database.Files.add_file.call_args.kwargs
+        kwargs = database.Files.claim_upload.call_args.kwargs
         assert kwargs["file_path"] == "/Home/Insta" and kwargs["owner_id"] == "42" and kwargs["is_vault"] is True and kwargs["file_size"] == 10
         assert update.call_args.args[1]["status"] == "completed"
         assert not (tmp_path / "tg_files" / "remote_rt_1").exists()
@@ -247,7 +247,7 @@ class TestTransfer:
             asyncio.run(mgr._run_download_and_upload(task, MagicMock(is_set=lambda: False)))
         assert gdm.initiate_resumable_upload.call_args.kwargs["parent_id"] == "fold9"
         assert b"".join(sent) == b"abc"
-        database.Files.add_file.assert_not_called()
+        database.Files.claim_upload.assert_not_called()
 
 
 def test_workers_never_claim_instagram_tasks(client, test_secrets):

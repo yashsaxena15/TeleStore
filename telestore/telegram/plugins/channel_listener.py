@@ -7,13 +7,40 @@ from pyrogram.types import Message
 from d4rk.Logs import setup_logger
 
 from telestore.db import database
-from telestore.config import OWNER, LOGS, MOVIE, GROUP, FILTER_CHAT
+from telestore.config import OWNER, LOGS, MOVIE, GROUP, FILTER_CHAT, TOKENS
 
 logger = setup_logger(__name__)
 
 # Concurrency lock to prevent race conditions across parallel bot tasks
 _listener_lock = asyncio.Lock()
 _startup_sync_done = False
+
+# Every TeleStore bot, including the ones lent to workers on other machines: a bot's ID is the
+# number before ":" in its token
+OWN_BOT_IDS = {int(t.split(":", 1)[0]) for t in TOKENS if t.split(":", 1)[0].isdigit()}
+# A TeleStore upload is recorded once its sender reports it done (a worker can take a while):
+# wait this long before taking an unrecorded file for Telegram Inbox
+INBOX_GRACE_SECONDS = 15
+
+
+def is_telestore_upload(message: Message) -> bool:
+    """Files TeleStore sent itself (uploads, leeches, workers, archives, split parts) never go to
+    Telegram Inbox; they belong in the folder their upload records."""
+    sender = message.from_user or getattr(message, "via_bot", None)
+    if sender and sender.id in OWN_BOT_IDS:
+        return True
+    caption = (message.caption or "").strip()
+    if (
+        caption.startswith("Uploaded file:")
+        or caption.startswith("Uploaded multi-part file:")
+        or caption.startswith("Archive:")
+        or re.search(r'\(Part \d+', caption, re.IGNORECASE)
+    ):
+        return True
+    # Intermediate parts of split files (filename.part1, filename.part2…)
+    raw_media = message.document or message.video or message.audio or message.photo
+    raw_name = getattr(raw_media, 'file_name', '') or ''
+    return bool(re.search(r'\.part\d+$', raw_name, re.IGNORECASE))
 
 
 def extract_media_info(message: Message):
@@ -112,30 +139,26 @@ async def auto_channel_file_listener(client: Client, message: Message):
     and store it in the user's 'Telegram Inbox' so it appears in the Web Drive sidebar in real time.
     """
     try:
-        chat_id = message.chat.id
-        msg_id = message.id
-
-        # 1. Skip if message is outgoing or sent by the bot itself
+        # 1. Skip what this bot sent, and anything TeleStore uploaded itself
         if getattr(message, 'outgoing', False):
             return
         if client.me and message.from_user and message.from_user.id == client.me.id:
             return
-        
-        # Skip web app uploads and multi-part chunk intermediate uploads
-        caption = (message.caption or "").strip()
-        if (
-            caption.startswith("Uploaded file:")
-            or caption.startswith("Uploaded multi-part file:")
-            or caption.startswith("Archive:")
-            or bool(re.search(r'\(Part \d+', caption, re.IGNORECASE))
-        ):
+        if is_telestore_upload(message):
             return
+        # Captured a little later, in the background (the bot keeps handling other updates)
+        asyncio.create_task(_capture_for_inbox(message))
+    except Exception as e:
+        logger.error(f"[CHANNEL_LISTENER] Error in auto_channel_file_listener: {e}", exc_info=True)
 
-        # Skip intermediate multi-part chunk files (e.g. filename.part1, filename.part2)
-        raw_media = message.document or message.video or message.audio or message.photo
-        raw_name = getattr(raw_media, 'file_name', '') or ''
-        if re.search(r'\.part\d+$', raw_name, re.IGNORECASE):
-            return
+
+async def _capture_for_inbox(message: Message):
+    """Saves a file someone posted into the storage chat to its owner's Telegram Inbox, unless
+    TeleStore recorded it in the meantime."""
+    try:
+        chat_id = message.chat.id
+        msg_id = message.id
+        await asyncio.sleep(INBOX_GRACE_SECONDS)
 
         async with _listener_lock:
             # 2. Check if file already exists in database for this chat and message_id
@@ -198,7 +221,7 @@ async def auto_channel_file_listener(client: Client, message: Message):
             from telestore.services import event_service
             event_service.inbox_file(owner_id, media_info["file_name"], chat_id, msg_id)
     except Exception as e:
-        logger.error(f"[CHANNEL_LISTENER] Error in auto_channel_file_listener: {e}", exc_info=True)
+        logger.error(f"[CHANNEL_LISTENER] Error saving a file to Telegram Inbox: {e}", exc_info=True)
 
 
 async def catchup_channel_inbox(client: Client, chat_id: int, owner_id: str, max_lookahead: int = 500):
@@ -238,8 +261,7 @@ async def catchup_channel_inbox(client: Client, chat_id: int, owner_id: str, max
                 if not media_info:
                     continue
 
-                caption = (m.caption or "").strip()
-                if caption.startswith("Uploaded file:") or caption.startswith("Uploaded multi-part file:"):
+                if is_telestore_upload(m):
                     continue
 
                 if database.Files.check_if_exists(chat_id_int, m.id, media_info["file_unique_id"]):

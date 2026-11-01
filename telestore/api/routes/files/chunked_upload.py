@@ -306,7 +306,7 @@ async def _process_upload_completion(upload_id: str, session: dict) -> None:
         chat_id = session["chat_id"]
         if len(results) == 1:
             res = results[0]
-            database.Files.add_file(
+            database.Files.claim_upload(
                 chat_id=chat_id, message_id=res["message_id"], thumbnail=res["thumbnail"], file_type=file_type,
                 file_unique_id=res["file_unique_id"], file_size=session["filesize"], file_name=session["filename"],
                 file_caption=f"Uploaded file: {session['filename']}", file_path=session["path"], owner_id=session["user_id"],
