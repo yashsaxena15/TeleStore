@@ -5,7 +5,12 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
-import com.backendforge.telestore.ui.components.rememberHaptics
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,6 +25,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,37 +45,57 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PauseCircleOutline
 import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.UnfoldMore
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.CloudDone
+import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.PhotoAlbum
+import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.outlined.Upload
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -79,10 +105,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
@@ -90,8 +120,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -104,27 +136,40 @@ import com.backendforge.telestore.core.FileItem
 import com.backendforge.telestore.core.Memory
 import com.backendforge.telestore.core.PhotoDay
 import com.backendforge.telestore.core.PhotoEntry
+import com.backendforge.telestore.core.PhotoHeadings
 import com.backendforge.telestore.core.Timeline
 import com.backendforge.telestore.data.AppContainer
 import com.backendforge.telestore.data.PhotoSource
-import com.backendforge.telestore.ui.components.FileThumbnail
 import com.backendforge.telestore.ui.components.AnimatedShow
+import com.backendforge.telestore.ui.components.FileThumbnail
 import com.backendforge.telestore.ui.components.SelectionMotion
+import com.backendforge.telestore.ui.components.rememberHaptics
 import com.backendforge.telestore.ui.home.AppLogo
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 import kotlin.math.roundToInt
 
-/** A row of the timeline grid: a day heading or one photo. */
+/** A row of the timeline grid: a month title, a day heading, or one photo. */
 private sealed interface Cell {
+    data class Month(val title: String, val dayIndex: Int) : Cell
     /** Carries its own day: looking it up by position in the (changing) list of days crashed on refresh. */
     data class Header(val dayIndex: Int, val day: PhotoDay) : Cell
-    data class Photo(val entry: PhotoEntry, val dayIndex: Int, val date: java.time.LocalDate?) : Cell
+    data class Photo(val entry: PhotoEntry, val dayIndex: Int, val date: LocalDate?) : Cell
 }
 
 /** The ring's colour when backup is fine. */
 private val BackedUpGreen = Color(0xFF34A853)
 
-@kotlin.OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
+/** White words over photos keep a soft shadow so they read on bright pictures too. */
+private val OverPhoto = Shadow(Color(0x99000000), blurRadius = 10f)
+
+/**
+ * Photos, laid out like Google Photos: the backup pill and the +, bell and account buttons float
+ * over the timeline; memories as tall cards; each day with its places, a select tick and a menu;
+ * month titles; edge-to-edge photos; and a round handle on the right to fly through the dates.
+ */
+@kotlin.OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun PhotosScreen(
     vm: PhotosViewModel,
@@ -134,10 +179,16 @@ fun PhotosScreen(
     onOpenPhotos: (List<PhotoSource>, Int) -> Unit,
     onAlbums: () -> Unit,
     onBackup: () -> Unit,
-) {
+    onNotifications: () -> Unit,
+    /** Opens a folder (a new album) in Photos. */
+    onOpenFolder: (String) -> Unit,
+    /** The Files tab ("Import from Files"). */
+    onOpenFiles: () -> Unit,
+) = PhotosTheme {
     val state by vm.state.collectAsStateWithLifecycle()
     val haptics = rememberHaptics()
     val context = LocalContext.current
+    val density = LocalDensity.current
     val backupSettings by container.backup.settings.collectAsStateWithLifecycle()
     val backup by container.backup.status.collectAsStateWithLifecycle()
     val session by container.session.state.collectAsStateWithLifecycle()
@@ -145,9 +196,17 @@ fun PhotosScreen(
     val grid = rememberLazyGridState()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
-    var backupSheet by remember { mutableStateOf(false) }
+    var accountSheet by remember { mutableStateOf(false) }
+    var createSheet by remember { mutableStateOf(false) }
+    var newAlbum by remember { mutableStateOf(false) }
+    var panelOpen by rememberSaveable { mutableStateOf(false) }
     var accessCardClosed by rememberSaveable { mutableStateOf(false) }
+    var headerPx by remember { mutableIntStateOf(0) }
+    val headerHeight = with(density) { headerPx.toDp() }
     val askAccess = rememberPhotoAccessRequest { vm.scanPhone() }
+    val pickToUpload = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> vm.uploadFromPhone(uris) }
+    val ring = BackupSummary.ring(backupSettings.enabled, backup.running, backup.message)
+    val initial = session?.username?.firstOrNull()?.uppercase() ?: "?"
 
     LaunchedEffect(state.message) {
         state.message?.let { snackbar.showSnackbar(it); vm.dismissMessage() }
@@ -163,14 +222,40 @@ fun PhotosScreen(
 
     val cells = remember(state.days) {
         buildList {
+            var previous: LocalDate? = null
             state.days.forEachIndexed { d, day ->
+                PhotoHeadings.monthTitle(previous, day.date)?.let { add(Cell.Month(it, d)) }
                 add(Cell.Header(d, day))
                 day.entries.forEach { add(Cell.Photo(it, d, day.date)) }
+                if (day.date != null) previous = day.date
+            }
+        }
+    }
+    // Which day each grid row belongs to (for the date shown while scrolling)
+    val dayOfKey = remember(cells) {
+        cells.associate { c ->
+            when (c) {
+                is Cell.Month -> "month-${c.dayIndex}" to c.dayIndex
+                is Cell.Header -> "day-${c.dayIndex}-${c.day.label}" to c.dayIndex
+                is Cell.Photo -> c.entry.id to c.dayIndex
             }
         }
     }
     val nearEnd by remember { derivedStateOf { (grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) > grid.layoutInfo.totalItemsCount - 40 } }
     LaunchedEffect(nearEnd, state.items.size) { if (nearEnd) vm.loadMore() }
+    val scrolled by remember { derivedStateOf { grid.firstVisibleItemIndex > 0 || grid.firstVisibleItemScrollOffset > 0 } }
+
+    // The scroll handle and the floating date show while scrolling, and fade a moment after
+    var scrubbing by remember { mutableStateOf(false) }
+    var recentlyScrolled by remember { mutableStateOf(false) }
+    LaunchedEffect(grid.isScrollInProgress, scrubbing) {
+        if (grid.isScrollInProgress || scrubbing) {
+            recentlyScrolled = true
+        } else {
+            delay(1500)
+            recentlyScrolled = false
+        }
+    }
 
     // What the selection holds: server actions apply to photos in TeleStore, "Back up" to the rest
     val picked = remember(state.selected, state.entries) { state.entries.filter { it.id in state.selected } }
@@ -192,8 +277,169 @@ fun PhotosScreen(
         }
     }
 
+    fun backUpNow() {
+        if (backupSettings.enabled) BackupWorker.runNow(context, backupSettings) else onBackup()
+    }
+
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        Column(Modifier.fillMaxSize()) {
+        val ptr = rememberPullToRefreshState()
+        val refreshing = state.loading && state.page == 0
+        PullToRefreshBox(
+            isRefreshing = refreshing, onRefresh = { haptics.confirm(); vm.refresh() }, state = ptr, modifier = Modifier.fillMaxSize(),
+            indicator = {
+                PullToRefreshDefaults.Indicator(state = ptr, isRefreshing = refreshing, modifier = Modifier.align(Alignment.TopCenter).padding(top = headerHeight))
+            },
+        ) {
+            // (The merged list follows the two lists a moment later: checking them too avoids a flash of "No photos")
+            if (state.entries.isEmpty() && state.items.isEmpty() && state.local.isEmpty() && !state.loading) {
+                when {
+                    state.error != null -> EmptyPhotos(
+                        headerHeight, Icons.Filled.CloudOff, "Couldn't load your photos", state.error ?: "", isError = true,
+                        action = "Retry", onAction = { vm.refresh() },
+                    )
+                    !state.canReadPhone -> EmptyPhotos(
+                        headerHeight, Icons.Filled.PhotoLibrary, "Show photos on this phone",
+                        "Allow TeleStore to see your photos and videos to show them here, next to the ones you've backed up.",
+                        action = "Allow", onAction = askAccess,
+                    )
+                    else -> EmptyPhotos(
+                        headerHeight, Icons.Filled.PhotoLibrary, "No photos yet",
+                        if (backupSettings.enabled) "Photos you take, and the ones you back up, appear here." else "Photos you take appear here. Turn on backup to keep them safe in TeleStore.",
+                        action = if (backupSettings.enabled) null else "Turn on backup", onAction = onBackup,
+                    )
+                }
+            } else {
+                BoxWithConstraints(Modifier.fillMaxSize()) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(state.columns),
+                        state = grid,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                        contentPadding = PaddingValues(top = headerHeight, bottom = 24.dp),
+                        modifier = Modifier.fillMaxSize().pointerInput(Unit) {
+                            // Pinch to show bigger or smaller photos (one step per pinch)
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false)
+                                var zoom = 1f
+                                var done = false
+                                do {
+                                    val event = awaitPointerEvent()
+                                    if (event.changes.count { it.pressed } > 1 && !done) {
+                                        zoom *= event.calculateZoom()
+                                        if (zoom > 1.3f) { vm.zoom(bigger = true); done = true }
+                                        if (zoom < 0.77f) { vm.zoom(bigger = false); done = true }
+                                    }
+                                } while (event.changes.any { it.pressed })
+                            }
+                        },
+                    ) {
+                        if (!state.canReadPhone && !accessCardClosed && !state.selecting) {
+                            item(span = { GridItemSpan(maxLineSpan) }, key = "phone-access") {
+                                Notice(
+                                    icon = Icons.Filled.PhotoLibrary,
+                                    title = "Show photos on this phone",
+                                    text = "See everything on this phone here, next to what you've backed up.",
+                                    action = "Allow", onAction = askAccess, onClose = { accessCardClosed = true },
+                                )
+                            }
+                        }
+                        state.error?.let { error ->
+                            item(span = { GridItemSpan(maxLineSpan) }, key = "server-error") {
+                                Notice(
+                                    icon = Icons.Filled.CloudOff, title = "Couldn't load your backed-up photos", text = error,
+                                    action = "Retry", onAction = { vm.loadMore() }, onClose = null, isError = true,
+                                )
+                            }
+                        }
+                        if (state.memories.isNotEmpty() && !state.selecting) {
+                            item(span = { GridItemSpan(maxLineSpan) }, key = "memories") { Memories(state.memories, api, onOpenFile) }
+                        }
+                        cells.forEach { cell ->
+                            when (cell) {
+                                is Cell.Month -> item(span = { GridItemSpan(maxLineSpan) }, key = "month-${cell.dayIndex}") { MonthTitle(cell.title) }
+                                is Cell.Header -> item(span = { GridItemSpan(maxLineSpan) }, key = "day-${cell.dayIndex}-${cell.day.label}") {
+                                    val day = cell.day
+                                    LaunchedEffect(day.date, day.entries.size) { vm.loadPlaces(day) }
+                                    DayHeader(
+                                        label = day.label,
+                                        places = day.date?.let { state.places[it] }.orEmpty(),
+                                        allSelected = day.entries.all { it.id in state.selected },
+                                        canDownload = day.entries.any { it.server != null },
+                                        onSelectDay = { haptics.tick(); vm.toggleDay(day) },
+                                        onDownloadDay = { vm.downloadDay(day) },
+                                    )
+                                }
+                                is Cell.Photo -> item(key = cell.entry.id) {
+                                    PhotoCell(
+                                        entry = cell.entry,
+                                        api = api,
+                                        backupOn = backupSettings.enabled,
+                                        selecting = state.selecting,
+                                        selected = cell.entry.id in state.selected,
+                                        onClick = { if (state.selecting) vm.toggle(cell.entry) else open(cell.entry) },
+                                        onLongClick = { vm.toggle(cell.entry) },
+                                    )
+                                }
+                            }
+                        }
+                        if (state.loading) item(span = { GridItemSpan(maxLineSpan) }) {
+                            Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(24.dp)) }
+                        }
+                    }
+
+                    // The day being scrolled through, floating at the top left (as in Google Photos)
+                    val topKey = grid.layoutInfo.visibleItemsInfo.firstOrNull { it.offset.y >= with(density) { headerHeight.roundToPx() } - it.size.height / 2 }?.key
+                    val floatingDay = (topKey as? String)?.let { dayOfKey[it] }?.let { state.days.getOrNull(it) }
+                    // Not while the day's own heading (or its month) is the top row: it says the same
+                    val topIsPhoto = (topKey as? String)?.let { !it.startsWith("day-") && !it.startsWith("month-") } == true
+                    AnimatedVisibility(
+                        visible = recentlyScrolled && scrolled && floatingDay != null && topIsPhoto,
+                        enter = fadeIn(), exit = fadeOut(),
+                        modifier = Modifier.padding(top = headerHeight + 4.dp, start = 16.dp),
+                    ) {
+                        floatingDay?.let { day ->
+                            Column {
+                                Text(day.label, color = Color.White, style = MaterialTheme.typography.titleLarge.copy(shadow = OverPhoto, fontSize = 20.sp))
+                                day.date?.let { state.places[it] }?.takeIf { it.isNotEmpty() }?.let {
+                                    Text(it, color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodyLarge.copy(shadow = OverPhoto), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                    }
+
+                    if (grid.layoutInfo.totalItemsCount > 60) {
+                        AnimatedVisibility(visible = recentlyScrolled || scrubbing, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopEnd)) {
+                            DateScrubber(
+                                top = headerHeight,
+                                height = maxHeight,
+                                fraction = if (grid.layoutInfo.totalItemsCount > 0) grid.firstVisibleItemIndex.toFloat() / grid.layoutInfo.totalItemsCount else 0f,
+                                label = { f ->
+                                    val i = (f * cells.size).toInt().coerceIn(0, (cells.size - 1).coerceAtLeast(0))
+                                    val date = when (val c = cells.getOrNull(i)) {
+                                        is Cell.Header -> c.day.date
+                                        is Cell.Photo -> c.date
+                                        is Cell.Month -> state.days.getOrNull(c.dayIndex)?.date
+                                        null -> null
+                                    }
+                                    Timeline.month(date)
+                                },
+                                onScrub = { f -> scope.launch { grid.scrollToItem((f * grid.layoutInfo.totalItemsCount).toInt().coerceAtLeast(0)) } },
+                                onDragging = { scrubbing = it },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // The bar floats over the photos: solid at the top, fading into them once scrolled
+        val barBackground = when {
+            state.selecting -> Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            panelOpen -> Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            scrolled -> Modifier.background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.background.copy(alpha = 0.92f), MaterialTheme.colorScheme.background.copy(alpha = 0.55f), Color.Transparent)))
+            else -> Modifier.background(MaterialTheme.colorScheme.background)
+        }
+        Column(Modifier.fillMaxWidth().then(barBackground).onSizeChanged { headerPx = it.height }) {
             if (state.selecting) {
                 SelectionBar(
                     count = state.selected.size, inTeleStore = inTeleStore, notBackedUp = notBackedUp, protectedCount = protectedCount,
@@ -206,109 +452,22 @@ fun PhotosScreen(
                     },
                 )
             } else {
-                Header(
-                    initial = session?.username?.firstOrNull()?.uppercase() ?: "?",
-                    ring = BackupSummary.ring(backupSettings.enabled, backup.running, backup.message),
-                    onClick = { backupSheet = true },
-                )
-            }
-            PullToRefreshBox(isRefreshing = state.loading && state.page == 0, onRefresh = { haptics.confirm(); vm.refresh() }, modifier = Modifier.fillMaxSize()) {
-                // (The merged list follows the two lists a moment later: checking them too avoids a flash of "No photos")
-                if (state.entries.isEmpty() && state.items.isEmpty() && state.local.isEmpty() && !state.loading) {
-                    when {
-                        state.error != null -> EmptyPhotos(
-                            Icons.Filled.CloudOff, "Couldn't load your photos", state.error ?: "", isError = true,
-                            action = "Retry", onAction = { vm.refresh() },
-                        )
-                        !state.canReadPhone -> EmptyPhotos(
-                            Icons.Filled.PhotoLibrary, "Show photos on this phone",
-                            "Allow TeleStore to see your photos and videos to show them here, next to the ones you've backed up.",
-                            action = "Allow", onAction = askAccess,
-                        )
-                        else -> EmptyPhotos(
-                            Icons.Filled.PhotoLibrary, "No photos yet",
-                            if (backupSettings.enabled) "Photos you take, and the ones you back up, appear here." else "Photos you take appear here. Turn on backup to keep them safe in TeleStore.",
-                            action = if (backupSettings.enabled) null else "Turn on backup", onAction = onBackup,
-                        )
-                    }
-                } else {
-                    BoxWithConstraints(Modifier.fillMaxSize()) {
-                        LazyVerticalGrid(
-                            columns = GridCells.Fixed(state.columns),
-                            state = grid,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp),
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                            contentPadding = PaddingValues(bottom = 24.dp),
-                            modifier = Modifier.fillMaxSize().pointerInput(Unit) {
-                                // Pinch to show bigger or smaller photos (one step per pinch)
-                                awaitEachGesture {
-                                    awaitFirstDown(requireUnconsumed = false)
-                                    var zoom = 1f
-                                    var done = false
-                                    do {
-                                        val event = awaitPointerEvent()
-                                        if (event.changes.count { it.pressed } > 1 && !done) {
-                                            zoom *= event.calculateZoom()
-                                            if (zoom > 1.3f) { vm.zoom(bigger = true); done = true }
-                                            if (zoom < 0.77f) { vm.zoom(bigger = false); done = true }
-                                        }
-                                    } while (event.changes.any { it.pressed })
-                                }
-                            },
-                        ) {
-                            if (!state.canReadPhone && !accessCardClosed && !state.selecting) {
-                                item(span = { GridItemSpan(maxLineSpan) }, key = "phone-access") {
-                                    Notice(
-                                        icon = Icons.Filled.PhotoLibrary,
-                                        title = "Show photos on this phone",
-                                        text = "See everything on this phone here, next to what you've backed up.",
-                                        action = "Allow", onAction = askAccess, onClose = { accessCardClosed = true },
-                                    )
-                                }
-                            }
-                            state.error?.let { error ->
-                                item(span = { GridItemSpan(maxLineSpan) }, key = "server-error") {
-                                    Notice(
-                                        icon = Icons.Filled.CloudOff, title = "Couldn't load your backed-up photos", text = error,
-                                        action = "Retry", onAction = { vm.loadMore() }, onClose = null, isError = true,
-                                    )
-                                }
-                            }
-                            if (state.memories.isNotEmpty() && !state.selecting) {
-                                item(span = { GridItemSpan(maxLineSpan) }, key = "memories") { Memories(state.memories, api, onOpenFile) }
-                            }
-                            cells.forEach { cell ->
-                                when (cell) {
-                                    is Cell.Header -> item(span = { GridItemSpan(maxLineSpan) }, key = "day-${cell.dayIndex}-${cell.day.label}") {
-                                        val day = cell.day
-                                        val all = day.entries.all { it.id in state.selected }
-                                        DayHeader(day.label, state.selecting, all) { vm.toggleDay(day) }
-                                    }
-                                    is Cell.Photo -> item(key = cell.entry.id) {
-                                        PhotoCell(
-                                            entry = cell.entry,
-                                            api = api,
-                                            selecting = state.selecting,
-                                            selected = cell.entry.id in state.selected,
-                                            onClick = { if (state.selecting) vm.toggle(cell.entry) else open(cell.entry) },
-                                            onLongClick = { vm.toggle(cell.entry) },
-                                        )
-                                    }
-                                }
-                            }
-                            if (state.loading) item(span = { GridItemSpan(maxLineSpan) }) {
-                                Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(24.dp)) }
-                            }
-                        }
-                        DateScrubber(
-                            height = maxHeight,
-                            fraction = if (grid.layoutInfo.totalItemsCount > 0) grid.firstVisibleItemIndex.toFloat() / grid.layoutInfo.totalItemsCount else 0f,
-                            label = { f ->
-                                val i = (f * cells.size).toInt().coerceIn(0, (cells.size - 1).coerceAtLeast(0))
-                                Timeline.month(when (val c = cells.getOrNull(i)) { is Cell.Header -> c.day.date; is Cell.Photo -> c.date; null -> null })
-                            },
-                            onScrub = { f -> scope.launch { grid.scrollToItem((f * grid.layoutInfo.totalItemsCount).toInt().coerceAtLeast(0)) } },
-                            modifier = Modifier.align(Alignment.TopEnd),
+                Column(Modifier.statusBarsPadding().animateContentSize()) {
+                    TopBar(
+                        ring = ring, panelOpen = panelOpen, initial = initial,
+                        onPanel = { panelOpen = !panelOpen },
+                        onCreate = { createSheet = true },
+                        onNotifications = onNotifications,
+                        onAccount = { accountSheet = true },
+                    )
+                    if (panelOpen) {
+                        BackupPanel(
+                            ring = ring,
+                            pending = backup.pending,
+                            line = BackupSummary.line(backupSettings.enabled, backup.running, backup.done, backup.pending, backup.lastRun, backup.message, System.currentTimeMillis()),
+                            remaining = if (backup.running) PhotoHeadings.remaining(backup.done, backup.pending, backup.startedAt, System.currentTimeMillis()) else null,
+                            onBackUpNow = ::backUpNow,
+                            onSettings = { panelOpen = false; onBackup() },
                         )
                     }
                 }
@@ -317,20 +476,33 @@ fun PhotosScreen(
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp))
     }
 
-    if (backupSheet) {
-        BackupSheet(
-            initial = session?.username?.firstOrNull()?.uppercase() ?: "?",
+    if (accountSheet) {
+        AccountSheet(
+            initial = initial,
             username = session?.username.orEmpty(),
-            ring = BackupSummary.ring(backupSettings.enabled, backup.running, backup.message),
+            ring = ring,
             line = BackupSummary.line(backupSettings.enabled, backup.running, backup.done, backup.pending, backup.lastRun, backup.message, System.currentTimeMillis()),
             backupOn = backupSettings.enabled,
             running = backup.running,
             freeable = state.freeable,
-            onBackUpNow = { backupSheet = false; BackupWorker.runNow(context, backupSettings) },
-            onAlbums = { backupSheet = false; onAlbums() },
-            onSettings = { backupSheet = false; onBackup() },
-            onDismiss = { backupSheet = false },
+            onBackUpNow = { accountSheet = false; BackupWorker.runNow(context, backupSettings) },
+            onAlbums = { accountSheet = false; onAlbums() },
+            onSettings = { accountSheet = false; onBackup() },
+            onDismiss = { accountSheet = false },
         )
+    }
+    if (createSheet) {
+        CreateSheet(
+            backupOn = backupSettings.enabled,
+            onNewAlbum = { createSheet = false; newAlbum = true },
+            onUpload = { createSheet = false; pickToUpload.launch(arrayOf("image/*", "video/*")) },
+            onBackUpNow = { createSheet = false; backUpNow() },
+            onImport = { createSheet = false; onOpenFiles() },
+            onDismiss = { createSheet = false },
+        )
+    }
+    if (newAlbum) {
+        NewAlbumDialog(onCreate = { name -> newAlbum = false; vm.newAlbum(name, onOpenFolder) }, onDismiss = { newAlbum = false })
     }
 }
 
@@ -346,16 +518,106 @@ private fun openOnPhone(context: Context, uri: String) {
     }
 }
 
+/** Backup pill (or the logo when all is backed up) on the left; +, bell and account on the right. */
 @Composable
-private fun Header(initial: String, ring: BackupRing, onClick: () -> Unit) {
-    Row(Modifier.statusBarsPadding().fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        AppLogo(24)
-        Text("Photos", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).padding(start = 10.dp))
-        Avatar(initial, ring, onClick)
+private fun TopBar(ring: BackupRing, panelOpen: Boolean, initial: String, onPanel: () -> Unit, onCreate: () -> Unit, onNotifications: () -> Unit, onAccount: () -> Unit) {
+    Row(Modifier.fillMaxWidth().height(64.dp).padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        when {
+            panelOpen -> Surface(onClick = onPanel, shape = CircleShape, color = MaterialTheme.colorScheme.background, modifier = Modifier.size(44.dp)) {
+                Box(contentAlignment = Alignment.Center) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Close backup details") }
+            }
+            ring == BackupRing.OK -> Row(
+                Modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onPanel).padding(vertical = 6.dp, horizontal = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AppLogo(26)
+                Text("Photos", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 10.dp))
+            }
+            else -> BackupPill(ring, onPanel)
+        }
+        Spacer(Modifier.weight(1f))
+        IconButton(onClick = onCreate) { Icon(Icons.Outlined.Add, contentDescription = "Create", modifier = Modifier.size(28.dp)) }
+        IconButton(onClick = onNotifications) { Icon(Icons.Outlined.Notifications, contentDescription = "Notifications", modifier = Modifier.size(26.dp)) }
+        Avatar(initial, ring, onAccount)
     }
 }
 
-/** The account's initial in a circle, ringed by the backup's state: spinning, green, amber, red or grey. */
+/** "Backing up photos" with a spinner (or paused, problem, off): tap for the details. */
+@Composable
+private fun BackupPill(ring: BackupRing, onClick: () -> Unit) {
+    val label = when (ring) {
+        BackupRing.RUNNING -> "Backing up photos"
+        BackupRing.WAITING -> "Backup paused"
+        BackupRing.PROBLEM -> "Backup problem"
+        BackupRing.OFF -> "Backup is off"
+        BackupRing.OK -> "Backed up"
+    }
+    Surface(onClick = onClick, shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Row(Modifier.padding(start = 12.dp, end = 18.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            when (ring) {
+                BackupRing.RUNNING -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onSurface)
+                BackupRing.WAITING -> Icon(Icons.Filled.PauseCircleOutline, contentDescription = null, modifier = Modifier.size(22.dp))
+                BackupRing.PROBLEM -> Icon(Icons.Filled.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(22.dp))
+                else -> Icon(Icons.Filled.CloudOff, contentDescription = null, modifier = Modifier.size(22.dp))
+            }
+            Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 12.dp))
+        }
+    }
+}
+
+/** The details under the pill: "Backing up 11 photos", the time left, and a tip or a way to fix it. */
+@Composable
+private fun BackupPanel(ring: BackupRing, pending: Int, line: String, remaining: String?, onBackUpNow: () -> Unit, onSettings: () -> Unit) {
+    val title = when (ring) {
+        BackupRing.RUNNING -> PhotoHeadings.backupTitle(pending)
+        BackupRing.OK -> "Backup complete"
+        BackupRing.WAITING -> "Backup paused"
+        BackupRing.PROBLEM -> "Backup stopped"
+        BackupRing.OFF -> "Backup is off"
+    }
+    Column(Modifier.fillMaxWidth()) {
+        Text(title, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 18.dp))
+        Column(Modifier.padding(horizontal = 16.dp).clip(RoundedCornerShape(24.dp)), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(
+                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer).padding(horizontal = 20.dp, vertical = 22.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                when (ring) {
+                    BackupRing.RUNNING -> CircularProgressIndicator(Modifier.size(36.dp), strokeWidth = 3.dp, color = MaterialTheme.colorScheme.primary)
+                    BackupRing.OK -> Icon(Icons.Outlined.CloudDone, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
+                    BackupRing.PROBLEM -> Icon(Icons.Filled.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(36.dp))
+                    BackupRing.WAITING -> Icon(Icons.Filled.PauseCircleOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
+                    BackupRing.OFF -> Icon(Icons.Filled.CloudOff, contentDescription = null, modifier = Modifier.size(36.dp))
+                }
+                Text(
+                    if (ring == BackupRing.RUNNING) remaining ?: "Working out the time left…" else line,
+                    style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
+                    color = if (ring == BackupRing.PROBLEM) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(start = 18.dp),
+                )
+            }
+            val (hint, action) = when (ring) {
+                BackupRing.RUNNING -> "Keep the app open for faster backup" to null
+                BackupRing.OK -> "Photos you take are backed up to TeleStore" to ("Back up now" to onBackUpNow)
+                BackupRing.WAITING -> "It carries on by itself when the phone is ready" to ("Backup settings" to onSettings)
+                BackupRing.PROBLEM -> "Check the backup settings, then try again" to ("Backup settings" to onSettings)
+                BackupRing.OFF -> "Turn on backup to keep your photos safe in TeleStore" to ("Turn on backup" to onSettings)
+            }
+            Row(
+                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer).padding(start = 20.dp, end = 8.dp, top = 6.dp, bottom = 6.dp).height(52.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(hint, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                action?.let { (label, onAction) -> TextButton(onClick = onAction) { Text(label) } }
+            }
+        }
+        Spacer(Modifier.height(28.dp))
+        // The timeline starts in a rounded sheet under the panel
+        Box(Modifier.fillMaxWidth().height(28.dp).background(MaterialTheme.colorScheme.background, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)))
+    }
+}
+
+/** The account's initial, ringed by the backup's state; spinning with an upload arrow while it runs. */
 @Composable
 private fun Avatar(initial: String, ring: BackupRing, onClick: (() -> Unit)?) {
     val label = when (ring) {
@@ -365,13 +627,13 @@ private fun Avatar(initial: String, ring: BackupRing, onClick: (() -> Unit)?) {
         BackupRing.PROBLEM -> "Backup has a problem"
         BackupRing.OFF -> "Backup is off"
     }
-    val base = Modifier.size(44.dp).clip(CircleShape)
+    val base = Modifier.size(48.dp).clip(CircleShape)
     Box(
         (if (onClick != null) base.clickable(onClick = onClick) else base).semantics { contentDescription = "Account and backup: $label" },
         contentAlignment = Alignment.Center,
     ) {
         if (ring == BackupRing.RUNNING) {
-            CircularProgressIndicator(Modifier.size(42.dp), strokeWidth = 2.5.dp)
+            CircularProgressIndicator(Modifier.size(44.dp), strokeWidth = 2.5.dp, color = MaterialTheme.colorScheme.primary)
         } else {
             val color = when (ring) {
                 BackupRing.OK -> BackedUpGreen
@@ -379,10 +641,17 @@ private fun Avatar(initial: String, ring: BackupRing, onClick: (() -> Unit)?) {
                 BackupRing.PROBLEM -> MaterialTheme.colorScheme.error
                 else -> MaterialTheme.colorScheme.outline
             }
-            Box(Modifier.size(42.dp).border(2.5.dp, color, CircleShape))
+            Box(Modifier.size(44.dp).border(2.5.dp, color, CircleShape))
         }
         Box(Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer), contentAlignment = Alignment.Center) {
             Text(initial, color = MaterialTheme.colorScheme.onSecondaryContainer, fontWeight = FontWeight.Bold)
+        }
+        if (ring == BackupRing.RUNNING) {
+            Box(
+                Modifier.align(Alignment.BottomEnd).size(18.dp).background(MaterialTheme.colorScheme.primary, CircleShape)
+                    .border(1.5.dp, MaterialTheme.colorScheme.background, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.ArrowUpward, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(12.dp)) }
         }
     }
 }
@@ -390,7 +659,7 @@ private fun Avatar(initial: String, ring: BackupRing, onClick: (() -> Unit)?) {
 /** Opened from the account circle: how the backup is doing, and the way to Albums and Backup. */
 @kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun BackupSheet(
+private fun AccountSheet(
     initial: String,
     username: String,
     ring: BackupRing,
@@ -403,7 +672,7 @@ private fun BackupSheet(
     onSettings: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainer) {
         Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Avatar(initial, ring, onClick = null)
@@ -416,7 +685,7 @@ private fun BackupSheet(
                 }
             }
             if (backupOn) SheetRow(Icons.Filled.CloudUpload, "Back up now", enabled = !running, onClick = onBackUpNow)
-            SheetRow(Icons.Filled.PhotoAlbum, "Albums", onClick = onAlbums)
+            SheetRow(Icons.Outlined.PhotoAlbum, "Albums", onClick = onAlbums)
             SheetRow(Icons.Filled.Settings, if (backupOn) "Backup settings" else "Turn on backup", onClick = onSettings)
             // Backup settings has the "Remove from this phone" button
             if (freeable > 0) SheetRow(Icons.Filled.PhoneAndroid, "Free up space · $freeable on this phone are backed up", onClick = onSettings)
@@ -424,12 +693,39 @@ private fun BackupSheet(
     }
 }
 
+/** The + button's menu. */
+@kotlin.OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CreateSheet(backupOn: Boolean, onNewAlbum: () -> Unit, onUpload: () -> Unit, onBackUpNow: () -> Unit, onImport: () -> Unit, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+            Text("Create", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 24.dp, bottom = 8.dp))
+            SheetRow(Icons.Outlined.PhotoAlbum, "New album", onClick = onNewAlbum)
+            SheetRow(Icons.Outlined.Upload, "Upload from phone", onClick = onUpload)
+            SheetRow(Icons.Outlined.CloudUpload, if (backupOn) "Back up now" else "Turn on backup", onClick = onBackUpNow)
+            SheetRow(Icons.Outlined.Folder, "Import from Files", onClick = onImport)
+        }
+    }
+}
+
+@Composable
+private fun NewAlbumDialog(onCreate: (String) -> Unit, onDismiss: () -> Unit) {
+    var name by rememberSaveable { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("New album") },
+        text = { OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, label = { Text("Album name") }) },
+        confirmButton = { TextButton(onClick = { onCreate(name) }, enabled = name.isNotBlank()) { Text("Create") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 @Composable
 private fun SheetRow(icon: ImageVector, label: String, enabled: Boolean = true, onClick: () -> Unit) {
     TextButton(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
-            Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 16.dp))
+            Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurface)
+            Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(start = 16.dp))
         }
     }
 }
@@ -447,18 +743,16 @@ private fun SelectionBar(
     onTrash: () -> Unit,
     onBackUp: () -> Unit,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-        Row(Modifier.statusBarsPadding().fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = "Cancel selection") }
-            Text("$count selected", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            // Photos only on the phone can't be starred or trashed in TeleStore yet: back them up first
-            if (notBackedUp > 0) IconButton(onClick = onBackUp) { Icon(Icons.Filled.CloudUpload, contentDescription = "Back up") }
-            if (inTeleStore > 0) {
-                IconButton(onClick = onDownload) { Icon(Icons.Filled.Download, contentDescription = "Download") }
-                IconButton(onClick = onStar) { Icon(Icons.Filled.Star, contentDescription = "Star") }
-                IconButton(onClick = onTrash) {
-                    Icon(Icons.Filled.Delete, contentDescription = "Move to Trash", modifier = Modifier.alpha(if (protectedCount > 0) 0.38f else 1f))
-                }
+    Row(Modifier.statusBarsPadding().fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = "Cancel selection") }
+        Text("$count selected", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+        // Photos only on the phone can't be starred or trashed in TeleStore yet: back them up first
+        if (notBackedUp > 0) IconButton(onClick = onBackUp) { Icon(Icons.Filled.CloudUpload, contentDescription = "Back up") }
+        if (inTeleStore > 0) {
+            IconButton(onClick = onDownload) { Icon(Icons.Filled.Download, contentDescription = "Download") }
+            IconButton(onClick = onStar) { Icon(Icons.Filled.Star, contentDescription = "Star") }
+            IconButton(onClick = onTrash) {
+                Icon(Icons.Filled.Delete, contentDescription = "Move to Trash", modifier = Modifier.alpha(if (protectedCount > 0) 0.38f else 1f))
             }
         }
     }
@@ -468,9 +762,9 @@ private fun SelectionBar(
 @Composable
 private fun Notice(icon: ImageVector, title: String, text: String, action: String, onAction: () -> Unit, onClose: (() -> Unit)?, isError: Boolean = false) {
     Surface(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(20.dp),
         color = if (isError) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainer,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
         Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, contentDescription = null, tint = if (isError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.primary)
@@ -487,43 +781,90 @@ private fun Notice(icon: ImageVector, title: String, text: String, action: Strin
     }
 }
 
+/** Tall rounded cards with the memory's name at the bottom ("1 year ago", "Recent highlights"). */
 @Composable
 private fun Memories(memories: List<Memory>, api: com.backendforge.telestore.core.TeleStoreApi, onOpenFile: (FileItem, List<FileItem>) -> Boolean) {
-    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    val width = (LocalConfiguration.current.screenWidthDp * 0.425f).dp
+    LazyRow(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         items(memories) { memory ->
             Box(
-                Modifier.width(110.dp).height(150.dp).clip(RoundedCornerShape(14.dp))
+                Modifier.width(width).aspectRatio(0.75f).clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     .clickable { memory.items.firstOrNull()?.let { onOpenFile(it, memory.items) } },
             ) {
-                FileThumbnail(item = memory.items.first(), api = api, modifier = Modifier.fillMaxSize(), shapeRadius = 14.dp, iconSize = 30.dp)
-                Box(Modifier.fillMaxSize().background(Color(0x33000000)))
+                FileThumbnail(item = memory.items.first(), api = api, modifier = Modifier.fillMaxSize(), shapeRadius = 20.dp, iconSize = 34.dp)
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Color(0x99000000))))
                 Text(
-                    memory.title, color = Color.White, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.align(Alignment.BottomStart).padding(10.dp),
+                    memory.title, color = Color.White, style = MaterialTheme.typography.titleLarge.copy(shadow = OverPhoto, fontSize = 21.sp, lineHeight = 26.sp),
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.align(Alignment.BottomStart).padding(start = 14.dp, end = 12.dp, bottom = 16.dp),
                 )
             }
         }
     }
 }
 
+/** "October", "March 2025": above the first day of each earlier month. */
 @Composable
-private fun DayHeader(label: String, selecting: Boolean, allSelected: Boolean, onSelectDay: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-        IconButton(onClick = onSelectDay, modifier = Modifier.size(36.dp)) {
-            Icon(
-                if (allSelected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
-                contentDescription = "Select this day",
-                tint = if (allSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (selecting) 1f else 0.6f),
-                modifier = Modifier.size(20.dp),
-            )
+private fun MonthTitle(title: String) {
+    Text(
+        title, style = MaterialTheme.typography.displaySmall.copy(fontSize = 34.sp), fontWeight = FontWeight.Normal,
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 28.dp, bottom = 2.dp),
+    )
+}
+
+/** "Today" with the day's places under it, the tick that selects the whole day, and the day's menu. */
+@Composable
+private fun DayHeader(label: String, places: String, allSelected: Boolean, canDownload: Boolean, onSelectDay: () -> Unit, onDownloadDay: () -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 2.dp, top = 18.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp), fontWeight = FontWeight.Normal)
+            if (places.isNotEmpty()) {
+                Text(
+                    places, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+        }
+        IconButton(onClick = onSelectDay) {
+            if (allSelected) {
+                Box(Modifier.size(26.dp).background(MaterialTheme.colorScheme.primary, CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.Check, contentDescription = "Unselect this day", tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(18.dp))
+                }
+            } else {
+                Icon(Icons.Outlined.CheckCircle, contentDescription = "Select this day", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
+            }
+        }
+        Box {
+            IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More for this day") }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text(if (allSelected) "Unselect all" else "Select all") },
+                    leadingIcon = { Icon(Icons.Outlined.CheckCircle, contentDescription = null) },
+                    onClick = { menu = false; onSelectDay() },
+                )
+                if (canDownload) DropdownMenuItem(
+                    text = { Text("Download all") },
+                    leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                    onClick = { menu = false; onDownloadDay() },
+                )
+            }
         }
     }
 }
 
 @kotlin.OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun PhotoCell(entry: PhotoEntry, api: com.backendforge.telestore.core.TeleStoreApi, selecting: Boolean, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun PhotoCell(
+    entry: PhotoEntry,
+    api: com.backendforge.telestore.core.TeleStoreApi,
+    backupOn: Boolean,
+    selecting: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     val haptics = rememberHaptics()
     val inset by SelectionMotion.inset(selected)
     val highlight by SelectionMotion.background(selected)
@@ -540,18 +881,21 @@ private fun PhotoCell(entry: PhotoEntry, api: com.backendforge.telestore.core.Te
             }
         }
         if (entry.video) {
-            Icon(Icons.Filled.PlayCircle, contentDescription = "Video", tint = Color.White, modifier = Modifier.align(Alignment.TopEnd).padding(5.dp).size(20.dp))
+            Icon(
+                Icons.Outlined.PlayCircle, contentDescription = "Video", tint = Color.White,
+                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).size(24.dp),
+            )
         }
         if (entry.starred && !selecting) {
-            Icon(Icons.Filled.Star, contentDescription = "Starred", tint = Color.White, modifier = Modifier.align(Alignment.BottomStart).padding(5.dp).size(16.dp))
+            Icon(Icons.Filled.Star, contentDescription = "Starred", tint = Color.White, modifier = Modifier.align(Alignment.BottomStart).padding(6.dp).size(18.dp))
         }
-        // In TeleStore: a small cloud; only on the phone: no mark
-        if (entry.backedUp) {
+        // As in Google Photos, only what still waits for the backup is marked
+        if (backupOn && entry.phoneOnly && !entry.backedUp && !selecting) {
             Box(
-                Modifier.align(Alignment.BottomEnd).padding(4.dp).size(20.dp).background(Color(0x73000000), CircleShape),
+                Modifier.align(Alignment.BottomEnd).padding(5.dp).size(22.dp).background(Color(0x66000000), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.CloudDone, contentDescription = "Backed up", tint = Color.White, modifier = Modifier.size(14.dp))
+                Icon(Icons.Outlined.CloudUpload, contentDescription = "Not backed up yet", tint = Color.White, modifier = Modifier.size(15.dp))
             }
         }
         AnimatedShow(visible = selecting, modifier = Modifier.align(Alignment.TopStart)) {
@@ -560,50 +904,54 @@ private fun PhotoCell(entry: PhotoEntry, api: com.backendforge.telestore.core.Te
                     if (isOn) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
                     contentDescription = if (isOn) "Selected" else "Not selected",
                     tint = if (isOn) MaterialTheme.colorScheme.primary else Color.White,
-                    modifier = Modifier.padding(5.dp).size(22.dp).background(if (isOn) Color.White else Color.Transparent, CircleShape),
+                    modifier = Modifier.padding(5.dp).size(22.dp).background(if (isOn) MaterialTheme.colorScheme.onPrimary else Color.Transparent, CircleShape),
                 )
             }
         }
     }
 }
 
-/** The thumb on the right edge: drag it to fly through the years, with the month shown beside it. */
+/**
+ * The round handle half off the right edge: drag it to fly through the years, with the month
+ * shown beside it. It shows while scrolling.
+ */
 @Composable
-private fun DateScrubber(height: androidx.compose.ui.unit.Dp, fraction: Float, label: (Float) -> String, onScrub: (Float) -> Unit, modifier: Modifier) {
+private fun DateScrubber(top: Dp, height: Dp, fraction: Float, label: (Float) -> String, onScrub: (Float) -> Unit, onDragging: (Boolean) -> Unit) {
     var dragging by remember { mutableStateOf<Float?>(null) }
     val density = LocalDensity.current
-    val trackPx = with(density) { (height - 140.dp).toPx() }.coerceAtLeast(1f)
+    val trackPx = with(density) { (height - top - 140.dp).toPx() }.coerceAtLeast(1f)
     val shown = dragging ?: fraction.coerceIn(0f, 1f)
-    Box(modifier.width(140.dp).height(height)) {
-        Box(
+    Box(Modifier.width(170.dp).height(height)) {
+        Row(
             Modifier
-                .offset { IntOffset(0, (shown * trackPx).roundToInt() + with(density) { 40.dp.roundToPx() }) }
                 .align(Alignment.TopEnd)
-                .pointerInput(trackPx) {
-                    detectVerticalDragGestures(
-                        onDragStart = { dragging = fraction.coerceIn(0f, 1f) },
-                        onDragEnd = { dragging = null },
-                        onDragCancel = { dragging = null },
-                    ) { change, dy ->
-                        change.consume()
-                        val next = ((dragging ?: 0f) + dy / trackPx).coerceIn(0f, 1f)
-                        dragging = next
-                        onScrub(next)
-                    }
-                },
+                .offset { IntOffset(with(density) { 16.dp.roundToPx() }, (shown * trackPx).roundToInt() + with(density) { (top + 24.dp).roundToPx() }) },
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (dragging != null) {
-                    Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.padding(end = 8.dp)) {
-                        Text(label(shown), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
-                    }
+            if (dragging != null) {
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest, modifier = Modifier.padding(end = 10.dp)) {
+                    Text(label(shown), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
                 }
-                Box(
-                    Modifier.width(26.dp).height(44.dp)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp))
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp)),
-                    contentAlignment = Alignment.Center,
-                ) { Text("⇕", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+            Box(
+                Modifier.size(56.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.94f), CircleShape)
+                    .pointerInput(trackPx) {
+                        detectVerticalDragGestures(
+                            onDragStart = { dragging = fraction.coerceIn(0f, 1f); onDragging(true) },
+                            onDragEnd = { dragging = null; onDragging(false) },
+                            onDragCancel = { dragging = null; onDragging(false) },
+                        ) { change, dy ->
+                            change.consume()
+                            val next = ((dragging ?: 0f) + dy / trackPx).coerceIn(0f, 1f)
+                            dragging = next
+                            onScrub(next)
+                        }
+                    }
+                    .semantics { contentDescription = "Scroll through dates" },
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Icon(Icons.Filled.UnfoldMore, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 10.dp).size(24.dp))
             }
         }
     }
@@ -614,8 +962,8 @@ private fun DateScrubber(height: androidx.compose.ui.unit.Dp, fraction: Float, l
  * It scrolls (a single page) so pull-to-refresh works on it too.
  */
 @Composable
-private fun EmptyPhotos(icon: ImageVector, title: String, text: String, isError: Boolean = false, action: String? = null, onAction: () -> Unit = {}) {
-    LazyColumn(Modifier.fillMaxSize()) {
+private fun EmptyPhotos(top: Dp, icon: ImageVector, title: String, text: String, isError: Boolean = false, action: String? = null, onAction: () -> Unit = {}) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = top)) {
         item {
             Column(
                 Modifier.fillParentMaxSize().padding(32.dp),

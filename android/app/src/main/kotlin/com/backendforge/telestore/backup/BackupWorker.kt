@@ -71,7 +71,7 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val api = container.api()
         val onServer = mutableMapOf<String, Set<String>>() // folder -> "name|size" already there
         var done = 0
-        store.status { it.copy(running = true, pending = todo.size, done = 0, message = null) }
+        store.status { it.copy(running = true, pending = todo.size, done = 0, startedAt = System.currentTimeMillis(), message = null) }
         return try {
             for (item in todo) {
                 val folder = settings.destination.trimEnd('/') + "/" + safeName(item.bucket)

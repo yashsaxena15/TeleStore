@@ -97,7 +97,7 @@ class PhotoMergeTest {
             emptySet(), serverHasMore = false,
         )
         val days = PhotoMerge.days(entries, LocalDate.of(2026, 10, 26), ZoneOffset.UTC)
-        assertEquals(listOf("Today", "Yesterday", "Sat, 24 Oct", "Thu, 2 Jan 2025"), days.map { it.label })
+        assertEquals(listOf("Today", "Yesterday", "Sat, Oct 24", "Thu, Jan 2, 2025"), days.map { it.label })
         assertEquals(listOf("local:p1", "s1"), days[0].entries.map { it.id })
         assertEquals(LocalDate.of(2026, 10, 24), days[2].date)
     }

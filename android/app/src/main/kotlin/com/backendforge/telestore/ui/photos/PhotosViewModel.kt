@@ -47,7 +47,9 @@ data class PhotosState(
     val freeable: Int = 0,
     /** Entry ids ([PhotoEntry.id]): the server id, or "local:<key>" for a photo only on the phone. */
     val selected: Set<String> = emptySet(),
-    val columns: Int = 4,
+    /** Places under each day's heading, by [PhotoDay.date] ("" when unknown); filled in as days show. */
+    val places: Map<java.time.LocalDate, String> = emptyMap(),
+    val columns: Int = 3,
     val message: String? = null,
 ) {
     val selecting: Boolean get() = selected.isNotEmpty()
@@ -67,6 +69,9 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
     private var generation = 0
     /** The phone items the backup has done, so they get the cloud mark before their server copy loads. */
     private var backedUpKeys: Set<String> = emptySet()
+    private val dayPlaces = com.backendforge.telestore.photos.DayPlaces(container.context)
+    /** Days whose places are being looked up, so each is asked once at a time. */
+    private val placesAsked = HashSet<java.time.LocalDate>()
 
     init {
         loadMore()
@@ -90,6 +95,7 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
     fun refresh() {
         job?.cancel()
         generation++
+        placesAsked.clear()
         _state.update { it.copy(page = 0, hasNext = true, loading = false, error = null, selected = emptySet()) }
         loadMore()
         scanPhone()
@@ -174,6 +180,58 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** Looks up where the day's phone photos were taken, once per day (called as its heading shows). */
+    fun loadPlaces(day: PhotoDay) {
+        val date = day.date ?: return
+        if (date in _state.value.places || !placesAsked.add(date)) return
+        val uris = day.entries.mapNotNull { e -> e.local?.takeIf { !it.video }?.uri }
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            val found = runCatching { dayPlaces.forDay(uris) }.getOrDefault("")
+            // A day with no place stays asked until a refresh (then its photos are read again)
+            if (found.isNotEmpty()) _state.update { it.copy(places = it.places + (date to found)) }
+        }
+    }
+
+    /** "New album" from +: a folder in the backup folder (where the albums are); [onMade] gets its path. */
+    fun newAlbum(name: String, onMade: (String) -> Unit) {
+        val clean = name.trim().replace('/', '-')
+        if (clean.isEmpty()) return
+        val path = container.backup.settings.value.destination.trimEnd('/') + "/" + clean
+        viewModelScope.launch {
+            try {
+                container.api().createFolderPath(path)
+                _state.update { it.copy(message = "Album \"$clean\" created") }
+                onMade(path)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(message = (e as? ApiException)?.message ?: "Couldn't create the album.") }
+            }
+        }
+    }
+
+    /** "Upload from phone" from +: the picked photos go to Uploads in the backup folder, so they show here. */
+    fun uploadFromPhone(uris: List<android.net.Uri>) {
+        if (uris.isEmpty()) return
+        val folder = container.backup.settings.value.destination.trimEnd('/') + "/Uploads"
+        viewModelScope.launch {
+            try {
+                container.api().createFolderPath(folder)
+                val files = withContext(Dispatchers.IO) { uris.map { com.backendforge.telestore.transfers.describe(container.context, it) } }
+                val skipped = container.transfers.upload(files, folder)
+                val queued = files.size - skipped.size
+                _state.update {
+                    it.copy(message = if (queued > 0) "Uploading $queued item${if (queued != 1) "s" else ""}. See Transfers." else "Couldn't read the picked items.")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(message = (e as? ApiException)?.message ?: "Couldn't start the upload.") }
+            }
+        }
+    }
+
     /** Pinch: 3, 4, 5 or 7 photos per row. */
     fun zoom(bigger: Boolean) = _state.update {
         val steps = listOf(3, 4, 5, 7)
@@ -202,6 +260,13 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
         val items = selectedItems()
         items.forEach { container.transfers.download(it) }
         _state.update { it.copy(selected = emptySet(), message = "Downloading ${items.size} item${if (items.size != 1) "s" else ""}. See Transfers.") }
+    }
+
+    /** The day menu's "Download all": every photo of the day that is in TeleStore. */
+    fun downloadDay(day: PhotoDay) {
+        val items = day.entries.mapNotNull { it.server }
+        items.forEach { container.transfers.download(it) }
+        _state.update { it.copy(message = "Downloading ${items.size} item${if (items.size != 1) "s" else ""}. See Transfers.") }
     }
 
     fun starSelected() = bulk("Starred") { container.api().setStarred(it, true) }

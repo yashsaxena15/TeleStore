@@ -16,7 +16,7 @@ class TimelineTest {
             listOf(photo("a", "2026-10-26T08:00:00"), photo("b", "2026-10-25T23:00:00"), photo("c", null, "2026-10-24T09:00:00"), photo("d", "2025-01-02T09:00:00")),
             today, ZoneOffset.UTC,
         )
-        assertEquals(listOf("Today", "Yesterday", "Sat, 24 Oct", "Thu, 2 Jan 2025"), days.map { it.label })
+        assertEquals(listOf("Today", "Yesterday", "Sat, Oct 24", "Thu, Jan 2, 2025"), days.map { it.label })
         assertEquals(listOf("a"), days[0].items.map { it.id })
         assertEquals("Oct 2026", Timeline.month(days[0].date))
     }
