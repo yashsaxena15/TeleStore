@@ -160,7 +160,7 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
                     val all = PhoneMedia.scan(context).map { p ->
                         LocalPhoto(
                             key = p.key, name = p.name, size = p.size, takenAtMillis = p.takenAt, video = p.video,
-                            uri = p.uri.toString(), bucketId = p.bucketId, bucket = p.bucket,
+                            uri = p.uri.toString(), bucketId = p.bucketId, bucket = p.bucket, durationMs = p.durationMs,
                         )
                     }
                     // The albums chosen in Backup, plus other apps' albums as "Photos view" allows
@@ -191,6 +191,26 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
                 val ids = entries.mapTo(HashSet()) { e -> e.id }
                 it.copy(entries = entries, days = days, freeable = freeable, selected = it.selected.filterTo(HashSet()) { id -> id in ids })
             }
+            shareDurations(entries)
+        }
+    }
+
+    /** Server ids whose video length this app already sent (once each per run). */
+    private val durationsSent = HashSet<String>()
+
+    /**
+     * Older backups have no video length on the server. When the phone still has the video, its
+     * length is sent (20 at a time), so the website and other phones show "0:38" too.
+     */
+    private fun shareDurations(entries: List<PhotoEntry>) {
+        val todo = entries.filter { e ->
+            val server = e.server
+            e.video && server != null && server.duration == null && (e.local?.durationMs ?: 0) > 0 && server.id !in durationsSent
+        }.take(20)
+        if (todo.isEmpty()) return
+        todo.forEach { durationsSent += it.server!!.id }
+        viewModelScope.launch {
+            todo.forEach { e -> runCatching { container.api().setDuration(e.server!!, e.local!!.durationMs / 1000.0) } }
         }
     }
 

@@ -126,6 +126,8 @@ class InitUploadRequest(BaseModel):
     resume_upload_id: Optional[str] = None
     # When a photo or video was taken (the phone's backup sends it), so timelines sort by it
     taken_at: Optional[str] = None
+    # A video's length in seconds (the phone's backup sends it), for the "0:38" on Photos' tiles
+    duration: Optional[float] = None
 
 
 def _taken_at(value: Optional[str]) -> Optional[str]:
@@ -173,6 +175,7 @@ async def init_chunked_upload(req: InitUploadRequest, user: User = Depends(requi
         "filesize": req.filesize,
         "path": req.path or "/Home",
         "taken_at": _taken_at(req.taken_at),
+        "duration": req.duration if req.duration and 0 < req.duration <= 7 * 86400 else None,
         "user_id": str(user.telegram_user_id),
         "created_at": datetime.datetime.utcnow().isoformat(),
         "last_activity": time.time(),
@@ -324,8 +327,9 @@ async def _process_upload_completion(upload_id: str, session: dict) -> None:
             )
             extra = {"is_split": True, "total_parts": len(parts)}
         file_doc = database.Files.find_one({"chat_id": chat_id, "file_unique_id": unique_id, "file_name": session["filename"], "trashed": {"$ne": True}})
-        if file_doc and session.get("taken_at"):
-            database.Files.update_one({"_id": file_doc["_id"]}, {"$set": {"taken_at": session["taken_at"]}})
+        known = {k: session[k] for k in ("taken_at", "duration") if session.get(k)}
+        if file_doc and known:
+            database.Files.update_one({"_id": file_doc["_id"]}, {"$set": known})
         session["result_file"] = {
             "id": str(file_doc["_id"]) if file_doc else str(results[0]["message_id"]),
             "file_unique_id": unique_id, "file_name": session["filename"], "file_path": session["path"],

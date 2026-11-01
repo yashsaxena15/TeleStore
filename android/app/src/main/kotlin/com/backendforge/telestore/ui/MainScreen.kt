@@ -187,7 +187,7 @@ fun MainScreen(
 
     val isSearch = currentRoute == "search"
     // The players take the whole screen: no tabs, no mini player
-    val isPlayer = currentRoute in setOf(ROUTE_VIDEO, ROUTE_PHOTOS, ROUTE_NOW_PLAYING)
+    val isPlayer = currentRoute in setOf(ROUTE_VIDEO, ROUTE_PHOTOS, ROUTE_NOW_PLAYING, "photo_edit")
     val music = remember { container.startMusic() }
     val musicState by music.state.collectAsStateWithLifecycle()
 
@@ -850,11 +850,20 @@ fun MainScreen(
                     }
                 }
 
+                composable("photo_edit") {
+                    val source = container.playback.editing
+                    if (source == null) LaunchedEffect(Unit) { navController.popBackStack() }
+                    else com.backendforge.telestore.photos.EditorScreen(source, container, onDone = { navController.popBackStack() })
+                }
                 composable(ROUTE_PHOTOS) {
                     PhotoViewerScreen(
                         photos = container.playback.photos,
                         startIndex = container.playback.photoIndex,
                         container = container,
+                        onEdit = { source ->
+                            container.playback.editing = source
+                            navController.navigate("photo_edit")
+                        },
                         onBack = { navController.popBackStack() },
                         offlineCopy = { container.transfers.store.offlineCopy(context, it.id) },
                     )

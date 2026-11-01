@@ -357,14 +357,18 @@ class TeleStoreApi(
 
     // ── Uploads (the website's chunked protocol) ────────────────────────────────
     /** Starts an upload, or continues [resumeId] when the server still has it. */
-    suspend fun uploadInit(name: String, size: Long, folder: String, resumeId: String? = null, takenAt: String? = null): UploadSession =
+    suspend fun uploadInit(name: String, size: Long, folder: String, resumeId: String? = null, takenAt: String? = null, durationSeconds: Double? = null): UploadSession =
         post(url("files/upload/init"), buildJsonObject {
             put("filename", name)
             put("filesize", size)
             put("path", folder)
             resumeId?.let { put("resume_upload_id", it) }
             takenAt?.let { put("taken_at", it) }
+            durationSeconds?.let { put("duration", it) }
         })
+
+    /** Tells the server a video's length (the phone knows it; older backups didn't send it). */
+    suspend fun setDuration(item: FileItem, seconds: Double): JsonObject = photoMeta(item, buildJsonObject { put("duration", seconds) })
 
     /** Makes every folder along [fullPath] (e.g. "/Home/Phone Backup/Camera"); fine if they exist. */
     suspend fun createFolderPath(fullPath: String): MessageReply =

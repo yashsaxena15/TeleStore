@@ -42,6 +42,9 @@ class PlaybackQueue {
     var photoIndex: Int = 0
         private set
 
+    /** The photo or video open in the editor. */
+    var editing: PhotoSource? = null
+
     /** The document or archive being viewed. */
     var document: FileItem? = null
 

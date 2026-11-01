@@ -1099,10 +1099,13 @@ private fun PhotoCell(
             }
         }
         if (entry.video) {
-            Icon(
-                Icons.Outlined.PlayCircle, contentDescription = "Video", tint = Color.White,
-                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).size(24.dp),
-            )
+            // "0:38 ▷" (the length once known), as in Google Photos
+            Row(Modifier.align(Alignment.TopEnd).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                PhotoHeadings.videoLength(entry.durationMs)?.let {
+                    Text(it, color = Color.White, style = MaterialTheme.typography.labelLarge.copy(shadow = OverPhoto), modifier = Modifier.padding(end = 4.dp))
+                }
+                Icon(Icons.Outlined.PlayCircle, contentDescription = "Video", tint = Color.White, modifier = Modifier.size(24.dp))
+            }
         } else if (tile.stack.size > 1) {
             // A stack of similar photos: how many are in it
             Row(

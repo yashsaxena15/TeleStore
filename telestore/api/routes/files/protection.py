@@ -133,6 +133,8 @@ class PhotoMetaRequest(BaseModel):
     place: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    # A video's length in seconds, when the app knows it (the phone's copy) and the server doesn't
+    duration: Optional[float] = None
 
 
 @router.post("/{file_id}/photo-meta")
@@ -167,6 +169,10 @@ async def photo_meta(file_id: str, body: PhotoMetaRequest, user: User = Depends(
         if (lat is None) != (lon is None) or (lat is not None and not (-90 <= lat <= 90 and -180 <= lon <= 180)):
             raise HTTPException(status_code=400, detail="That location isn't valid.")
         changes["latitude"], changes["longitude"] = lat, lon
+    if "duration" in sent:
+        if body.duration is None or not (0 < body.duration <= 7 * 86400):
+            raise HTTPException(status_code=400, detail="That length isn't valid.")
+        changes["duration"] = round(body.duration, 3)
     if changes:
         database.Files.update_one({"_id": doc["_id"]}, {"$set": changes})
     return {
@@ -176,6 +182,7 @@ async def photo_meta(file_id: str, body: PhotoMetaRequest, user: User = Depends(
         "place": changes.get("place", doc.get("place")),
         "latitude": changes.get("latitude", doc.get("latitude")),
         "longitude": changes.get("longitude", doc.get("longitude")),
+        "duration": changes.get("duration", doc.get("duration")),
     }
 
 

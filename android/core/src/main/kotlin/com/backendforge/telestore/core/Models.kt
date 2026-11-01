@@ -64,6 +64,8 @@ data class FileItem(
     val caption: String? = null,
     /** Where the owner says a photo was taken ("Gandhinagar, Gujarat"). */
     val place: String? = null,
+    /** A video's length in seconds, when the server knows it. */
+    val duration: Double? = null,
 ) {
     /** The date for timelines: when it was taken, else when it was uploaded. */
     val timelineDate: String? get() = takenAt ?: modified

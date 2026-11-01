@@ -83,7 +83,7 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 notify(done, todo.size, item.name)
                 if ("${item.name}|${item.size}" !in existing) {
                     openWithLocation(item).use { source ->
-                        ChunkedUploader(api, source, item.name, item.size, folder, takenAt = item.takenIso).upload()
+                        ChunkedUploader(api, source, item.name, item.size, folder, takenAt = item.takenIso, durationSeconds = item.durationMs.takeIf { it > 0 }?.let { it / 1000.0 }).upload()
                     }
                 }
                 store.markBackedUp(item.key)

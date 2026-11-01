@@ -144,6 +144,8 @@ fun PhotoViewerScreen(
     onBack: () -> Unit,
     /** A downloaded copy on the phone, shown instead of fetching it again. */
     offlineCopy: (FileItem) -> Uri? = { null },
+    /** The editor (crop and adjust a photo, trim a video); it saves a copy. */
+    onEdit: (PhotoSource) -> Unit = {},
 ) = PhotosTheme {
     // Trashed or deleted photos leave the viewer; star and archive changes show straight away
     var list by remember { mutableStateOf(photos) }
@@ -239,15 +241,6 @@ fun PhotoViewerScreen(
             local != null -> try { use(local, mime) } catch (_: ActivityNotFoundException) { toast("No app on this phone can do that.") }
             source.item != null -> opener.withLocalFile(source.item) { use(it.uri, it.mime) }
         }
-    }
-
-    fun edit(source: PhotoSource) = withUri(source) { uri, mime ->
-        context.startActivity(
-            Intent.createChooser(
-                Intent(Intent.ACTION_EDIT).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION),
-                "Edit with",
-            ),
-        )
     }
 
     // Slideshow: a new photo every 4 seconds until the last one (a tap stops it)
@@ -354,7 +347,7 @@ fun PhotoViewerScreen(
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 BarAction(Icons.Outlined.Share, "Share") { share(current) }
-                BarAction(Icons.Outlined.Tune, "Edit") { edit(current) }
+                BarAction(Icons.Outlined.Tune, "Edit") { onEdit(current) }
                 BarAction(Icons.Filled.Add, "Add to") { if (current.item != null) addTo = current else toast("Back this up first: it's only on this phone.") }
                 BarAction(Icons.Outlined.Delete, "Trash") { trash(current) }
             }

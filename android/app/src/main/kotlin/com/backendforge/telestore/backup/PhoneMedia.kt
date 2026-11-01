@@ -21,6 +21,8 @@ data class PhoneItem(
     val bucketId: String,
     val bucket: String,
     val video: Boolean,
+    /** A video's length in milliseconds (0 for photos or when unknown). */
+    val durationMs: Long = 0,
 ) {
     /** Changes when the file is edited, so an edited photo is backed up again. */
     val key: String get() = "$id:$size:$modifiedSec"
@@ -103,6 +105,8 @@ object PhoneMedia {
             MediaStore.MediaColumns.BUCKET_ID,
             MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
             MediaStore.Files.FileColumns.MEDIA_TYPE,
+            // "duration": in the same table since Android 1 (videos only)
+            MediaStore.Video.VideoColumns.DURATION,
         )
         val types = if (includeVideos) "(1,3)" else "(1)"
         val selection = "${MediaStore.Files.FileColumns.MEDIA_TYPE} IN $types AND ${MediaStore.Files.FileColumns.SIZE} > 0"
@@ -117,6 +121,7 @@ object PhoneMedia {
                 val bucketId = c.getColumnIndexOrThrow(MediaStore.MediaColumns.BUCKET_ID)
                 val bucket = c.getColumnIndexOrThrow(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME)
                 val type = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
+                val duration = c.getColumnIndex(MediaStore.Video.VideoColumns.DURATION)
                 while (c.moveToNext()) {
                     val video = c.getInt(type) == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
                     val rowId = c.getLong(id)
@@ -131,6 +136,7 @@ object PhoneMedia {
                         bucketId = c.getString(bucketId) ?: "",
                         bucket = c.getString(bucket) ?: "Other",
                         video = video,
+                        durationMs = if (video && duration >= 0 && !c.isNull(duration)) c.getLong(duration) else 0,
                     )
                 }
             }

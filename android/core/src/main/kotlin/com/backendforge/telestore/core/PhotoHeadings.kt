@@ -40,6 +40,16 @@ object PhotoHeadings {
         return listOfNotNull(time, place?.trim()?.ifBlank { null }).joinToString(" • ")
     }
 
+    /** A video tile's length, as Google Photos writes it: "0:07", "02:47", "1:02:03". */
+    fun videoLength(ms: Long?): String? {
+        val s = ms?.takeIf { it > 0 }?.let { (it + 500) / 1000 } ?: return null
+        return when {
+            s >= 3600 -> String.format(Locale.US, "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
+            s >= 60 -> String.format(Locale.US, "%02d:%02d", s / 60, s % 60)
+            else -> String.format(Locale.US, "0:%02d", s)
+        }
+    }
+
     /** Month view's titles: "November" this year, "March 2025" before, "Undated". */
     fun monthLabel(date: LocalDate?, today: LocalDate = LocalDate.now()): String = when {
         date == null -> "Undated"

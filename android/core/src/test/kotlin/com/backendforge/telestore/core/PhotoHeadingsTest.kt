@@ -49,6 +49,16 @@ class PhotoHeadingsTest {
     }
 
     @Test
+    fun `video lengths read like Google Photos`() {
+        assertEquals("0:07", PhotoHeadings.videoLength(7_200))
+        assertEquals("0:38", PhotoHeadings.videoLength(37_600))
+        assertEquals("02:47", PhotoHeadings.videoLength(167_000))
+        assertEquals("1:02:03", PhotoHeadings.videoLength(3_723_000))
+        assertNull(PhotoHeadings.videoLength(0))
+        assertNull(PhotoHeadings.videoLength(null))
+    }
+
+    @Test
     fun `month view names every month`() {
         assertEquals("November", PhotoHeadings.monthLabel(today, today))
         assertEquals("March 2025", PhotoHeadings.monthLabel(LocalDate.of(2025, 3, 9), today))

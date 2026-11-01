@@ -49,6 +49,7 @@ class FileData:
     place: str = None  # where a photo was taken, as set by the owner ("Gandhinagar, Gujarat")
     latitude: float = None  # the owner's location for the photo (overrides the photo's own GPS)
     longitude: float = None
+    duration: float = None  # a video's length in seconds (for Photos' "0:38"), when known
 
 class Files(Collection):
     def __init__(self,collection: Collection) -> None:
@@ -432,6 +433,7 @@ class Files(Collection):
                 place=file_dict.get("place"),
                 latitude=file_dict.get("latitude"),
                 longitude=file_dict.get("longitude"),
+                duration=file_dict.get("duration"),
             )
 
         if page is not None or page_size is not None:
