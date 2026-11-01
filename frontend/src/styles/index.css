@@ -235,3 +235,49 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 }
+/* Photos: Google Photos' colours (pure white/black behind photos, grey cards, soft purple),
+   only inside the Photos page, its viewer and dialogs (class "gphotos"). Matches the app's PhotosTheme. */
+@layer base {
+  .gphotos {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 12%;
+    --card: 255 18% 94%;
+    --card-foreground: 240 10% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 12%;
+    --surface-1: 255 18% 94%;
+    --surface-2: 252 15% 92%;
+    --primary: 231 47% 49%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 252 15% 92%;
+    --secondary-foreground: 240 10% 12%;
+    --muted: 250 14% 90%;
+    --muted-foreground: 240 6% 29%;
+    --accent: 252 15% 92%;
+    --accent-foreground: 240 10% 12%;
+    --border: 250 10% 80%;
+    --input: 250 10% 80%;
+    --ring: 231 47% 49%;
+  }
+  .dark .gphotos, .dark.gphotos {
+    --background: 0 0% 0%;
+    --foreground: 240 13% 90%;
+    --card: 230 10% 13%;
+    --card-foreground: 240 13% 90%;
+    --popover: 228 7% 17%;
+    --popover-foreground: 240 13% 90%;
+    --surface-1: 230 10% 13%;
+    --surface-2: 228 7% 17%;
+    --primary: 232 100% 86%;
+    --primary-foreground: 230 49% 26%;
+    --secondary: 240 5% 21%;
+    --secondary-foreground: 240 13% 90%;
+    --muted: 228 7% 17%;
+    --muted-foreground: 245 10% 79%;
+    --accent: 240 5% 21%;
+    --accent-foreground: 240 13% 90%;
+    --border: 240 6% 29%;
+    --input: 240 6% 29%;
+    --ring: 232 100% 86%;
+  }
+}

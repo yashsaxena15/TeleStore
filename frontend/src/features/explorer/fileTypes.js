@@ -86,5 +86,10 @@ export const apiFileToFileItem = (apiFile) => {
         // Name of the protected folder this item is inside (it can't be deleted either)
         protected_by: apiFile.protected_by || null,
         color: apiFile.color || null,
+        // Photos: in the Archive, the owner's caption and place, and a video's length (seconds)
+        archived: Boolean(apiFile.archived),
+        photoCaption: apiFile.caption || null,
+        place: apiFile.place || null,
+        duration: typeof apiFile.duration === 'number' ? apiFile.duration : null,
     };
 };

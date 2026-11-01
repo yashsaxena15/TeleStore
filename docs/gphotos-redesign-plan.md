@@ -27,3 +27,9 @@ Agreed with the owner on 2026-11-01. Android app first, then the website gets th
    Delete from device, Print), Share / Edit / Add to / Trash bar, video controls, details sheet (caption,
    editable date, camera settings, file chips, on-device size/path, add location). Collections page.
 5. Basic editor, video length on tiles (server stores duration; older videos are filled in over time).
+6. Website: the same design on /photos (frontend/src/features/photos): Google colours (.gphotos),
+   top bar with Collections / + / bell / account, memories, month titles, days with places, the three
+   layouts (ctrl + scroll or Photos view), video lengths, stacks, selection pill and sheet, viewer
+   with details editing, Collections, and the crop/adjust editor.
+   Phone-only on purpose: content from other apps (phone albums), video trim, Use as, Cast and
+   Delete from device; the website's place search takes a typed name (no geocoder in browsers).
