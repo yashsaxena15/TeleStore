@@ -92,16 +92,16 @@ def test_a_worker_stops_when_the_task_isnt_theirs(post, task):
 def test_a_finished_upload_is_saved_once(post):
     coll = Transfers(status="downloading", claimed_by="vm2")
     body, db = post(coll, "complete-task", DONE)
-    assert body == {"status": "ok"} and db.Files.add_file.call_count == 1
+    assert body == {"status": "ok"} and db.Files.claim_upload.call_count == 1
     assert coll.doc["status"] == "completed"
     body, db = post(coll, "complete-task", DONE)  # reported again
-    assert body == {"status": "ignored"} and not db.Files.add_file.called
+    assert body == {"status": "ignored"} and not db.Files.claim_upload.called
 
 
 def test_a_late_finish_is_ignored_when_another_machine_has_it(post):
     coll = Transfers(status="downloading", claimed_by="master-vm1")
     body, db = post(coll, "complete-task", DONE)
-    assert body == {"status": "ignored"} and not db.Files.add_file.called
+    assert body == {"status": "ignored"} and not db.Files.claim_upload.called
     assert coll.doc["claimed_by"] == "master-vm1"
 
 

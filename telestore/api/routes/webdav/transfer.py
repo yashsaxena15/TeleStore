@@ -339,7 +339,7 @@ async def handle_put(request: Request, segments: List[str], owner_id: str, defau
                     }, "$unset": {"total_parts": "", "part_size": ""}}
                 )
             else:
-                database.Files.add_file(
+                database.Files.claim_upload(
                     chat_id=default_chat_id,
                     message_id=res["message_id"],
                     thumbnail=res["thumbnail"],

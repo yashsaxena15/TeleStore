@@ -548,7 +548,7 @@ async def execute_task_extract(task_id: str, payload: Dict[str, Any], manager: A
                     elif hasattr(media, 'file_id') and sent_msg.photo:
                         thumbnail = media.file_id
 
-                    database.Files.add_file(
+                    database.Files.claim_upload(
                         chat_id=sent_msg.chat.id,
                         message_id=sent_msg.id,
                         thumbnail=thumbnail,
@@ -819,7 +819,7 @@ async def execute_task_compress(task_id: str, payload: Dict[str, Any], manager: 
             doc_info = sent_msg.document
             thumbnail = doc_info.thumbs[0].file_id if doc_info.thumbs else None
 
-            database.Files.add_file(
+            database.Files.claim_upload(
                 chat_id=sent_msg.chat.id,
                 message_id=sent_msg.id,
                 thumbnail=thumbnail,

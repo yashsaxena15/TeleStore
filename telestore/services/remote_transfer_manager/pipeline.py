@@ -36,6 +36,7 @@ class PipelinedStreamWriter:
         self.current_part_path = ""
         self.current_part_bytes = 0
         self.total_bytes = 0
+        self.head = b""  # the first bytes, to check the source didn't send an error page instead
         self.parts: List[Dict[str, Any]] = []
         self._lock = threading.Lock()
         self._closed = False
@@ -73,6 +74,8 @@ class PipelinedStreamWriter:
         self._check_priority_pause()
 
         with self._lock:
+            if len(self.head) < 4096:
+                self.head += data[:4096 - len(self.head)]
             written = 0
             data_len = len(data)
 

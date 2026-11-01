@@ -89,6 +89,41 @@ class Files(Collection):
             return True
         return None
 
+    def claim_upload(self, chat_id: int, message_id: int, thumbnail: str, file_type: str, file_unique_id: str, file_size: int, file_name: str, file_caption: str, file_path: str = "/", owner_id: str = None, is_vault: bool = None) -> dict:
+        """Records a file TeleStore uploaded in the folder it belongs in, and returns its record.
+
+        The Telegram Inbox listener may have recorded the message first (it sees every file posted to
+        the storage chat): then the file moves from Telegram Inbox to [file_path], with its real name
+        and owner. A record anywhere else is kept as it is. Raises when nothing could be recorded, so
+        the upload fails instead of looking finished.
+        """
+        mine = {"chat_id": {"$in": [chat_id, str(chat_id)]}, "message_id": message_id}
+        existing = self.find_one(mine)
+        if not existing:
+            self.add_file(chat_id=chat_id, message_id=message_id, thumbnail=thumbnail, file_type=file_type,
+                          file_unique_id=file_unique_id, file_size=file_size, file_name=file_name, file_caption=file_caption,
+                          file_path=file_path, owner_id=owner_id, is_vault=is_vault)
+            saved = self.find_one(mine)
+            if not saved:
+                raise RuntimeError(f"'{file_name}' reached Telegram but couldn't be saved to {file_path}.")
+            return saved
+        if existing.get("file_path") == "/Telegram Inbox" and file_path != "/Telegram Inbox":
+            if is_vault is None:
+                is_vault = file_path in ("/Vault", "Vault") or str(file_path).startswith(("/Vault/", "Vault/"))
+            moved = {"file_path": file_path, "file_name": file_name, "file_caption": file_caption, "file_type": file_type, "is_vault": bool(is_vault)}
+            if owner_id:
+                moved["owner_id"] = owner_id
+            if thumbnail and not existing.get("thumbnail"):
+                moved["thumbnail"] = thumbnail
+            self.update_one({"_id": existing["_id"]}, {"$set": moved})
+            from telestore.services import event_service
+            event_service.forget_inbox_file(chat_id, message_id)
+            logger.info(f"'{file_name}' was taken for Telegram Inbox before its upload finished; moved to {file_path}")
+            return {**existing, **moved}
+        if existing.get("file_path") != file_path:
+            logger.warning(f"'{file_name}' (message {message_id}) is already recorded in {existing.get('file_path')}; left there instead of {file_path}")
+        return existing
+
     def add_multipart_file(
         self,
         chat_id: int,

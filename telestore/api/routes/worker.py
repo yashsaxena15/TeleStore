@@ -298,42 +298,53 @@ async def complete_task(
         logger.info(f"[WORKER_COMPLETE] Range part task {body.task_id} completed via {body.worker_id}")
         return {"status": "ok"}
 
-    # 1. Create target folder structure in database
-    database.Files.create_folder_path(body.destination_path, owner_id=str(body.user_id))
-    file_type = get_file_type(body.file_name)
+    # Saving the file record must work, or the transfer fails (it never looks finished while missing)
+    try:
+        # 1. Create target folder structure in database
+        database.Files.create_folder_path(body.destination_path, owner_id=str(body.user_id))
+        file_type = get_file_type(body.file_name)
 
-    # 2. Add file record to Files collection
-    if not body.is_multipart and body.message_id:
-        database.Files.add_file(
-            chat_id=body.chat_id,
-            message_id=body.message_id,
-            thumbnail=body.thumbnail,
-            file_type=file_type,
-            file_unique_id=body.file_unique_id or f"uniq_{body.message_id}",
-            file_size=body.file_size,
-            file_name=body.file_name,
-            file_caption=f"Uploaded file: {body.file_name}",
-            file_path=body.destination_path,
-            owner_id=str(body.user_id),
-            is_vault=body.is_vault
-        )
-    else:
-        parts = body.parts or []
-        first_unique = parts[0]["file_unique_id"] if parts else "multipart_worker"
-        database.Files.add_multipart_file(
-            chat_id=body.chat_id,
-            thumbnail=body.thumbnail,
-            file_type=file_type,
-            file_unique_id=first_unique,
-            file_size=body.file_size,
-            file_name=body.file_name,
-            file_caption=f"Uploaded multi-part file: {body.file_name}",
-            parts=parts,
-            file_path=body.destination_path,
-            owner_id=str(body.user_id),
-            part_size=body.part_size or (1950 * 1024 * 1024),
-            is_vault=body.is_vault
-        )
+        # 2. Add file record to Files collection
+        if not body.is_multipart and body.message_id:
+            database.Files.claim_upload(
+                chat_id=body.chat_id,
+                message_id=body.message_id,
+                thumbnail=body.thumbnail,
+                file_type=file_type,
+                file_unique_id=body.file_unique_id or f"uniq_{body.message_id}",
+                file_size=body.file_size,
+                file_name=body.file_name,
+                file_caption=f"Uploaded file: {body.file_name}",
+                file_path=body.destination_path,
+                owner_id=str(body.user_id),
+                is_vault=body.is_vault
+            )
+        else:
+            parts = body.parts or []
+            first_unique = parts[0]["file_unique_id"] if parts else "multipart_worker"
+            database.Files.add_multipart_file(
+                chat_id=body.chat_id,
+                thumbnail=body.thumbnail,
+                file_type=file_type,
+                file_unique_id=first_unique,
+                file_size=body.file_size,
+                file_name=body.file_name,
+                file_caption=f"Uploaded multi-part file: {body.file_name}",
+                parts=parts,
+                file_path=body.destination_path,
+                owner_id=str(body.user_id),
+                part_size=body.part_size or (1950 * 1024 * 1024),
+                is_vault=body.is_vault
+            )
+
+    except Exception as e:
+        logger.error(f"[WORKER_COMPLETE] Task {body.task_id}: '{body.file_name}' reached Telegram but couldn't be saved: {e}")
+        coll.update_one({"task_id": body.task_id}, {"$set": {
+            "status": "failed", "error_message": f"'{body.file_name}' couldn't be saved to {body.destination_path}. Tap Retry.",
+            "error_detail": f"[{body.worker_id}] {e}"[:2000], "phase": "Failed: couldn't save the file", "updated_at": now,
+        }})
+        event_service.task_finished(body.task_id)
+        return {"status": "failed"}
 
     # 3. Mark RemoteTransfers record as completed
     coll.update_one(

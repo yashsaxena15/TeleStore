@@ -192,6 +192,14 @@ def inbox_file(owner: str, file_name: str, chat_id=None, message_id=None) -> Non
            dedupe=f"inbox:{chat_id}:{message_id}" if chat_id and message_id else None)
 
 
+def forget_inbox_file(chat_id, message_id) -> None:
+    """Drops the "New file in Telegram Inbox" notice for a file that was really an upload (moved out)."""
+    try:
+        _coll().delete_many({"dedupe": f"inbox:{chat_id}:{message_id}"})
+    except Exception as e:
+        logger.warning(f"Couldn't remove the Inbox notice for message {message_id}: {e}")
+
+
 def storage_check(owner: str) -> None:
     """Warns once a week when the account uses 90% or more of its storage."""
     try:

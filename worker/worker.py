@@ -6,6 +6,7 @@ import asyncio
 import logging
 import secrets
 import urllib.parse
+import re
 import aiohttp
 from pyrogram import Client
 
@@ -41,6 +42,30 @@ def is_gdrive_quota_error(msg: str) -> bool:
         "quota exceeded" in m or
         "download quota" in m
     )
+
+# A finished download must be the file: not an error page the source sent instead (Google Drive
+# answers "200 OK" with a small notice when its download limit is reached), and all of it.
+# The same checks as the master's telestore/services/download_check.py.
+HTML_NAMES = (".htm", ".html", ".xhtml", ".shtml", ".mht", ".mhtml")
+HEAD_BYTES = 4096
+_QUOTA_PAGE = re.compile(r"too many users have (viewed or )?downloaded|download quota|quota (was |has been )?exceeded", re.I)
+
+
+def looks_like_html(head: bytes) -> bool:
+    start = head[:1024].lstrip(b"\xef\xbb\xbf \t\r\n").lower()
+    return start.startswith((b"<!doctype html", b"<html")) or (start.startswith(b"<") and b"<html" in start and b"<head" in head[:HEAD_BYTES].lower())
+
+
+def check_download(filename: str, received: int, expected: int, head: bytes) -> None:
+    """Raises when the bytes received aren't [filename] as the source announced it."""
+    if head and not (filename or "").lower().endswith(HTML_NAMES) and looks_like_html(head):
+        text = re.sub(r"<[^>]+>", " ", head.decode("utf-8", "ignore"))
+        if _QUOTA_PAGE.search(text):
+            raise RuntimeError(f"Google Drive daily download quota exceeded for '{filename}' (it sent a notice instead of the file).")
+        raise RuntimeError(f"The source sent a web page instead of '{filename}' ({received} bytes). Check the link, or try again later.")
+    if expected and expected > 0 and received != expected:
+        raise RuntimeError(f"Only part of '{filename}' arrived: {received} of {expected} bytes. Try again.")
+
 
 class TaskCancelled(Exception):
     """The master cancelled the task, or another machine took it over: stop without reporting a failure."""
@@ -245,12 +270,15 @@ class DistributedWorker:
                     with open(part_path, "wb") as pf:
                         chunk_size = 512 * 1024
                         transferred = 0
+                        head = b""
                         start_time = time.time()
                         last_rep_time = start_time
                         while True:
                             chunk = await resp.content.read(chunk_size)
                             if not chunk:
                                 break
+                            if len(head) < HEAD_BYTES:
+                                head += chunk[:HEAD_BYTES - len(head)]
                             pf.write(chunk)
                             transferred += len(chunk)
                             now = time.time()
@@ -262,6 +290,8 @@ class DistributedWorker:
                                 eta = int((part_size - transferred) / speed) if (part_size > transferred and speed > 0) else 0
                                 phase = f"Leeching Part {part_index}/{total_parts} @ {round(speed/1024/1024, 1)} MB/s ({prog}%)"
                                 await self.report_progress(task_id, transferred, part_size, speed, prog, eta, phase)
+
+                check_download(filename, transferred, part_size, head)
 
                 # Upload part file to Telegram Cloud
                 step = "uploading to Telegram"
@@ -325,8 +355,10 @@ class DistributedWorker:
                     raise RuntimeError(f"HTTP {resp.status} from source: {txt[:100]}")
 
                 content_len = resp.headers.get("Content-Length")
+                announced = 0  # the size the source gave for this download (checked at the end)
+                head = b""
                 if content_len and content_len.isdigit():
-                    filesize = int(content_len)
+                    filesize = announced = int(content_len)
 
                 cd = resp.headers.get("Content-Disposition", "")
                 if "filename*=" in cd:
@@ -349,7 +381,8 @@ class DistributedWorker:
                     try:
                         logger.info(f"Uploading part {p_idx} ({p_size} bytes) to Telegram...")
                         target_name = filename if is_single else f"{filename}.part{p_idx}"
-                        caption = filename if is_single else f"{filename} (Part {p_idx})"
+                        # "Uploaded file:" marks it as TeleStore's own upload (not a file for Telegram Inbox)
+                        caption = f"Uploaded file: {filename}" if is_single else f"{filename} (Part {p_idx})"
                         ext = os.path.splitext(filename)[1].lower()
                         progress = self.upload_progress(task_id, "Uploading to Telegram ☁️" if is_single else f"Uploading Part {p_idx} to Telegram ☁️")
 
@@ -393,6 +426,8 @@ class DistributedWorker:
                     chunk = await resp.content.read(chunk_size)
                     if not chunk:
                         break
+                    if len(head) < HEAD_BYTES:
+                        head += chunk[:HEAD_BYTES - len(head)]
 
                     current_part_file.write(chunk)
                     chunk_len = len(chunk)
@@ -424,6 +459,7 @@ class DistributedWorker:
                         current_part_file = open(current_part_path, "wb")
 
                 current_part_file.close()
+                check_download(filename, transferred, announced, head)
 
                 # Final part
                 is_single = (part_index == 1)
@@ -474,6 +510,8 @@ class DistributedWorker:
             for t in upload_tasks:
                 t.cancel()
         except Exception as e:
+            for t in upload_tasks:
+                t.cancel()
             if isinstance(e, asyncio.TimeoutError):
                 err_msg = f"Timed out while {step} (no data for {READ_TIMEOUT} s)."
             else:

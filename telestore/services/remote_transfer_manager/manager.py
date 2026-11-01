@@ -19,6 +19,7 @@ import requests
 from telestore.db import database
 from telestore.services.pipeline_uploader import upload_part_task
 from telestore.services.disk_budget import AsyncPartSlots, ThreadPartSlots
+from telestore.services import download_check
 from telestore.services.priority_manager import priority_manager
 from telestore.services.torrent_manager import torrent_manager, parse_torrent_bytes
 
@@ -941,7 +942,7 @@ class RemoteTransferManager:
                 chat_id=chat_id, bot_manager=bot_manager, fallback_client=bot, caption=caption,
                 semaphore=None, is_single_part=True, file_type=file_type,
             )
-            database.Files.add_file(
+            database.Files.claim_upload(
                 chat_id=chat_id, message_id=res["message_id"], thumbnail=res.get("thumbnail"), file_type=file_type,
                 file_unique_id=res["file_unique_id"], file_size=size, file_name=filename, file_caption=caption,
                 file_path=destination_path, owner_id=str(user_id), is_vault=bool(task_doc.get("is_vault")),
@@ -1361,6 +1362,11 @@ class RemoteTransferManager:
             if cancel_event.is_set():
                 raise InterruptedError("Cancelled by user")
 
+            # The whole range, and not an error page the source sent instead
+            with open(part_file_path, "rb") as pf:
+                head = pf.read(download_check.HEAD_BYTES)
+            download_check.check(filename, downloaded_bytes, part_size, head)
+
             self._update_task(task_id, {
                 "status": "uploading_tg",
                 "phase": f"[master-vm1] Uploading Part {part_index}/{total_parts} to Telegram Cloud ☁️",
@@ -1499,6 +1505,7 @@ class RemoteTransferManager:
         uploaded_bytes_map = {}
         filename_holder = [task_doc.get("filename") or "download.bin"]
         estimated_total = [task_doc.get("filesize", 0)]
+        announced = [0]  # the size the source itself gave for this download (checked at the end)
         last_progress_time = [time.time()]
         last_dl = [0]
         last_up = [0]
@@ -1700,7 +1707,7 @@ class RemoteTransferManager:
                             is_single_part=True,
                             file_type="document"
                         )
-                        database.Files.add_file(
+                        database.Files.claim_upload(
                             chat_id=chat_id,
                             message_id=res["message_id"],
                             thumbnail=res.get("thumbnail"),
@@ -1809,7 +1816,7 @@ class RemoteTransferManager:
                             progress=_part_up_prog
                         )
 
-                        database.Files.add_file(
+                        database.Files.claim_upload(
                             chat_id=chat_id,
                             message_id=res["message_id"],
                             thumbnail=res.get("thumbnail"),
@@ -1977,7 +1984,7 @@ class RemoteTransferManager:
 
                 def _gdown_progress(cur, tot):
                     if tot:
-                        estimated_total[0] = tot
+                        estimated_total[0] = announced[0] = tot
                     tot_up = sum(uploaded_bytes_map.values())
                     report_combined_progress(cur, tot_up, estimated_total[0])
 
@@ -2090,7 +2097,7 @@ class RemoteTransferManager:
                         tot = resp.headers.get("Content-Length")
                         if tot:
                             try:
-                                estimated_total[0] = int(tot)
+                                estimated_total[0] = announced[0] = int(tot)
                             except Exception:
                                 pass
 
@@ -2140,14 +2147,14 @@ class RemoteTransferManager:
                                     tot = resp.headers.get("Content-Length")
                                     if tot:
                                         try:
-                                            estimated_total[0] = int(tot)
+                                            estimated_total[0] = announced[0] = int(tot)
                                         except Exception:
                                             pass
                                 elif resp.status_code == 206:
                                     cr = resp.headers.get("Content-Range", "")
                                     if "/" in cr:
                                         try:
-                                            estimated_total[0] = int(cr.split("/")[-1])
+                                            estimated_total[0] = announced[0] = int(cr.split("/")[-1])
                                         except Exception:
                                             pass
 
@@ -2180,13 +2187,8 @@ class RemoteTransferManager:
             if not upload_tasks or writer.total_bytes == 0:
                 raise ValueError("No data received or transfer was cancelled.")
 
-            # Safety Guard: Ensure downloaded media/archive files are not corrupt HTML snippets (< 50 KB)
-            target_ext = filename_holder[0].rsplit(".", 1)[-1].lower() if "." in filename_holder[0] else ""
-            if target_ext in ("mkv", "mp4", "avi", "mov", "webm", "ts", "m4v", "flv", "zip", "rar", "7z", "tar", "gz", "iso") and writer.total_bytes < 50 * 1024:
-                raise ValueError(
-                    f"Corrupt or invalid download: Received only {writer.total_bytes} bytes for '{filename_holder[0]}'. "
-                    f"The remote source returned an error page or broken stream instead of the actual media file."
-                )
+            # The real file, not an error page the source sent instead, and all of it
+            download_check.check(filename_holder[0], writer.total_bytes, announced[0], writer.head)
 
             # Ensure folder hierarchy exists in MongoDB
             database.Files.create_folder_path(destination_path, owner_id=str(user_id))
@@ -2196,7 +2198,7 @@ class RemoteTransferManager:
             if len(upload_tasks) == 1 and writer.parts[0].get("part_index") == 1 and writer.total_bytes <= PART_MAX_SIZE:
                 # Single-part file upload complete
                 res = await upload_tasks[0]
-                database.Files.add_file(
+                database.Files.claim_upload(
                     chat_id=chat_id,
                     message_id=res["message_id"],
                     thumbnail=res.get("thumbnail"),

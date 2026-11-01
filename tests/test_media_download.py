@@ -264,7 +264,7 @@ class TestTransfer:
         with patch.object(media, "download", self._fake_download(1000)), patch.object(manager_module, "upload_part_task", upload), \
                 patch.object(mgr, "_update_task") as update:
             asyncio.run(mgr._run_download_and_upload(self._task(), MagicMock(is_set=lambda: False)))
-        kwargs = database.Files.add_file.call_args.kwargs
+        kwargs = database.Files.claim_upload.call_args.kwargs
         assert kwargs["file_name"] == "Song 1.mp3" and kwargs["file_path"] == "/Home/Music" and kwargs["file_type"] == "audio"
         assert update.call_args.args[1]["status"] == "completed"
         assert not (tmp_path / "tg_files" / "remote_rt_9").exists()
