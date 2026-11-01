@@ -23,7 +23,6 @@ import os
 import re
 import sys
 import time
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from telestore.services.download_check import HEAD_BYTES, HTML_NAMES, looks_like_html
@@ -85,60 +84,75 @@ def find_misplaced(db) -> dict:
 
 # ── 2. Fake files ───────────────────────────────────────────────────────────
 
-async def find_fakes(db, limit: int = 0) -> dict:
+# Types where a file of a few KB is almost never real: checked first, so their results come early
+SUSPECT = re.compile(r"\.(mp4|mkv|webm|avi|mov|m4v|ts|flv|3gp|mp3|m4a|flac|wav|ogg|opus|aac|zip|rar|7z|tar|gz|tgz|xz|bz2|zst|iso|img|bin|"
+                     r"apk|exe|msi|dmg|pdf|epub|docx?|xlsx?|pptx?|win\d*|tgz)$", re.I)
+
+
+async def find_fakes(db, limit: int = 0, bots: int = 4) -> dict:
+    """Reads every small file's first bytes back from Telegram (with [bots] spare bots in parallel,
+    each in its own short-lived session, so the running app isn't disturbed)."""
     from pyrogram import Client
     from telestore.config import API_HASH, API_ID, TOKENS
 
     files = db["Files"]
     query = {"file_type": {"$ne": "folder"}, "trashed": {"$ne": True}, "is_split": {"$ne": True},
              "message_id": {"$ne": None}, "file_size": {"$gte": SMALLEST, "$lte": LARGEST}}
-    by_chat = defaultdict(list)
-    for f in files.find(query, {"_id": 1, "chat_id": 1, "message_id": 1, "file_name": 1, "file_path": 1, "owner_id": 1, "file_size": 1}):
-        if not (f.get("file_name") or "").lower().endswith(HTML_NAMES) and f.get("chat_id"):
-            by_chat[int(f["chat_id"])].append(f)
-    total = sum(len(v) for v in by_chat.values())
-    print(f"Reading {total} small files back from Telegram to look for web pages…", flush=True)
+    todo = [f for f in files.find(query, {"_id": 1, "chat_id": 1, "message_id": 1, "file_name": 1, "file_path": 1, "owner_id": 1, "file_size": 1})
+            if f.get("chat_id") and not (f.get("file_name") or "").lower().endswith(HTML_NAMES)]
+    todo.sort(key=lambda f: (not SUSPECT.search(f.get("file_name") or ""), int(f["chat_id"]), f["message_id"]))
+    if limit:
+        todo = todo[:limit]
+    # Batches of up to 200 messages from one chat, dealt out to the bots in turn
+    batches = []
+    for f in todo:
+        if batches and len(batches[-1]) < 200 and batches[-1][0]["chat_id"] == f["chat_id"]:
+            batches[-1].append(f)
+        else:
+            batches.append([f])
+    bots = max(1, min(bots, len(TOKENS)))
+    print(f"Reading {len(todo)} small files back from Telegram with {bots} bots to look for web pages…", flush=True)
 
-    fakes, unreadable, done = [], 0, 0
+    fakes, state = [], {"done": 0, "unreadable": 0}
     started = time.monotonic()
-    # A spare bot (the last one), in its own short-lived session, so the running app isn't disturbed
-    async with Client("repair_scan", api_id=API_ID, api_hash=API_HASH, bot_token=TOKENS[-1],
-                      in_memory=True, no_updates=True, sleep_threshold=300) as client:
-        gate = asyncio.Semaphore(4)
 
-        async def read(msg, f):
-            nonlocal unreadable
-            async with gate:
-                try:
-                    head = b""
-                    async for chunk in client.stream_media(msg, limit=1):
-                        head = bytes(chunk[:HEAD_BYTES])
-                        break
-                except Exception:
-                    unreadable += 1
-                    return
-            if looks_like_html(head):
-                text = re.sub(rb"<[^>]+>", b" ", head).decode("utf-8", "ignore")
-                fakes.append({"file_id": str(f["_id"]), "name": f["file_name"], "path": f["file_path"], "owner": str(f.get("owner_id") or ""),
-                              "size": f.get("file_size"), "google_limit": bool(QUOTA_TEXT.search(text))})
+    async def run_bot(index: int, token: str):
+        async with Client(f"repair_scan_{index}", api_id=API_ID, api_hash=API_HASH, bot_token=token,
+                          in_memory=True, no_updates=True, sleep_threshold=300) as client:
+            gate = asyncio.Semaphore(4)
 
-        for chat_id, docs in by_chat.items():
-            for i in range(0, len(docs), 200):
-                batch = docs[i:i + 200]
+            async def read(msg, f):
+                async with gate:
+                    try:
+                        head = b""
+                        async for chunk in client.stream_media(msg, limit=1):
+                            head = bytes(chunk[:HEAD_BYTES])
+                            break
+                    except Exception:
+                        state["unreadable"] += 1
+                        return
+                if looks_like_html(head):
+                    text = re.sub(rb"<[^>]+>", b" ", head).decode("utf-8", "ignore")
+                    fakes.append({"file_id": str(f["_id"]), "name": f["file_name"], "path": f["file_path"], "owner": str(f.get("owner_id") or ""),
+                                  "size": f.get("file_size"), "google_limit": bool(QUOTA_TEXT.search(text))})
+
+            for batch in batches[index::bots]:
+                chat_id = int(batch[0]["chat_id"])
                 try:
                     msgs = await client.get_messages(chat_id, [d["message_id"] for d in batch])
                 except Exception as e:
-                    print(f"  couldn't read messages in chat {chat_id}: {e}", flush=True)
-                    unreadable += len(batch)
+                    print(f"  bot {index}: couldn't read messages in chat {chat_id}: {e}", flush=True)
+                    state["unreadable"] += len(batch)
                     continue
                 pairs = [(m, d) for m, d in zip(msgs, batch) if m and not getattr(m, "empty", False) and m.media]
-                unreadable += len(batch) - len(pairs)
+                state["unreadable"] += len(batch) - len(pairs)
                 await asyncio.gather(*(read(m, d) for m, d in pairs))
-                done += len(batch)
-                print(f"  {done}/{total} checked, {len(fakes)} fake so far ({time.monotonic() - started:.0f} s)", flush=True)
-                if limit and done >= limit:
-                    return {"fakes": fakes, "checked": done, "unreadable": unreadable}
-    return {"fakes": fakes, "checked": done, "unreadable": unreadable}
+                state["done"] += len(batch)
+                print(f"  {state['done']}/{len(todo)} checked, {len(fakes)} fake so far ({time.monotonic() - started:.0f} s)", flush=True)
+
+    # The spare bots at the end of the list
+    await asyncio.gather(*(run_bot(i, token) for i, token in enumerate(TOKENS[-bots:])))
+    return {"fakes": fakes, "checked": state["done"], "unreadable": state["unreadable"]}
 
 
 def _task_for(db, fake):
@@ -148,10 +162,10 @@ def _task_for(db, fake):
 
 # ── Scan and apply ──────────────────────────────────────────────────────────
 
-def scan(groups, limit: int = 0) -> dict:
+def scan(groups, limit: int = 0, bots: int = 4) -> dict:
     db = _db()
     report = {"scanned_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), **find_misplaced(db)}
-    report.update(asyncio.run(find_fakes(db, limit)))
+    report.update(asyncio.run(find_fakes(db, limit, bots)))
     # A fake that was misplaced too: its transfer is found by the folder it belongs in
     moved_to = {m["file_id"]: m["to"] for m in report["moves"]}
     requeue, no_source = [], []
@@ -204,9 +218,10 @@ def main(argv=None):
     parser.add_argument("command", choices=["scan", "apply"])
     parser.add_argument("--group", action="append", default=[], help="a folder copy whose failed and cancelled files are copied again")
     parser.add_argument("--limit", type=int, default=0, help="scan: check only this many small files (a quick trial)")
+    parser.add_argument("--bots", type=int, default=4, help="scan: spare bots reading in parallel (the last ones in the list)")
     args = parser.parse_args(argv)
     if args.command == "scan":
-        r = scan(args.group, args.limit)
+        r = scan(args.group, args.limit, args.bots)
         print(json.dumps({
             "misplaced (move to their folder)": len(r["moves"]), "misplaced, no single match (left)": len(r["unsure"]),
             "small files checked": r["checked"], "couldn't read": r["unreadable"],
