@@ -44,11 +44,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -61,6 +59,12 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.MobileOff
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudUpload
@@ -75,6 +79,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -213,6 +218,17 @@ fun PhotosScreen(
     var headerPx by remember { mutableIntStateOf(0) }
     val headerHeight = with(density) { headerPx.toDp() }
     val askAccess = rememberPhotoAccessRequest { vm.scanPhone() }
+    val opener = com.backendforge.telestore.ui.components.rememberOpenElsewhere(container)
+    val deleteFromPhone = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            vm.clearSelection()
+            vm.scanPhone()
+        }
+    }
+    var allAlbums by remember { mutableStateOf(false) }
+    var newAlbumForSelection by remember { mutableStateOf(false) }
+    var sheetPx by remember { mutableIntStateOf(0) }
+    val sheetHeight = with(density) { sheetPx.toDp() }
     val pickToUpload = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> vm.uploadFromPhone(uris) }
     val ring = BackupSummary.ring(backupSettings.enabled, backup.running, backup.message)
     val initial = session?.username?.firstOrNull()?.uppercase() ?: "?"
@@ -285,6 +301,9 @@ fun PhotosScreen(
     val inTeleStore = picked.count { it.server != null }
     val notBackedUp = picked.count { it.phoneOnly && !it.backedUp }
     val protectedCount = picked.count { it.server?.isProtected == true }
+    val freeableSelected = picked.count { it.backedUp && it.local != null }
+    // The albums for "Add to album" load as a selection starts
+    LaunchedEffect(state.selecting) { if (state.selecting) vm.loadAlbums() }
 
     fun open(entry: PhotoEntry) {
         val server = entry.server
@@ -336,7 +355,7 @@ fun PhotosScreen(
                     LazyColumn(
                         state = grid,
                         verticalArrangement = Arrangement.spacedBy(2.dp),
-                        contentPadding = PaddingValues(top = headerHeight, bottom = 24.dp),
+                        contentPadding = PaddingValues(top = headerHeight, bottom = if (state.selecting) sheetHeight + 8.dp else 24.dp),
                         modifier = Modifier.fillMaxSize().pointerInput(Unit) {
                             // Pinch to show bigger or smaller photos (one step per pinch)
                             awaitEachGesture {
@@ -372,7 +391,7 @@ fun PhotosScreen(
                                 )
                             }
                         }
-                        if (state.memories.isNotEmpty() && !state.selecting) {
+                        if (state.memories.isNotEmpty()) {
                             item(key = "memories") { Memories(state.memories, api, onOpenFile) }
                         }
                         cells.forEach { cell ->
@@ -455,23 +474,21 @@ fun PhotosScreen(
 
         // The bar floats over the photos: solid at the top, fading into them once scrolled
         val barBackground = when {
-            state.selecting -> Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            panelOpen -> Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            panelOpen && !state.selecting -> Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)
             scrolled -> Modifier.background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.background.copy(alpha = 0.92f), MaterialTheme.colorScheme.background.copy(alpha = 0.55f), Color.Transparent)))
             else -> Modifier.background(MaterialTheme.colorScheme.background)
         }
         Column(Modifier.fillMaxWidth().then(barBackground).onSizeChanged { headerPx = it.height }) {
             if (state.selecting) {
-                SelectionBar(
-                    count = state.selected.size, inTeleStore = inTeleStore, notBackedUp = notBackedUp, protectedCount = protectedCount,
-                    onClose = vm::clearSelection, onDownload = vm::downloadSelected, onStar = vm::starSelected, onTrash = vm::trashSelected,
-                    onBackUp = {
-                        if (!vm.backUpSelected()) {
-                            Toast.makeText(context, "Backup is off. Turn it on to back up these photos.", Toast.LENGTH_LONG).show()
-                            onBackup()
+                // "✕ 253" in a pill, nothing else: the actions are in the sheet at the bottom
+                Row(Modifier.statusBarsPadding().fillMaxWidth().height(64.dp).padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(onClick = vm::clearSelection, shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                        Row(Modifier.padding(start = 12.dp, end = 22.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Close, contentDescription = "Cancel selection", modifier = Modifier.size(26.dp))
+                            Text("${state.selected.size}", style = MaterialTheme.typography.titleLarge.copy(fontSize = 22.sp), modifier = Modifier.padding(start = 16.dp))
                         }
-                    },
-                )
+                    }
+                }
             } else {
                 Column(Modifier.statusBarsPadding().animateContentSize()) {
                     TopBar(
@@ -494,7 +511,70 @@ fun PhotosScreen(
                 }
             }
         }
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp))
+        AnimatedVisibility(
+            visible = state.selecting,
+            enter = androidx.compose.animation.slideInVertically { it } + fadeIn(),
+            exit = androidx.compose.animation.slideOutVertically { it } + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            SelectionSheet(
+                albums = state.albums,
+                api = api,
+                inTeleStore = inTeleStore,
+                notBackedUp = notBackedUp,
+                protectedCount = protectedCount,
+                canFree = freeableSelected > 0 && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R,
+                onShare = {
+                    val (phone, server) = vm.selectionToShare()
+                    val mime = when {
+                        picked.all { !it.video } -> "image/*"
+                        picked.all { it.video } -> "video/*"
+                        else -> "*/*"
+                    }
+                    opener.shareMany(phone, server, mime)
+                },
+                onAddTo = { album -> vm.addSelectedToAlbum(album.path, album.name) },
+                onNewAlbum = { newAlbumForSelection = true },
+                onViewAllAlbums = { allAlbums = true },
+                onStar = vm::starSelected,
+                onDownload = vm::downloadSelected,
+                onTrash = vm::trashSelected,
+                onBackUp = {
+                    if (!vm.backUpSelected()) {
+                        Toast.makeText(context, "Backup is off. Turn it on to back up these photos.", Toast.LENGTH_LONG).show()
+                        onBackup()
+                    }
+                },
+                onDeleteFromDevice = {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                        // Android asks "delete these?" itself
+                        val request = android.provider.MediaStore.createDeleteRequest(context.contentResolver, vm.selectionFreeable())
+                        deleteFromPhone.launch(androidx.activity.result.IntentSenderRequest.Builder(request.intentSender).build())
+                    }
+                },
+                onNeedsBackup = { Toast.makeText(context, "Back these up first: they're only on this phone.", Toast.LENGTH_SHORT).show() },
+                modifier = Modifier.onSizeChanged { sheetPx = it.height },
+            )
+        }
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = if (state.selecting) sheetHeight + 8.dp else 16.dp))
+    }
+
+    if (allAlbums) {
+        AllAlbumsSheet(
+            albums = state.albums,
+            onPick = { album -> allAlbums = false; vm.addSelectedToAlbum(album.path, album.name) },
+            onNewAlbum = { allAlbums = false; newAlbumForSelection = true },
+            onDismiss = { allAlbums = false },
+        )
+    }
+    if (newAlbumForSelection) {
+        NewAlbumDialog(
+            onCreate = { name ->
+                newAlbumForSelection = false
+                vm.newAlbum(name) { path -> vm.addSelectedToAlbum(path, name.trim()) }
+            },
+            onDismiss = { newAlbumForSelection = false },
+        )
     }
 
     if (accountSheet) {
@@ -763,30 +843,105 @@ private fun SheetRow(icon: ImageVector, label: String, enabled: Boolean = true, 
     }
 }
 
+/**
+ * The sheet at the bottom while photos are selected: a row of actions (Share, Add to album,
+ * Favourite, Download, Trash, Back up, Delete from device), then "Add to album" with the albums.
+ */
 @Composable
-private fun SelectionBar(
-    count: Int,
+private fun SelectionSheet(
+    albums: List<AlbumChoice>,
+    api: com.backendforge.telestore.core.TeleStoreApi,
     inTeleStore: Int,
     notBackedUp: Int,
     /** Selected photos protected from deletion: Trash then looks off (tapping it says why). */
     protectedCount: Int,
-    onClose: () -> Unit,
-    onDownload: () -> Unit,
+    canFree: Boolean,
+    onShare: () -> Unit,
+    onAddTo: (AlbumChoice) -> Unit,
+    onNewAlbum: () -> Unit,
+    onViewAllAlbums: () -> Unit,
     onStar: () -> Unit,
+    onDownload: () -> Unit,
     onTrash: () -> Unit,
     onBackUp: () -> Unit,
+    onDeleteFromDevice: () -> Unit,
+    /** Tapped an action that needs the photos in TeleStore while none of them is. */
+    onNeedsBackup: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Row(Modifier.statusBarsPadding().fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = "Cancel selection") }
-        Text("$count selected", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-        // Photos only on the phone can't be starred or trashed in TeleStore yet: back them up first
-        if (notBackedUp > 0) IconButton(onClick = onBackUp) { Icon(Icons.Filled.CloudUpload, contentDescription = "Back up") }
-        if (inTeleStore > 0) {
-            IconButton(onClick = onDownload) { Icon(Icons.Filled.Download, contentDescription = "Download") }
-            IconButton(onClick = onStar) { Icon(Icons.Filled.Star, contentDescription = "Star") }
-            IconButton(onClick = onTrash) {
-                Icon(Icons.Filled.Delete, contentDescription = "Move to Trash", modifier = Modifier.alpha(if (protectedCount > 0) 0.38f else 1f))
+    val inCloud = inTeleStore > 0
+    Surface(
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(bottom = 12.dp)) {
+            Box(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.width(32.dp).height(4.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), CircleShape))
             }
+            LazyRow(contentPadding = PaddingValues(horizontal = 8.dp)) {
+                item { SheetAction(Icons.Outlined.Share, "Share", onClick = onShare) }
+                item { SheetAction(Icons.AutoMirrored.Outlined.PlaylistAdd, "Add to album", dimmed = !inCloud) { if (inCloud) onViewAllAlbums() else onNeedsBackup() } }
+                item { SheetAction(Icons.Outlined.StarOutline, "Favourite", dimmed = !inCloud) { if (inCloud) onStar() else onNeedsBackup() } }
+                item { SheetAction(Icons.Outlined.Download, "Download", dimmed = !inCloud) { if (inCloud) onDownload() else onNeedsBackup() } }
+                item { SheetAction(Icons.Outlined.Delete, "Trash", dimmed = !inCloud || protectedCount > 0) { if (inCloud) onTrash() else onNeedsBackup() } }
+                if (notBackedUp > 0) item { SheetAction(Icons.Outlined.CloudUpload, "Back up", onClick = onBackUp) }
+                if (canFree) item { SheetAction(Icons.Outlined.MobileOff, "Delete from device", onClick = onDeleteFromDevice) }
+            }
+            HorizontalDivider(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Add to album", style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp), modifier = Modifier.weight(1f))
+                TextButton(onClick = { if (inCloud) onViewAllAlbums() else onNeedsBackup() }) { Text("View all", style = MaterialTheme.typography.titleMedium) }
+            }
+            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                item { AlbumCard(name = "New album", cover = null, api = api, icon = Icons.Outlined.Add) { if (inCloud) onNewAlbum() else onNeedsBackup() } }
+                items(albums, key = { it.path }) { album ->
+                    AlbumCard(name = album.name, cover = album.cover, api = api, icon = Icons.Outlined.PhotoAlbum) { if (inCloud) onAddTo(album) else onNeedsBackup() }
+                }
+            }
+        }
+    }
+}
+
+/** An action in the selection sheet: an icon over its name. */
+@Composable
+private fun SheetAction(icon: ImageVector, label: String, dimmed: Boolean = false, onClick: () -> Unit) {
+    Column(
+        Modifier.width(92.dp).clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(vertical = 10.dp).alpha(if (dimmed) 0.45f else 1f),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(26.dp))
+        Text(
+            label, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, maxLines = 2,
+            modifier = Modifier.padding(top = 10.dp),
+        )
+    }
+}
+
+/** An album in "Add to album": its newest photo (or an icon) with the name under it. */
+@Composable
+private fun AlbumCard(name: String, cover: FileItem?, api: com.backendforge.telestore.core.TeleStoreApi, icon: ImageVector, onClick: () -> Unit) {
+    Column(Modifier.width(112.dp).clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick)) {
+        Box(
+            Modifier.size(112.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (cover != null) FileThumbnail(item = cover, api = api, modifier = Modifier.fillMaxSize(), shapeRadius = 16.dp, iconSize = 28.dp)
+            else Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+        }
+        Text(name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp, start = 2.dp))
+    }
+}
+
+/** "View all": every album, to add the selection to one (or a new one). */
+@kotlin.OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AllAlbumsSheet(albums: List<AlbumChoice>, onPick: (AlbumChoice) -> Unit, onNewAlbum: () -> Unit, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+        LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 24.dp)) {
+            item { Text("Add to album", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 24.dp, bottom = 8.dp)) }
+            item { SheetRow(Icons.Outlined.Add, "New album", onClick = onNewAlbum) }
+            items(albums, key = { it.path }) { album -> SheetRow(Icons.Outlined.PhotoAlbum, album.name) { onPick(album) } }
         }
     }
 }
@@ -925,13 +1080,15 @@ private fun PhotoCell(
 ) {
     val entry = tile.entry
     val haptics = rememberHaptics()
-    val inset by SelectionMotion.inset(selected)
-    val highlight by SelectionMotion.background(selected)
+    // Selected: the photo shrinks into a rounded tile on a grey square (with a spring), as in Google Photos
+    val inset by SelectionMotion.inset(selected, 14.dp)
+    val highlight by androidx.compose.animation.animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent, label = "selected tile",
+    )
     val local = entry.local
     val server = entry.server
     Box(modifier.background(highlight).combinedClickable(onClick = onClick, onLongClick = { haptics.longPress(); onLongClick() })) {
-        // The photo shrinks into a rounded tile when selected, and back out with a spring
-        Box(Modifier.fillMaxSize().padding(inset).clip(RoundedCornerShape(inset)).background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
+        Box(Modifier.fillMaxSize().padding(inset).clip(RoundedCornerShape(inset * 1.2f)).background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
             // The phone's copy when there is one: no download, and it works offline
             if (local != null) {
                 AsyncImage(model = local.uri, contentDescription = entry.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -971,12 +1128,19 @@ private fun PhotoCell(
         }
         AnimatedShow(visible = selecting, modifier = Modifier.align(Alignment.TopStart)) {
             androidx.compose.animation.Crossfade(targetState = selected, label = "photo check") { isOn ->
-                Icon(
-                    if (isOn) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
-                    contentDescription = if (isOn) "Selected" else "Not selected",
-                    tint = if (isOn) MaterialTheme.colorScheme.primary else Color.White,
-                    modifier = Modifier.padding(5.dp).size(22.dp).background(if (isOn) MaterialTheme.colorScheme.onPrimary else Color.Transparent, CircleShape),
-                )
+                if (isOn) {
+                    Box(
+                        Modifier.padding(6.dp).size(26.dp).background(MaterialTheme.colorScheme.primary, CircleShape)
+                            .border(2.dp, MaterialTheme.colorScheme.surfaceContainerHighest, CircleShape)
+                            .semantics { contentDescription = "Selected" },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(17.dp)) }
+                } else {
+                    Icon(
+                        Icons.Filled.RadioButtonUnchecked, contentDescription = "Not selected", tint = Color.White,
+                        modifier = Modifier.padding(6.dp).size(26.dp),
+                    )
+                }
             }
         }
     }

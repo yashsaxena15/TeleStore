@@ -30,6 +30,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** An album in "Add to album": its name, folder path, and newest photo (once loaded). */
+data class AlbumChoice(val name: String, val path: String, val cover: FileItem?)
+
 data class PhotosState(
     /** The backed-up photos loaded so far (server pages). */
     val items: List<FileItem> = emptyList(),
@@ -51,6 +54,8 @@ data class PhotosState(
     val selected: Set<String> = emptySet(),
     /** Places under each day's heading, by [PhotoDay.date] ("" when unknown); filled in as days show. */
     val places: Map<java.time.LocalDate, String> = emptyMap(),
+    /** Albums for "Add to album" (loaded when a selection starts). */
+    val albums: List<AlbumChoice> = emptyList(),
     val message: String? = null,
 ) {
     val selecting: Boolean get() = selected.isNotEmpty()
@@ -70,6 +75,7 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
     private var generation = 0
     /** The phone items the backup has done, so they get the cloud mark before their server copy loads. */
     private var backedUpKeys: Set<String> = emptySet()
+    private var albumsJob: Job? = null
     private val dayPlaces = com.backendforge.telestore.photos.DayPlaces(container.context)
     /** Days whose places are being looked up, so each is asked once at a time. */
     private val placesAsked = HashSet<java.time.LocalDate>()
@@ -273,6 +279,76 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
         items.forEach { container.transfers.download(it) }
         _state.update { it.copy(selected = emptySet(), message = "Downloading ${items.size} item${if (items.size != 1) "s" else ""}. See Transfers.") }
     }
+
+    /** The albums (folders in the backup folder) with their newest photo, for "Add to album". */
+    fun loadAlbums() {
+        if (albumsJob?.isActive == true) return
+        albumsJob = viewModelScope.launch {
+            try {
+                val dest = container.backup.settings.value.destination
+                val folders = container.api().listFiles(path = dest, pageSize = 200).files.filter { it.isFolder }
+                val base = folders.map { AlbumChoice(it.name, com.backendforge.telestore.core.FolderPaths.childPath(it), null) }
+                _state.update { it.copy(albums = base) }
+                // Covers one by one (a dozen at most), each showing as it arrives
+                base.take(12).forEach { album ->
+                    val cover = runCatching {
+                        container.api().listFiles(path = "all", pageSize = 1, sortBy = SortBy.TAKEN, ascending = false, mediaOnly = true, under = album.path).files.firstOrNull()
+                    }.getOrNull() ?: return@forEach
+                    _state.update { s -> s.copy(albums = s.albums.map { if (it.path == album.path) it.copy(cover = cover) else it }) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // No albums yet: the sheet still offers "New album"
+            }
+        }
+    }
+
+    /**
+     * Moves the selected photos that are in TeleStore into the album (a move, not a copy: the
+     * albums are inside the backup folder, so a copy would show twice in Photos).
+     */
+    fun addSelectedToAlbum(path: String, name: String) {
+        val entries = selectedEntries()
+        val items = entries.mapNotNull { it.server }.filter { it.path.trimEnd('/') != path.trimEnd('/') }
+        val notInTeleStore = entries.count { it.server == null }
+        _state.update { it.copy(selected = emptySet()) }
+        viewModelScope.launch {
+            var moved = 0
+            var error: String? = null
+            for (item in items) {
+                try {
+                    container.api().move(item, path)
+                    moved++
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    error = error ?: (e as? ApiException)?.message ?: e.message
+                }
+            }
+            _state.update {
+                it.copy(
+                    message = buildString {
+                        append(if (moved > 0) "Added $moved to $name" else if (error == null) "Already in $name" else "Couldn't add to $name: $error")
+                        if (notInTeleStore > 0) append(". $notInTeleStore not backed up yet: back them up first")
+                    },
+                )
+            }
+            if (moved > 0) refresh()
+        }
+    }
+
+    /** What sharing the selection sends: the phone's own copies, and TeleStore files for the rest. */
+    fun selectionToShare(): Pair<List<android.net.Uri>, List<FileItem>> {
+        val entries = selectedEntries()
+        val phone = entries.mapNotNull { e -> e.local?.let { android.net.Uri.parse(it.uri) } }
+        val server = entries.filter { it.local == null }.mapNotNull { it.server }
+        return phone to server
+    }
+
+    /** The selected photos whose phone copy is safely backed up ("Delete from device"). */
+    fun selectionFreeable(): List<android.net.Uri> =
+        selectedEntries().filter { it.backedUp }.mapNotNull { e -> e.local?.let { android.net.Uri.parse(it.uri) } }
 
     /** The day menu's "Download all": every photo of the day that is in TeleStore. */
     fun downloadDay(day: PhotoDay) {

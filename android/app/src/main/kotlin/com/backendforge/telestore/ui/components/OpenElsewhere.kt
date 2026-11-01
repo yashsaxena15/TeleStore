@@ -42,6 +42,44 @@ class OpenElsewhere internal constructor(
     fun share(item: FileItem) = fetchThen(item) { FileCache.shareIntent(it, "Share ${item.name}") }
     fun openWith(item: FileItem) = fetchThen(item) { FileCache.viewIntent(it, "Open ${item.name} with") }
 
+    /**
+     * Shares several photos at once: [phone] are sent as they are, [server] are fetched first (with
+     * the same progress dialog, one by one). [mime] is the shared type: images, videos, or anything.
+     */
+    fun shareMany(phone: List<android.net.Uri>, server: List<FileItem>, mime: String) {
+        job?.cancel()
+        error = null
+        job = scope.launch {
+            val uris = ArrayList<android.net.Uri>(phone)
+            try {
+                for (item in server) {
+                    fetching = item
+                    progress = 0f
+                    uris += container.files.fetch(item) { progress = it }.uri
+                }
+                fetching = null
+                if (uris.isEmpty()) return@launch
+                val send = if (uris.size == 1) {
+                    android.content.Intent(android.content.Intent.ACTION_SEND).putExtra(android.content.Intent.EXTRA_STREAM, uris[0])
+                } else {
+                    android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, uris)
+                }
+                send.setType(mime).addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                try {
+                    context.startActivity(android.content.Intent.createChooser(send, if (uris.size == 1) "Share" else "Share ${uris.size} items"))
+                } catch (e: ActivityNotFoundException) {
+                    error = "No app on this phone can share these."
+                }
+            } catch (e: CancellationException) {
+                fetching = null
+                throw e
+            } catch (e: Exception) {
+                fetching = null
+                error = (e as? ApiException)?.message ?: "Couldn't get the photos to share."
+            }
+        }
+    }
+
     private fun fetchThen(item: FileItem, intent: (com.backendforge.telestore.data.LocalFile) -> android.content.Intent) {
         job?.cancel()
         fetching = item
