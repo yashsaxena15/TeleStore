@@ -76,9 +76,9 @@ const TransferItem = ({ item, actions }) => {
 export const DockTransfers = ({ alone = false }) => {
     const navigate = useNavigate();
     const manager = useTransferManager();
-    const { uploads, downloads, remoteTransfers, activeUploads, activeDownloads, activeRemote, totalActiveCount, busyCount, stats, pauseAll, resumeAll } = manager;
+    const { uploads, downloads, remoteTransfers, remoteGroups, activeUploads, activeDownloads, activeRemote, totalActiveCount, busyCount, stats, pauseAll, resumeAll } = manager;
     const [open, setOpen] = useState(false);
-    const { groupedRemoteItems, singleRemoteItems } = groupRemoteTransfers(remoteTransfers);
+    const { groupedRemoteItems, singleRemoteItems } = groupRemoteTransfers(remoteTransfers, remoteGroups);
     const items = [
         ...groupedRemoteItems,
         ...singleRemoteItems,

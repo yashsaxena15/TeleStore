@@ -1,5 +1,6 @@
 import { downloadFile } from '@/lib/utils';
 import logger from '@/lib/logger';
+import { smoothSpeed } from './speed';
 export class DownloadManager {
     downloads = new Map();
     queue = [];
@@ -188,7 +189,8 @@ export class DownloadManager {
                     const bytesSinceLastUpdate = bytesDownloaded - (download.lastDownloaded || 0);
                     // Calculate speed (bytes per second)
                     if (timeElapsed > 0) {
-                        download.speed = bytesSinceLastUpdate / timeElapsed;
+                        // Averaged over about 5 seconds, like uploads and the app
+                        download.speed = smoothSpeed(download.speed, bytesSinceLastUpdate / timeElapsed, timeElapsed);
                         // Calculate ETA (seconds remaining) if we know the total size
                         if (download.size && download.speed > 0) {
                             const bytesRemaining = download.size - bytesDownloaded;

@@ -1,5 +1,7 @@
 // frontend/src/features/transfers/transferGrouping.js
-export function groupRemoteTransfers(remoteTransfers) {
+// Folder transfers become one row each. `groups` are the server's summaries by group id: a folder
+// shows even when none of its files is in the list right now.
+export function groupRemoteTransfers(remoteTransfers, groups = {}) {
     const groupMap = new Map();
     const singleRemoteItems = [];
     remoteTransfers.forEach(r => {
@@ -22,12 +24,13 @@ export function groupRemoteTransfers(remoteTransfers) {
             singleRemoteItems.push(item);
         }
     });
+    Object.keys(groups || {}).forEach((groupId) => { if (!groupMap.has(groupId)) groupMap.set(groupId, []); });
     const groupedRemoteItems = [];
     groupMap.forEach((subItems, groupId) => {
         // The server's summary counts every file in the group; the rows are only the ones moving
         // now, the next few waiting and recent history
-        const summary = subItems[0].group_summary;
-        const statusCount = (status) => summary ? (summary.counts[status] || 0) : subItems.filter(i => i.status === status).length;
+        const summary = groups?.[groupId] || subItems[0]?.group_summary;
+        const statusCount = (status) => summary ? (summary.counts?.[status] || 0) : subItems.filter(i => i.status === status).length;
         const totalCount = summary ? summary.total : subItems.length;
         const completedCount = statusCount('completed');
         const failedCount = statusCount('failed');
@@ -37,6 +40,10 @@ export function groupRemoteTransfers(remoteTransfers) {
         const isDiscovering = statusCount('discovering') > 0;
         const isPausedQuota = statusCount('paused_quota') > 0;
         const isQueued = statusCount('queued') > 0;
+        const pausedCount = statusCount('paused_quota');
+        // The server pauses only the files that hit Google's limit, so a folder keeps running (or
+        // waiting its turn) while some of its files wait; it shows the limit only when every file
+        // left waits for it
         let status = 'queued';
         if (isDownloading)
             status = 'downloading';
@@ -44,6 +51,8 @@ export function groupRemoteTransfers(remoteTransfers) {
             status = 'uploading_tg';
         else if (isDiscovering)
             status = 'discovering';
+        else if (isQueued)
+            status = 'queued';
         else if (isPausedQuota)
             status = 'paused_quota';
         else if (completedCount === totalCount && totalCount > 0)
@@ -52,8 +61,6 @@ export function groupRemoteTransfers(remoteTransfers) {
             status = 'cancelled';
         else if (failedCount === totalCount && totalCount > 0)
             status = 'failed';
-        else if (isQueued)
-            status = 'queued';
         // Nothing left running: some files failed (the rest finished or were cancelled)
         else if (failedCount > 0)
             status = 'failed';
@@ -62,10 +69,12 @@ export function groupRemoteTransfers(remoteTransfers) {
         const sum = (key) => subItems.reduce((acc, i) => acc + (i[key] || 0), 0);
         const totalBytes = summary ? summary.filesize : sum('filesize');
         const transferredBytes = summary ? summary.transferred_bytes : sum('transferred_bytes');
-        const totalSpeed = summary ? summary.speed_bps : sum('speed_bps');
+        const totalSpeed = summary ? summary.speed_bps || 0 : sum('speed_bps');
+        const downloadBps = summary ? summary.download_bps ?? totalSpeed : sum('download_bps') || totalSpeed;
+        const uploadBps = summary ? summary.upload_bps ?? 0 : sum('upload_bps');
         const totalPeers = sum('peer_count');
-        const groupName = subItems[0].group_name || 'Folder Download';
-        const groupType = subItems[0].group_type || 'folder';
+        const groupName = summary?.name || subItems[0]?.group_name || 'Folder transfer';
+        const groupType = subItems[0]?.group_type || 'folder';
         // A folder's waiting files have no size yet, so its progress counts files, not bytes
         const countFiles = summary && groupType !== 'file';
         let progress = 0;
@@ -75,9 +84,10 @@ export function groupRemoteTransfers(remoteTransfers) {
         else if (totalCount > 0) {
             progress = Math.min(100, Math.round((completedCount / totalCount) * 1000) / 10);
         }
-        const destPath = subItems[0].destination_path || '/Home';
-        const cooldownItem = subItems.find(i => i.cooldown_until);
-        const cooldownUntil = cooldownItem?.cooldown_until || summary?.resumes_at;
+        const destPath = summary?.destination_path || subItems[0]?.destination_path || '/Home';
+        // The earliest time a paused file tries Google again
+        const cooldownUntil = summary?.resumes_at || subItems.map(i => i.cooldown_until).filter(Boolean).sort()[0];
+        const runningSub = subItems.find(i => ['downloading', 'uploading_tg'].includes(i.status) && i.worker);
         let phase = '';
         if (status === 'discovering') {
             phase = 'Analyzing folder structure in background...';
@@ -132,6 +142,12 @@ export function groupRemoteTransfers(remoteTransfers) {
             downloaded: transferredBytes,
             speed_bps: totalSpeed,
             speed: totalSpeed,
+            download_bps: downloadBps,
+            upload_bps: uploadBps,
+            source_url: summary?.source_url || null,
+            worker: runningSub?.worker,
+            pausedCount,
+            failedCount,
             progress,
             eta_seconds: 0,
             eta: 0,
@@ -139,7 +155,7 @@ export function groupRemoteTransfers(remoteTransfers) {
             items: subItems,
             completedCount,
             totalCount,
-            startTime: subItems[0].startTime
+            startTime: summary?.created_at || subItems[0]?.startTime
         });
     });
     return { groupedRemoteItems, singleRemoteItems };
@@ -152,7 +168,7 @@ const RUNNING_REMOTE = ['downloading', 'uploading_tg', 'discovering'];
 // Active, completed and failed remote tasks: a folder leech's rows are only a sample of its files,
 // so its summary is counted once instead. Of the active ones: running, waiting, and paused by
 // Google Drive's daily limit (which aren't running, so they aren't shown as such)
-export function countRemoteTasks(remoteTransfers) {
+export function countRemoteTasks(remoteTransfers, groups = {}) {
     const counts = { active: 0, completed: 0, failed: 0, running: 0, waiting: 0, pausedQuota: 0 };
     const add = (status, n) => {
         if (RUNNING_REMOTE.includes(status)) counts.running += n;
@@ -160,15 +176,22 @@ export function countRemoteTasks(remoteTransfers) {
         else if (status === 'paused_quota') counts.pausedQuota += n;
     };
     const seenGroups = new Set();
+    const countSummary = (summary) => {
+        ACTIVE_REMOTE.forEach(s => { counts.active += summary.counts?.[s] || 0; add(s, summary.counts?.[s] || 0); });
+        counts.completed += summary.counts?.completed || 0;
+        counts.failed += summary.counts?.failed || 0;
+    };
+    Object.entries(groups || {}).forEach(([id, summary]) => {
+        seenGroups.add(id);
+        countSummary(summary);
+    });
     remoteTransfers.forEach(r => {
         const summary = r.group_id && r.group_summary;
         if (summary) {
             if (seenGroups.has(r.group_id))
                 return;
             seenGroups.add(r.group_id);
-            ACTIVE_REMOTE.forEach(s => { counts.active += summary.counts[s] || 0; add(s, summary.counts[s] || 0); });
-            counts.completed += summary.counts.completed || 0;
-            counts.failed += summary.counts.failed || 0;
+            countSummary(summary);
             return;
         }
         if (ACTIVE_REMOTE.includes(r.status)) {

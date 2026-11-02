@@ -8,6 +8,8 @@ export const useTransferManager = () => {
     const [uploads, setUploads] = useState(() => uploadManager.getUploads());
     const [downloads, setDownloads] = useState(() => downloadManager.getDownloads());
     const [remoteTransfers, setRemoteTransfers] = useState([]);
+    // Folder transfers' summaries by group id (a folder shows even when none of its files is listed)
+    const [remoteGroups, setRemoteGroups] = useState({});
     useEffect(() => {
         const unsubUpload = uploadManager.subscribe(setUploads);
         const unsubDownload = downloadManager.subscribe(setDownloads);
@@ -38,6 +40,7 @@ export const useTransferManager = () => {
                     type: 'remote'
                 }));
                 setRemoteTransfers(mapped);
+                setRemoteGroups(groups);
             }
         }
         catch {
@@ -47,7 +50,7 @@ export const useTransferManager = () => {
             remotePollRunning.current = false;
         }
     }, []);
-    const hasActiveRemote = useMemo(() => remoteTransfers.some(r => r.status === 'downloading' || r.status === 'uploading_tg' || r.status === 'queued' || r.status === 'discovering' || r.status === 'paused_quota'), [remoteTransfers]);
+    const hasActiveRemote = useMemo(() => remoteTransfers.some(r => r.status === 'downloading' || r.status === 'uploading_tg' || r.status === 'queued' || r.status === 'discovering' || r.status === 'paused_quota') || Object.values(remoteGroups).some(g => ['downloading', 'uploading_tg', 'queued', 'discovering'].some(s => g.counts?.[s] > 0)), [remoteTransfers, remoteGroups]);
     useEffect(() => {
         fetchRemoteTransfers();
         const intervalTime = hasActiveRemote ? 1500 : 8000;
@@ -64,7 +67,7 @@ export const useTransferManager = () => {
     const activeDownloads = useMemo(() => downloads.filter(d => d.status === 'downloading' || d.status === 'queued'), [downloads]);
     const activeRemote = useMemo(() => remoteTransfers.filter(r => r.status === 'downloading' || r.status === 'uploading_tg' || r.status === 'queued' || r.status === 'discovering' || r.status === 'paused_quota'), [remoteTransfers]);
     // Folder leeches send a summary instead of every file, so counts come from it
-    const remoteCounts = useMemo(() => countRemoteTasks(remoteTransfers), [remoteTransfers]);
+    const remoteCounts = useMemo(() => countRemoteTasks(remoteTransfers, remoteGroups), [remoteTransfers, remoteGroups]);
     const totalActiveCount = activeUploads.length + activeDownloads.length + remoteCounts.active;
     // Moving now, waiting their turn, and paused by Google Drive's daily limit (not counted as busy)
     const running = uploads.filter(u => u.status === 'uploading').length + downloads.filter(d => d.status === 'downloading').length + remoteCounts.running;
@@ -129,6 +132,16 @@ export const useTransferManager = () => {
             console.error(e);
         }
     }, [fetchRemoteTransfers]);
+    // Re-queues only a folder's failed files
+    const retryFailedRemote = useCallback(async (groupId) => {
+        try {
+            await api.retryFailedRemote(groupId);
+            fetchRemoteTransfers();
+        }
+        catch (e) {
+            console.error(e);
+        }
+    }, [fetchRemoteTransfers]);
     const retryRemoteTransfer = useCallback(async (taskId) => {
         try {
             await api.retryRemoteTransfer(taskId);
@@ -155,9 +168,10 @@ export const useTransferManager = () => {
         // Cancel all active remote tasks as well; a folder leech is cancelled as a whole, since only
         // a few of its waiting files are in the list
         const active = remoteTransfers.filter(r => r.status === 'downloading' || r.status === 'uploading_tg' || r.status === 'queued' || r.status === 'discovering' || r.status === 'paused_quota');
-        new Set(active.filter(r => r.group_id).map(r => r.group_id)).forEach(cancelRemoteGroup);
+        const activeGroups = Object.entries(remoteGroups).filter(([, g]) => ['downloading', 'uploading_tg', 'queued', 'discovering', 'paused_quota'].some(s => g.counts?.[s] > 0)).map(([id]) => id);
+        new Set([...active.filter(r => r.group_id).map(r => r.group_id), ...activeGroups]).forEach(cancelRemoteGroup);
         active.filter(r => !r.group_id).forEach(r => cancelRemoteTransfer(r.task_id));
-    }, [remoteTransfers, cancelRemoteTransfer, cancelRemoteGroup]);
+    }, [remoteTransfers, remoteGroups, cancelRemoteTransfer, cancelRemoteGroup]);
     const clearCompleted = useCallback(() => {
         transferManager.clearCompleted();
         clearCompletedRemote();
@@ -166,6 +180,7 @@ export const useTransferManager = () => {
         uploads,
         downloads,
         remoteTransfers,
+        remoteGroups,
         activeUploads,
         activeDownloads,
         activeRemote,
@@ -184,6 +199,7 @@ export const useTransferManager = () => {
         cancelRemoteGroup,
         resumeRemoteGroup,
         retryRemoteTransfer,
+        retryFailedRemote,
         clearCompletedRemote,
         refreshRemoteTransfers: fetchRemoteTransfers,
         pauseAll,

@@ -1,6 +1,7 @@
 import { getApiBaseUrl } from '@/lib/api';
 import authService from '@/features/auth/authService';
 import logger from '@/lib/logger';
+import { smoothSpeed } from './speed';
 // Chunks of one file sent at the same time. The server writes each at its own place in the file.
 const PARALLEL_CHUNKS = 4;
 const RESUME_KEY = 'telestore.uploadResume';
@@ -306,7 +307,7 @@ export class UploadManager {
                 const timeDiff = (now - lastTime) / 1000;
                 if (timeDiff >= 0.3) {
                     const instantSpeed = (item.bytesUploaded - lastLoaded) / timeDiff;
-                    currentSpeed = currentSpeed === 0 ? instantSpeed : 0.7 * currentSpeed + 0.3 * instantSpeed;
+                    currentSpeed = smoothSpeed(currentSpeed, instantSpeed, timeDiff);
                     lastTime = now;
                     lastLoaded = item.bytesUploaded;
                 }
