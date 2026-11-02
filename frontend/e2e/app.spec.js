@@ -743,21 +743,36 @@ test.describe("phone @phone", () => {
 });
 
 test.describe("photos", () => {
-    test("the menu at the top shows an album or starred photos", async ({ page }) => {
+    test("Collections opens an album, Favourites and the Archive", async ({ page }) => {
         await page.goto("/photos");
-        await expect(page.getByText("3 items from your phone backup")).toBeVisible();
-        await page.getByRole("button", { name: "Photos menu" }).click();
+        await page.getByRole("button", { name: "Account and Photos settings" }).click();
         await expect(page.getByText("Backup runs in the TeleStore Android app")).toBeVisible();
-        await page.getByRole("menuitem", { name: "WhatsApp Images" }).click();
+        await page.keyboard.press("Escape");
+        await page.getByRole("button", { name: "Collections" }).click();
+        await page.getByRole("button", { name: "WhatsApp Images" }).click();
         await expect(page.getByText("Nothing in WhatsApp Images yet")).toBeVisible();
         await page.getByRole("button", { name: "Show all photos" }).click();
-        await page.getByRole("button", { name: "Photos menu" }).click();
-        await page.getByRole("menuitem", { name: "Camera" }).click();
-        await expect(page.getByText("Camera · 3 items")).toBeVisible();
+        await page.getByRole("button", { name: "Collections" }).click();
+        await page.getByRole("button", { name: "Camera" }).click();
+        await expect(page.getByRole("heading", { level: 1, name: "Camera" })).toBeVisible();
         await expect(page.getByTestId("photo-tile")).toHaveCount(3);
-        await page.getByRole("button", { name: "Photos menu" }).click();
-        await page.getByRole("menuitem", { name: "Starred" }).click();
-        await expect(page.getByText("No starred photos")).toBeVisible();
+        await page.getByRole("button", { name: "Back to Photos" }).click();
+        await page.getByRole("button", { name: "Collections" }).click();
+        await page.getByRole("button", { name: "Favourites" }).click();
+        await expect(page.getByText("No favourites yet")).toBeVisible();
+    });
+
+    test("Photos view switches the layout and remembers it", async ({ page }) => {
+        await page.goto("/photos");
+        await page.getByRole("button", { name: "Account and Photos settings" }).click();
+        await page.getByRole("menuitem", { name: "Photos view" }).click();
+        await page.getByRole("radio", { name: "Month" }).click();
+        await page.keyboard.press("Escape");
+        // Month view: month titles, no day headings
+        await expect(page.getByRole("heading", { level: 2, name: "Today" })).toHaveCount(0);
+        await expect(page.getByTestId("photo-tile")).toHaveCount(3);
+        await page.reload();
+        await expect(page.getByRole("heading", { level: 2, name: "Today" })).toHaveCount(0);
     });
 
     test("shows only the phone backup, by day, with previews for files without a thumbnail", async ({ page, request }) => {
@@ -765,9 +780,8 @@ test.describe("photos", () => {
         await page.getByRole("complementary").first().getByRole("button", { name: "Photos" }).click();
         await expect(page).toHaveURL(/\/photos$/);
         await expect(page.getByRole("heading", { level: 1, name: "Photos" })).toBeVisible();
-        await expect(page.getByText("3 items from your phone backup")).toBeVisible();
         await expect(page.getByRole("heading", { level: 2, name: "Today" })).toBeVisible();
-        await expect(page.getByRole("heading", { level: 2, name: "Fri, 3 Jan 2025" })).toBeVisible();
+        await expect(page.getByRole("heading", { level: 2, name: "Fri, Jan 3, 2025" })).toBeVisible();
         await expect(page.getByTestId("photo-tile")).toHaveCount(3);
         await expect(page.getByTestId("photo-tile").locator("img")).toHaveCount(3);
         const asked = (await mutations(request)).map((r) => r.path);
@@ -776,18 +790,18 @@ test.describe("photos", () => {
         expect(asked).not.toContain("/files/preview/ph3");
     });
 
-    test("select, star, and Escape ends the selection", async ({ page, request }) => {
+    test("select, favourite, and Escape ends the selection", async ({ page, request }) => {
         await page.goto("/photos");
         await page.getByRole("button", { name: "Select IMG_0003.HEIC" }).click();
-        await expect(page.getByText("1 selected")).toBeVisible();
+        await expect(page.getByRole("button", { name: "Cancel selection of 1" })).toBeVisible();
         await page.getByTestId("photo-tile").nth(1).click(); // while selecting, a click selects
-        await expect(page.getByText("2 selected")).toBeVisible();
-        await page.getByRole("toolbar", { name: "Selected photos" }).getByRole("button", { name: "Star" }).click();
-        await expect(page.getByText("Starred 2 items")).toBeVisible();
+        await expect(page.getByRole("button", { name: "Cancel selection of 2" })).toBeVisible();
+        await page.getByRole("toolbar", { name: "2 selected" }).getByRole("button", { name: "Favourite" }).click();
+        await expect(page.getByText("Added to Favourites: 2 items")).toBeVisible();
         const stars = (await mutations(request)).filter((r) => r.path === "/files/star").map((r) => JSON.parse(r.body).file_id);
         expect(stars.sort()).toEqual(["ph1", "ph2"]);
         await page.getByRole("button", { name: "Select Today" }).click();
-        await expect(page.getByText("2 selected")).toBeVisible();
+        await expect(page.getByRole("toolbar", { name: /selected$/ })).toBeVisible();
         await page.keyboard.press("Escape");
         await expect(page.getByRole("heading", { level: 1, name: "Photos" })).toBeVisible();
     });

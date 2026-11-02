@@ -11,6 +11,8 @@ import com.backendforge.telestore.core.Memory
 import com.backendforge.telestore.core.PhotoDay
 import com.backendforge.telestore.core.PhotoEntry
 import com.backendforge.telestore.core.PhotoMerge
+import com.backendforge.telestore.core.PhotosLayout
+import com.backendforge.telestore.core.PhotosVisibility
 import com.backendforge.telestore.core.ProtectedDelete
 import com.backendforge.telestore.core.SortBy
 import com.backendforge.telestore.core.Timeline
@@ -27,6 +29,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/** An album in "Add to album": its name, folder path, and newest photo (once loaded). */
+data class AlbumChoice(val name: String, val path: String, val cover: FileItem?)
 
 data class PhotosState(
     /** The backed-up photos loaded so far (server pages). */
@@ -47,7 +52,10 @@ data class PhotosState(
     val freeable: Int = 0,
     /** Entry ids ([PhotoEntry.id]): the server id, or "local:<key>" for a photo only on the phone. */
     val selected: Set<String> = emptySet(),
-    val columns: Int = 4,
+    /** Places under each day's heading, by [PhotoDay.date] ("" when unknown); filled in as days show. */
+    val places: Map<java.time.LocalDate, String> = emptyMap(),
+    /** Albums for "Add to album" (loaded when a selection starts). */
+    val albums: List<AlbumChoice> = emptyList(),
     val message: String? = null,
 ) {
     val selecting: Boolean get() = selected.isNotEmpty()
@@ -67,15 +75,25 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
     private var generation = 0
     /** The phone items the backup has done, so they get the cloud mark before their server copy loads. */
     private var backedUpKeys: Set<String> = emptySet()
+    private var albumsJob: Job? = null
+    private val dayPlaces = com.backendforge.telestore.photos.DayPlaces(container.context)
+    /** Days whose places are being looked up, so each is asked once at a time. */
+    private val placesAsked = HashSet<java.time.LocalDate>()
 
     init {
         loadMore()
         scanPhone()
         // A finished backup or upload shows up straight away
         viewModelScope.launch { container.transfers.store.uploaded.collect { refresh() } }
+        // So does anything changed in the viewer (archived, trashed, added to an album, new date)
+        viewModelScope.launch { container.photosChanged.collect { refresh() } }
         // Choosing other albums (or videos on/off) in Backup changes which phone photos show
         viewModelScope.launch {
             container.backup.settings.map { it.albums to it.includeVideos }.distinctUntilChanged().drop(1).collect { scanPhone() }
+        }
+        // So do the "content from other apps" switches on the Photos view page
+        viewModelScope.launch {
+            container.settings.photosView.map { it.copy(layout = PhotosLayout.DAY, stackSimilar = false) }.distinctUntilChanged().drop(1).collect { scanPhone() }
         }
         // Each photo the backup finishes gets its cloud mark
         viewModelScope.launch {
@@ -90,6 +108,7 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
     fun refresh() {
         job?.cancel()
         generation++
+        placesAsked.clear()
         _state.update { it.copy(page = 0, hasNext = true, loading = false, error = null, selected = emptySet()) }
         loadMore()
         scanPhone()
@@ -141,12 +160,13 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
                     val all = PhoneMedia.scan(context).map { p ->
                         LocalPhoto(
                             key = p.key, name = p.name, size = p.size, takenAtMillis = p.takenAt, video = p.video,
-                            uri = p.uri.toString(), bucketId = p.bucketId, bucket = p.bucket,
+                            uri = p.uri.toString(), bucketId = p.bucketId, bucket = p.bucket, durationMs = p.durationMs,
                         )
                     }
-                    // Only the albums chosen in Backup (WhatsApp, screenshots… stay out unless chosen)
+                    // The albums chosen in Backup, plus other apps' albums as "Photos view" allows
                     val settings = container.backup.settings.value
-                    Triple(true, PhotoMerge.inBackupAlbums(all, settings.albums, settings.includeVideos), container.backup.backedUpKeys())
+                    val keys = container.backup.backedUpKeys()
+                    Triple(true, PhotosVisibility.visible(all, settings.albums, settings.includeVideos, container.settings.photosView.value, keys), keys)
                 }
             }
             backedUpKeys = keys
@@ -171,18 +191,96 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
                 val ids = entries.mapTo(HashSet()) { e -> e.id }
                 it.copy(entries = entries, days = days, freeable = freeable, selected = it.selected.filterTo(HashSet()) { id -> id in ids })
             }
+            shareDurations(entries)
         }
     }
 
-    /** Pinch: 3, 4, 5 or 7 photos per row. */
-    fun zoom(bigger: Boolean) = _state.update {
-        val steps = listOf(3, 4, 5, 7)
-        val i = steps.indexOf(it.columns).coerceAtLeast(0)
-        it.copy(columns = steps[(if (bigger) i - 1 else i + 1).coerceIn(0, steps.lastIndex)])
+    /** Server ids whose video length this app already sent (once each per run). */
+    private val durationsSent = HashSet<String>()
+
+    /**
+     * Older backups have no video length on the server. When the phone still has the video, its
+     * length is sent (20 at a time), so the website and other phones show "0:38" too.
+     */
+    private fun shareDurations(entries: List<PhotoEntry>) {
+        val todo = entries.filter { e ->
+            val server = e.server
+            e.video && server != null && server.duration == null && (e.local?.durationMs ?: 0) > 0 && server.id !in durationsSent
+        }.take(20)
+        if (todo.isEmpty()) return
+        todo.forEach { durationsSent += it.server!!.id }
+        viewModelScope.launch {
+            todo.forEach { e -> runCatching { container.api().setDuration(e.server!!, e.local!!.durationMs / 1000.0) } }
+        }
+    }
+
+    /** Looks up where the day's phone photos were taken, once per day (called as its heading shows). */
+    fun loadPlaces(day: PhotoDay) {
+        val date = day.date ?: return
+        if (date in _state.value.places || !placesAsked.add(date)) return
+        val uris = day.entries.mapNotNull { e -> e.local?.takeIf { !it.video }?.uri }
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            val found = runCatching { dayPlaces.forDay(uris) }.getOrDefault("")
+            // A day with no place stays asked until a refresh (then its photos are read again)
+            if (found.isNotEmpty()) _state.update { it.copy(places = it.places + (date to found)) }
+        }
+    }
+
+    /** "New album" from +: a folder in the backup folder (where the albums are); [onMade] gets its path. */
+    fun newAlbum(name: String, onMade: (String) -> Unit) {
+        val clean = name.trim().replace('/', '-')
+        if (clean.isEmpty()) return
+        val path = container.backup.settings.value.destination.trimEnd('/') + "/" + clean
+        viewModelScope.launch {
+            try {
+                container.api().createFolderPath(path)
+                _state.update { it.copy(message = "Album \"$clean\" created") }
+                onMade(path)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(message = (e as? ApiException)?.message ?: "Couldn't create the album.") }
+            }
+        }
+    }
+
+    /** "Upload from phone" from +: the picked photos go to Uploads in the backup folder, so they show here. */
+    fun uploadFromPhone(uris: List<android.net.Uri>) {
+        if (uris.isEmpty()) return
+        val folder = container.backup.settings.value.destination.trimEnd('/') + "/Uploads"
+        viewModelScope.launch {
+            try {
+                container.api().createFolderPath(folder)
+                val files = withContext(Dispatchers.IO) { uris.map { com.backendforge.telestore.transfers.describe(container.context, it) } }
+                val skipped = container.transfers.upload(files, folder)
+                val queued = files.size - skipped.size
+                _state.update {
+                    it.copy(message = if (queued > 0) "Uploading $queued item${if (queued != 1) "s" else ""}. See Transfers." else "Couldn't read the picked items.")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(message = (e as? ApiException)?.message ?: "Couldn't start the upload.") }
+            }
+        }
+    }
+
+    /** Pinch: Month → Day → Comfortable (bigger photos), and back. Remembered like the Photos view page. */
+    fun zoom(bigger: Boolean) {
+        val view = container.settings.photosView.value
+        val next = if (bigger) view.layout.bigger() else view.layout.smaller()
+        if (next != view.layout) container.settings.setPhotosView(view.copy(layout = next))
     }
 
     fun toggle(entry: PhotoEntry) = _state.update {
         it.copy(selected = if (entry.id in it.selected) it.selected - entry.id else it.selected + entry.id)
+    }
+
+    /** A stack of similar photos is picked (or dropped) as one. */
+    fun toggleStack(entries: List<PhotoEntry>) = _state.update {
+        val ids = entries.map { e -> e.id }.toSet()
+        it.copy(selected = if (it.selected.containsAll(ids)) it.selected - ids else it.selected + ids)
     }
 
     fun toggleDay(day: PhotoDay) = _state.update {
@@ -202,6 +300,83 @@ class PhotosViewModel(private val container: AppContainer) : ViewModel() {
         val items = selectedItems()
         items.forEach { container.transfers.download(it) }
         _state.update { it.copy(selected = emptySet(), message = "Downloading ${items.size} item${if (items.size != 1) "s" else ""}. See Transfers.") }
+    }
+
+    /** The albums (folders in the backup folder) with their newest photo, for "Add to album". */
+    fun loadAlbums() {
+        if (albumsJob?.isActive == true) return
+        albumsJob = viewModelScope.launch {
+            try {
+                val dest = container.backup.settings.value.destination
+                val folders = container.api().listFiles(path = dest, pageSize = 200).files.filter { it.isFolder }
+                val base = folders.map { AlbumChoice(it.name, com.backendforge.telestore.core.FolderPaths.childPath(it), null) }
+                _state.update { it.copy(albums = base) }
+                // Covers one by one (a dozen at most), each showing as it arrives
+                base.take(12).forEach { album ->
+                    val cover = runCatching {
+                        container.api().listFiles(path = "all", pageSize = 1, sortBy = SortBy.TAKEN, ascending = false, mediaOnly = true, under = album.path).files.firstOrNull()
+                    }.getOrNull() ?: return@forEach
+                    _state.update { s -> s.copy(albums = s.albums.map { if (it.path == album.path) it.copy(cover = cover) else it }) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // No albums yet: the sheet still offers "New album"
+            }
+        }
+    }
+
+    /**
+     * Moves the selected photos that are in TeleStore into the album (a move, not a copy: the
+     * albums are inside the backup folder, so a copy would show twice in Photos).
+     */
+    fun addSelectedToAlbum(path: String, name: String) {
+        val entries = selectedEntries()
+        val items = entries.mapNotNull { it.server }.filter { it.path.trimEnd('/') != path.trimEnd('/') }
+        val notInTeleStore = entries.count { it.server == null }
+        _state.update { it.copy(selected = emptySet()) }
+        viewModelScope.launch {
+            var moved = 0
+            var error: String? = null
+            for (item in items) {
+                try {
+                    container.api().move(item, path)
+                    moved++
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    error = error ?: (e as? ApiException)?.message ?: e.message
+                }
+            }
+            _state.update {
+                it.copy(
+                    message = buildString {
+                        append(if (moved > 0) "Added $moved to $name" else if (error == null) "Already in $name" else "Couldn't add to $name: $error")
+                        if (notInTeleStore > 0) append(". $notInTeleStore not backed up yet: back them up first")
+                    },
+                )
+            }
+            if (moved > 0) refresh()
+        }
+    }
+
+    /** What sharing the selection sends: the phone's own copies, and TeleStore files for the rest. */
+    fun selectionToShare(): Pair<List<android.net.Uri>, List<FileItem>> {
+        val entries = selectedEntries()
+        val phone = entries.mapNotNull { e -> e.local?.let { android.net.Uri.parse(it.uri) } }
+        val server = entries.filter { it.local == null }.mapNotNull { it.server }
+        return phone to server
+    }
+
+    /** The selected photos whose phone copy is safely backed up ("Delete from device"). */
+    fun selectionFreeable(): List<android.net.Uri> =
+        selectedEntries().filter { it.backedUp }.mapNotNull { e -> e.local?.let { android.net.Uri.parse(it.uri) } }
+
+    /** The day menu's "Download all": every photo of the day that is in TeleStore. */
+    fun downloadDay(day: PhotoDay) {
+        val items = day.entries.mapNotNull { it.server }
+        items.forEach { container.transfers.download(it) }
+        _state.update { it.copy(message = "Downloading ${items.size} item${if (items.size != 1) "s" else ""}. See Transfers.") }
     }
 
     fun starSelected() = bulk("Starred") { container.api().setStarred(it, true) }

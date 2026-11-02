@@ -357,14 +357,18 @@ class TeleStoreApi(
 
     // ── Uploads (the website's chunked protocol) ────────────────────────────────
     /** Starts an upload, or continues [resumeId] when the server still has it. */
-    suspend fun uploadInit(name: String, size: Long, folder: String, resumeId: String? = null, takenAt: String? = null): UploadSession =
+    suspend fun uploadInit(name: String, size: Long, folder: String, resumeId: String? = null, takenAt: String? = null, durationSeconds: Double? = null): UploadSession =
         post(url("files/upload/init"), buildJsonObject {
             put("filename", name)
             put("filesize", size)
             put("path", folder)
             resumeId?.let { put("resume_upload_id", it) }
             takenAt?.let { put("taken_at", it) }
+            durationSeconds?.let { put("duration", it) }
         })
+
+    /** Tells the server a video's length (the phone knows it; older backups didn't send it). */
+    suspend fun setDuration(item: FileItem, seconds: Double): JsonObject = photoMeta(item, buildJsonObject { put("duration", seconds) })
 
     /** Makes every folder along [fullPath] (e.g. "/Home/Phone Backup/Camera"); fine if they exist. */
     suspend fun createFolderPath(fullPath: String): MessageReply =
@@ -534,6 +538,26 @@ class TeleStoreApi(
         }).color
 
     /** Camera, exposure and location details the server read from a photo. */
+    /** Moves a photo to Photos' Archive (out of the timeline), or back. */
+    suspend fun setArchived(item: FileItem, archived: Boolean): JsonObject = photoMeta(item, buildJsonObject { put("archived", archived) })
+
+    /** The photo's caption ("" clears it). */
+    suspend fun setCaption(item: FileItem, caption: String): JsonObject = photoMeta(item, buildJsonObject { put("caption", caption) })
+
+    /** When the photo was taken (ISO date-time with its offset); the timeline moves it there. */
+    suspend fun setTakenAt(item: FileItem, iso: String): JsonObject = photoMeta(item, buildJsonObject { put("taken_at", iso) })
+
+    /** Where the photo was taken; nulls remove the owner's location (the photo's own GPS shows again). */
+    suspend fun setPhotoLocation(item: FileItem, place: String?, latitude: Double?, longitude: Double?): JsonObject =
+        photoMeta(item, buildJsonObject {
+            put("place", place)
+            put("latitude", latitude)
+            put("longitude", longitude)
+        })
+
+    private suspend fun photoMeta(item: FileItem, body: JsonObject): JsonObject =
+        post(url("files").newBuilder().addPathSegment(item.id).addPathSegment("photo-meta").build(), body)
+
     suspend fun photoInfo(item: FileItem): PhotoInfo =
         PhotoInfo.fromJson(get<JsonObject>(url("files").newBuilder().addPathSegment(item.id).addPathSegment("photo-info").build()))
 

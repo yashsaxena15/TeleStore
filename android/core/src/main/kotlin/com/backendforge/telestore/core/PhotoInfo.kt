@@ -44,6 +44,11 @@ data class PhotoInfo(
     val fileSize: Long? = null,
     val fileName: String? = null,
     val folder: String? = null,
+    /** The owner's caption (TeleStore only). */
+    val caption: String? = null,
+    /** The owner's place name for it (TeleStore only). */
+    val place: String? = null,
+    val archived: Boolean = false,
 ) {
     val hasLocation: Boolean get() = latitude != null && longitude != null && !(latitude == 0.0 && longitude == 0.0)
 
@@ -77,6 +82,9 @@ data class PhotoInfo(
                 fileSize = number("file_size")?.toLong(),
                 fileName = text("file_name"),
                 folder = text("folder"),
+                caption = text("caption"),
+                place = text("place"),
+                archived = (o["archived"] as? JsonPrimitive)?.booleanOrNull ?: false,
             )
         }
     }
@@ -84,7 +92,23 @@ data class PhotoInfo(
 
 /** How the photo details sheet words a [PhotoInfo]. */
 object PhotoDetails {
-    private val TAKEN = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy · h:mm a", Locale.US)
+    private val TAKEN = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy • h:mm a", Locale.US)
+
+    /** Google Photos' exposure row: "ƒ/1.5", "1/105s", "4.95 mm", "ISO80" (the ones known). */
+    fun exposureCells(info: PhotoInfo): List<String> = listOfNotNull(
+        info.aperture?.takeIf { it > 0 }?.let { "ƒ/${decimal(it, 1)}" },
+        info.exposure?.takeIf { it > 0 }?.let { s -> if (s >= 1) "${decimal(s, 1)}s" else "1/${(1 / s).roundToLong()}s" },
+        info.focalLength?.takeIf { it > 0 }?.let { "${decimal(it, 2)} mm" },
+        info.iso?.takeIf { it > 0 }?.let { "ISO$it" },
+    )
+
+    /** The chips under the file name: "9.4 MP", "4096 x 2304". */
+    fun fileChips(info: PhotoInfo): List<String> {
+        val w = info.width?.takeIf { it > 0 }
+        val h = info.height?.takeIf { it > 0 }
+        val mp = info.megapixels?.takeIf { it > 0 } ?: if (w != null && h != null) w.toDouble() * h / 1_000_000.0 else null
+        return listOfNotNull(mp?.let { "${decimal(it, 1)} MP" }, if (w != null && h != null) "$w x $h" else null)
+    }
 
     /** "12.2 MP · 4032 × 3024" (either half alone when the other is unknown). */
     fun resolution(info: PhotoInfo): String? {

@@ -7,8 +7,25 @@ import com.backendforge.telestore.core.FileItem
  * One photo for the viewer: the copy in TeleStore, the copy on this phone, or both (then the
  * phone's is shown: faster, and it works offline).
  */
-data class PhotoSource(val item: FileItem?, val localUri: Uri?, val name: String) {
-    constructor(item: FileItem) : this(item, null, item.name)
+data class PhotoSource(
+    val item: FileItem?,
+    val localUri: Uri?,
+    val name: String,
+    /** When it was taken (epoch ms), for the viewer's "Nov 1" and "6:35 PM". */
+    val takenAtMillis: Long? = null,
+    /** Where (the day's places from Photos, or the owner's place), for the viewer's second line. */
+    val place: String? = null,
+    /** A video: the viewer plays it in place. */
+    val video: Boolean = false,
+    /** The phone copy is safely in TeleStore (so "Delete from device" may remove it). */
+    val backedUp: Boolean = item != null,
+) {
+    constructor(item: FileItem) : this(
+        item, null, item.name,
+        takenAtMillis = com.backendforge.telestore.core.PhotoMerge.millisOf(item),
+        place = item.place,
+        video = item.kind == com.backendforge.telestore.core.FileKind.VIDEO,
+    )
 }
 
 /**
@@ -24,6 +41,9 @@ class PlaybackQueue {
         private set
     var photoIndex: Int = 0
         private set
+
+    /** The photo or video open in the editor. */
+    var editing: PhotoSource? = null
 
     /** The document or archive being viewed. */
     var document: FileItem? = null

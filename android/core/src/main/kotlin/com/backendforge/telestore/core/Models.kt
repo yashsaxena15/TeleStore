@@ -58,6 +58,14 @@ data class FileItem(
     @SerialName("protected_by") val protectedBy: String? = null,
     /** A folder's colour name (see [FolderColors]); null is the default colour. */
     val color: String? = null,
+    /** In Photos' Archive: kept, but not in the Photos timeline. */
+    val archived: Boolean = false,
+    /** The owner's caption on a photo (Photos' "Add a caption"). */
+    val caption: String? = null,
+    /** Where the owner says a photo was taken ("Gandhinagar, Gujarat"). */
+    val place: String? = null,
+    /** A video's length in seconds, when the server knows it. */
+    val duration: Double? = null,
 ) {
     /** The date for timelines: when it was taken, else when it was uploaded. */
     val timelineDate: String? get() = takenAt ?: modified

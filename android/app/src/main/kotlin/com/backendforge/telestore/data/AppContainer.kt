@@ -35,6 +35,9 @@ class AppContainer(val context: Context) {
     val transfers = TransferManager(context.applicationContext)
     val backup = BackupStore(context.applicationContext)
 
+    /** A photo was archived, trashed, moved or changed in the viewer: Photos reloads. */
+    val photosChanged = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
     /** Files shared into TeleStore from other apps, waiting for the user to pick a folder. */
     val pendingShare = MutableStateFlow<List<PickedFile>>(emptyList())
 

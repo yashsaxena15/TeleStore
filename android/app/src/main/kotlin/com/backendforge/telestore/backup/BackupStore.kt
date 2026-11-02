@@ -30,6 +30,8 @@ data class BackupStatus(
     val current: String? = null,
     val lastRun: Long = 0,
     val message: String? = null,
+    /** When the current run started backing up (for "21 min remaining"). */
+    val startedAt: Long = 0,
 )
 
 /**

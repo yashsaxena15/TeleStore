@@ -14,8 +14,8 @@ data class Memory(val title: String, val items: List<FileItem>)
 
 /** Groups photos into days and finds memories, like Google Photos (pure, so it is tested here). */
 object Timeline {
-    private val SAME_YEAR = DateTimeFormatter.ofPattern("EEE, d MMM", Locale.US)
-    private val OTHER_YEAR = DateTimeFormatter.ofPattern("EEE, d MMM yyyy", Locale.US)
+    private val SAME_YEAR = DateTimeFormatter.ofPattern("EEE, MMM d", Locale.US)
+    private val OTHER_YEAR = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy", Locale.US)
     private val MONTH = DateTimeFormatter.ofPattern("MMM yyyy", Locale.US)
 
     fun dateOf(item: FileItem, zone: ZoneId = ZoneId.systemDefault()): LocalDate? =

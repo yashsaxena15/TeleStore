@@ -99,6 +99,17 @@ async def get_all_files_route(
             f_dict['file_unique_id'] = f.file_unique_id  # Include file_unique_id for streaming
             files_list.append(f_dict)
 
+        # Photos: videos without a length get it read in the background, a few per page
+        if path == "all" and (kind or "").lower() == "media":
+            from telestore.services import video_duration
+            todo = video_duration.missing(files_list)
+            if todo:
+                from telestore.api.routes import media
+                token = media._caller_token(request, None, user)
+                asyncio.create_task(video_duration.fill(
+                    todo, lambda f: media._get_internal_stream_url(f.get("file_name") or "", token, f.get("id")),
+                ))
+
         if is_paginated:
             import math
             total_pages = math.ceil(total_items / ps) if total_items > 0 else 1

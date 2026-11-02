@@ -71,7 +71,7 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val api = container.api()
         val onServer = mutableMapOf<String, Set<String>>() // folder -> "name|size" already there
         var done = 0
-        store.status { it.copy(running = true, pending = todo.size, done = 0, message = null) }
+        store.status { it.copy(running = true, pending = todo.size, done = 0, startedAt = System.currentTimeMillis(), message = null) }
         return try {
             for (item in todo) {
                 val folder = settings.destination.trimEnd('/') + "/" + safeName(item.bucket)
@@ -83,7 +83,7 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 notify(done, todo.size, item.name)
                 if ("${item.name}|${item.size}" !in existing) {
                     openWithLocation(item).use { source ->
-                        ChunkedUploader(api, source, item.name, item.size, folder, takenAt = item.takenIso).upload()
+                        ChunkedUploader(api, source, item.name, item.size, folder, takenAt = item.takenIso, durationSeconds = item.durationMs.takeIf { it > 0 }?.let { it / 1000.0 }).upload()
                     }
                 }
                 store.markBackedUp(item.key)

@@ -45,9 +45,12 @@ import com.backendforge.telestore.ui.vault.VaultScreen
 import com.backendforge.telestore.ui.vault.VaultViewModel
 import com.backendforge.telestore.ui.links.AddLinkScreen
 import com.backendforge.telestore.ui.links.AddLinkViewModel
-import com.backendforge.telestore.ui.photos.AlbumsScreen
+import com.backendforge.telestore.ui.photos.CollectionsScreen
 import com.backendforge.telestore.ui.photos.BackupScreen
 import com.backendforge.telestore.ui.photos.PhotosScreen
+import com.backendforge.telestore.ui.photos.PhotosTheme
+import com.backendforge.telestore.ui.photos.PhotosViewScreen
+import com.backendforge.telestore.ui.photos.CustomizeAppsScreen
 import com.backendforge.telestore.ui.photos.PhotosViewModel
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -184,7 +187,7 @@ fun MainScreen(
 
     val isSearch = currentRoute == "search"
     // The players take the whole screen: no tabs, no mini player
-    val isPlayer = currentRoute in setOf(ROUTE_VIDEO, ROUTE_PHOTOS, ROUTE_NOW_PLAYING)
+    val isPlayer = currentRoute in setOf(ROUTE_VIDEO, ROUTE_PHOTOS, ROUTE_NOW_PLAYING, "photo_edit")
     val music = remember { container.startMusic() }
     val musicState by music.state.collectAsStateWithLifecycle()
 
@@ -674,11 +677,29 @@ fun MainScreen(
                             },
                             onAlbums = { navController.navigate("photos_albums") },
                             onBackup = { navController.navigate("photos_backup") },
+                            onNotifications = { navController.navigate(ROUTE_NOTIFICATIONS) },
+                            onOpenFolder = { navigateToFolder("photos", it) },
+                            onOpenFiles = { navigateToTab(MainTab.FILES) },
+                            onPhotosView = { navController.navigate("photos_view") },
                         )
                     }
-                    composable("photos_backup") { BackupScreen(container, onBack = { navController.popBackStack() }) }
+                    composable("photos_view") {
+                        PhotosTheme { PhotosViewScreen(container, onBack = { navController.popBackStack() }, onCustomizeApps = { navController.navigate("photos_apps") }) }
+                    }
+                    composable("photos_apps") { PhotosTheme { CustomizeAppsScreen(container, onBack = { navController.popBackStack() }) } }
+                    composable("photos_backup") { PhotosTheme { BackupScreen(container, onBack = { navController.popBackStack() }) } }
                     composable("photos_albums") {
-                        AlbumsScreen(container, onBack = { navController.popBackStack() }, onOpenFolder = { navigateToFolder("photos", it) })
+                        PhotosTheme {
+                            CollectionsScreen(
+                                container,
+                                onBack = { navController.popBackStack() },
+                                onOpenFolder = { navigateToFolder("photos", it) },
+                                onOpenPhotos = { sources, index ->
+                                    container.playback.openPhotoSources(sources, index)
+                                    navController.navigate(ROUTE_PHOTOS)
+                                },
+                            )
+                        }
                     }
                     composable(
                         route = "photos_folder?path={path}",
@@ -829,11 +850,20 @@ fun MainScreen(
                     }
                 }
 
+                composable("photo_edit") {
+                    val source = container.playback.editing
+                    if (source == null) LaunchedEffect(Unit) { navController.popBackStack() }
+                    else com.backendforge.telestore.photos.EditorScreen(source, container, onDone = { navController.popBackStack() })
+                }
                 composable(ROUTE_PHOTOS) {
                     PhotoViewerScreen(
                         photos = container.playback.photos,
                         startIndex = container.playback.photoIndex,
-                        api = container.api(),
+                        container = container,
+                        onEdit = { source ->
+                            container.playback.editing = source
+                            navController.navigate("photo_edit")
+                        },
                         onBack = { navController.popBackStack() },
                         offlineCopy = { container.transfers.store.offlineCopy(context, it.id) },
                     )

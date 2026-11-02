@@ -17,6 +17,8 @@ data class LocalPhoto(
     val uri: String,
     val bucketId: String = "",
     val bucket: String = "",
+    /** A video's length in milliseconds (0 when unknown or a photo). */
+    val durationMs: Long = 0,
 )
 
 /** One tile of the Photos timeline: the backed-up copy, the copy on this phone, or both. */
@@ -32,6 +34,8 @@ data class PhotoEntry(
     val name: String get() = local?.name ?: server?.name.orEmpty()
     val video: Boolean get() = local?.video ?: (server?.kind == FileKind.VIDEO)
     val starred: Boolean get() = server?.starred == true
+    /** A video's length: the phone's own reading first, else the server's. Null when unknown. */
+    val durationMs: Long? get() = local?.durationMs?.takeIf { it > 0 } ?: server?.duration?.takeIf { it > 0 }?.let { (it * 1000).toLong() }
     /** Only on this phone, not (yet) in TeleStore. */
     val phoneOnly: Boolean get() = server == null
 

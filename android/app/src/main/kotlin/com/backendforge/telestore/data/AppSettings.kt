@@ -21,6 +21,20 @@ class AppSettings(context: Context) {
         _theme.value = mode
     }
 
+    private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+    private val _photosView = MutableStateFlow(
+        runCatching { json.decodeFromString(com.backendforge.telestore.core.PhotosView.serializer(), prefs.getString(KEY_PHOTOS_VIEW, null)!!) }
+            .getOrDefault(com.backendforge.telestore.core.PhotosView()),
+    )
+
+    /** Photos' layout and what it shows (the "Photos view" page). */
+    val photosView: StateFlow<com.backendforge.telestore.core.PhotosView> = _photosView.asStateFlow()
+
+    fun setPhotosView(view: com.backendforge.telestore.core.PhotosView) {
+        prefs.edit().putString(KEY_PHOTOS_VIEW, json.encodeToString(com.backendforge.telestore.core.PhotosView.serializer(), view)).apply()
+        _photosView.value = view
+    }
+
     /** Videos keep playing (sound only) when the app is left or the screen turns off. */
     var videoBackgroundPlay: Boolean
         get() = prefs.getBoolean(KEY_BG_PLAY, true)
@@ -82,6 +96,7 @@ class AppSettings(context: Context) {
         const val KEY_NOTIFICATION_SEEN = "notification_seen"
         const val KEY_LOW_SPACE = "low_space_warning"
         const val KEY_THEME = "theme"
+        const val KEY_PHOTOS_VIEW = "photos_view"
         const val KEY_UPDATE_CHECK = "last_update_check"
         const val KEY_BG_PLAY = "video_background_play"
         const val KEY_ONLINE_LYRICS = "online_lyrics"

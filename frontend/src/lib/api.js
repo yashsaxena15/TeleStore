@@ -254,6 +254,11 @@ export const api = {
     setFolderColor: (fileId, color) => post('/files/color', { file_id: fileId, color }, { fallback: "Couldn't change the folder colour" }),
     // Camera, exposure and place a photo was taken (from its EXIF)
     getPhotoInfo: (fileId) => request(`/files/${encodeURIComponent(fileId)}/photo-info`, { timeout: 30000, fallback: "Couldn't read the photo details" }),
+    // Photos' own details: { archived }, { caption }, { taken_at }, { place, latitude, longitude },
+    // { duration }; only the fields sent change
+    setPhotoMeta: (fileId, fields) => post(`/files/${encodeURIComponent(fileId)}/photo-meta`, fields, { fallback: "Couldn't save that" }),
+    // Moves one file into a folder (an album is a folder in the phone backup)
+    moveFile: (fileId, targetPath) => post('/files/move', { file_id: fileId, target_path: targetPath }, { fallback: "Couldn't move it" }),
     getStorageAnalytics: () => request('/files/analytics', { fallback: 'Failed to fetch storage analytics' }),
     uploadFile: (file, path = '/', onProgress) => uploadFile(file, path, onProgress),
     uploadFileChunked: (file, path = '/', onProgress) => uploadFileChunked(file, path, onProgress),
