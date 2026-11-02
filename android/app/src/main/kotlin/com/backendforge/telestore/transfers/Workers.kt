@@ -10,6 +10,7 @@ import com.backendforge.telestore.core.ApiException
 import com.backendforge.telestore.core.ChunkedUploader
 import com.backendforge.telestore.core.NetworkException
 import com.backendforge.telestore.core.ResumableDownloader
+import com.backendforge.telestore.core.SpeedSmoother
 import com.backendforge.telestore.core.NotificationKind
 import com.backendforge.telestore.core.NotificationTarget
 import com.backendforge.telestore.core.OfflineSync
@@ -99,15 +100,16 @@ abstract class TransferWorker(context: Context, params: WorkerParameters) : Coro
     /**
      * Runs [block] while a timer works out the speed from the stored progress every second and
      * refreshes the notification (the transfer callbacks only record bytes, from any thread).
+     * The speed is averaged over about 5 seconds, so it doesn't jump with every chunk.
      */
     protected suspend fun <T> tracked(block: suspend () -> T): T = coroutineScope {
         val ticker = launch {
-            var lastDone = store.get(transferId)?.done ?: 0
+            val smoother = SpeedSmoother()
+            smoother.next(store.get(transferId)?.done ?: 0, System.currentTimeMillis())
             while (isActive) {
                 delay(1_000)
                 val now = store.get(transferId) ?: break
-                val speed = (now.done - lastDone).coerceAtLeast(0)
-                lastDone = now.done
+                val speed = smoother.next(now.done, System.currentTimeMillis())
                 store.update(transferId, force = false) { it.copy(speedBps = speed) }
                 showForeground(saving = now.status == TransferStatus.SAVING)
             }

@@ -130,6 +130,31 @@ class TransferManager(private val context: Context) {
         keep.forEach { id -> store.update(id) { it.copy(hidden = true) } }
     }
 
+    /** Pauses every phone transfer that is running or waiting. */
+    fun pauseAll() {
+        store.items.value.filter { it.listed && (it.status == TransferStatus.RUNNING || it.status == TransferStatus.QUEUED) }.forEach { pause(it.id) }
+    }
+
+    /** Starts every paused phone transfer again. */
+    fun resumeAll() {
+        store.items.value.filter { it.listed && it.status == TransferStatus.PAUSED }.forEach { resume(it.id) }
+    }
+
+    /** Cancels every phone transfer that hasn't finished. */
+    fun cancelAll() {
+        store.items.value.filter { it.listed && !it.status.finished }.forEach { cancel(it.id) }
+    }
+
+    /** Removes one finished row (swiped away); like [clearFinished], a downloaded TeleStore file is only hidden. */
+    fun dismiss(id: String) {
+        val t = store.get(id)?.takeIf { it.status.finished } ?: return
+        if (t.status == TransferStatus.DONE && t.direction == Direction.DOWNLOAD && t.fileId != null) {
+            store.update(id) { it.copy(hidden = true) }
+        } else {
+            store.remove(setOf(id))
+        }
+    }
+
     private fun enqueue(t: PhoneTransfer) {
         val request: OneTimeWorkRequest = when (t.direction) {
             Direction.UPLOAD -> OneTimeWorkRequestBuilder<UploadWorker>()

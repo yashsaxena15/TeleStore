@@ -757,7 +757,12 @@ fun MainScreen(
                 }
 
                 composable("transfers") {
-                    TransfersScreen(container, onAddLink = { navController.navigate("add_link") })
+                    TransfersScreen(
+                        container,
+                        onAddLink = { navController.navigate("add_link") },
+                        onGoogleDrive = { navController.navigate("drive") },
+                        onOpenFolder = { navigateToFolder("files", it) },
+                    )
                 }
 
                 composable("add_link?link={link}", arguments = listOf(navArgument("link") { type = NavType.StringType; nullable = true; defaultValue = null })) { entry ->
