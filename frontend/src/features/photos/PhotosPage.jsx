@@ -433,7 +433,7 @@ export const PhotosPage = () => {
               <DropdownMenuItem onSelect={() => window.dispatchEvent(new CustomEvent("changeCategory", { detail: { folderPath: "/Home" } }))} className="gap-3 py-2.5"><FolderInput className="w-5 h-5"/>Import from Files</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <NotificationBell className="w-11 h-11 grid place-items-center rounded-full hover:bg-muted"/>
+          <NotificationBell icon className="w-11 h-11 grid place-items-center rounded-full hover:bg-muted"/>
           <PhotosMenu onPhotosView={() => setViewDialog(true)} onCollections={() => changeShow({ kind: "collections" })}/>
           <input ref={uploadInput} type="file" multiple accept="image/*,video/*" className="hidden" onChange={(e) => { upload(e.target.files); e.target.value = ""; }}/>
         </div>)}

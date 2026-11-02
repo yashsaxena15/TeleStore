@@ -82,22 +82,25 @@ export const NotificationsPanel = ({ onNavigateView, onDone, inSheet = false }) 
     </div>);
 };
 
-/** Sidebar row (desktop) with the unread count; opens the list beside it. */
-export const NotificationBell = ({ collapsed, className, onNavigateView }) => {
+/** Sidebar row (desktop) with the unread count; opens the list beside it.
+ *  [icon]: a round header button instead (Photos), the count in its corner; opens the list below it. */
+export const NotificationBell = ({ collapsed, icon, className, onNavigateView }) => {
     const [open, setOpen] = useState(false);
     const { unread } = useNotifications();
     const badge = badgeText(unread);
     return (<Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button type="button" className={cn(className, "relative")} title={collapsed ? "Notifications" : undefined} aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"}>
-          <Bell className="w-4 h-4 shrink-0"/>
-          {!collapsed && <span className="truncate">Notifications</span>}
-          {badge && (collapsed
+        <button type="button" className={cn(className, "relative")} title={collapsed || icon ? "Notifications" : undefined} aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"}>
+          <Bell className={cn("shrink-0", icon ? "w-6 h-6" : "w-4 h-4")}/>
+          {!collapsed && !icon && <span className="truncate">Notifications</span>}
+          {badge && (icon
+                ? <span data-testid="notification-badge" className="absolute top-0.5 right-0 min-w-[18px] h-[18px] px-1 grid place-items-center rounded-full bg-primary text-primary-foreground text-[10px] font-semibold leading-none tabular-nums">{badge}</span>
+                : collapsed
                 ? <span className="absolute top-1 right-1.5 min-w-2 h-2 rounded-full bg-primary"/>
                 : <span data-testid="notification-badge" className="ml-auto text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground">{badge}</span>)}
         </button>
       </PopoverTrigger>
-      <PopoverContent side="right" align="start" className="w-[360px] max-w-[calc(100vw-2rem)] p-0 overflow-hidden">
+      <PopoverContent side={icon ? "bottom" : "right"} align={icon ? "end" : "start"} className="w-[360px] max-w-[calc(100vw-2rem)] p-0 overflow-hidden">
         <NotificationsPanel onNavigateView={onNavigateView} onDone={() => setOpen(false)}/>
       </PopoverContent>
     </Popover>);
