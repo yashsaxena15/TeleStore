@@ -85,13 +85,13 @@ class CoreHelpersTest {
         val crumbs = FolderPaths.crumbs("/Home/Movies/Sci-Fi [2024]")
         assertEquals(
             listOf(
-                "Home" to "/Home",
+                "Files" to "/Home",
                 "Movies" to "/Home/Movies",
                 "Sci-Fi [2024]" to "/Home/Movies/Sci-Fi [2024]"
             ),
             crumbs
         )
-        assertEquals(listOf("Home" to "/Home"), FolderPaths.crumbs("/Home"))
+        assertEquals(listOf("Files" to "/Home"), FolderPaths.crumbs("/Home"))
         assertEquals(listOf("Starred" to "starred"), FolderPaths.crumbs("starred"))
         assertEquals(listOf("Recent" to "all"), FolderPaths.crumbs("all"))
 
@@ -119,6 +119,16 @@ class CoreHelpersTest {
         assertTrue(Places.isSpecial("inbox"))
         assertFalse(Places.isSpecial("/Home"))
         assertFalse(Places.isSpecial("/Home/Movies"))
+        // The Files tab is titled "Files", not "Home" (that's the Home tab)
+        assertEquals("Files", Place.HOME.title)
+    }
+
+    @Test
+    fun `folders show as a list unless the grid was chosen`() {
+        assertEquals(FilesView.LIST, FilesView.parse(null))
+        assertEquals(FilesView.LIST, FilesView.parse("tiles"))
+        assertEquals(FilesView.GRID, FilesView.parse("grid"))
+        assertEquals(FilesView.LIST, FilesView.parse(FilesView.LIST.wire))
     }
 
     @Test

@@ -90,6 +90,13 @@ import com.backendforge.telestore.ui.components.ItemActionSheet
 import com.backendforge.telestore.ui.components.NewFolderDialog
 import com.backendforge.telestore.ui.components.RenameDialog
 import com.backendforge.telestore.ui.components.SortViewSheet
+import com.backendforge.telestore.ui.components.AppTopBar
+import com.backendforge.telestore.ui.components.FabClearance
+import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 
 private enum class FolderPickerMode { MOVE, COPY }
 
@@ -121,6 +128,8 @@ fun FolderScreen(
     onAddToPlaylist: ((List<FileItem>) -> Unit)? = null,
     /** Compress to ZIP is offered (the owner can turn it off). */
     canArchive: Boolean = true,
+    /** Shows a back arrow (a folder opened from somewhere); null on the Files tab itself. */
+    onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -133,6 +142,7 @@ fun FolderScreen(
     }
 
     var showSortSheet by remember { mutableStateOf(false) }
+    var showMoreMenu by remember { mutableStateOf(false) }
     var actionItem by remember { mutableStateOf<FileItem?>(null) }
     var infoItem by remember { mutableStateOf<FileItem?>(null) }
     var renameItem by remember { mutableStateOf<FileItem?>(null) }
@@ -190,56 +200,66 @@ fun FolderScreen(
         },
         topBar = {
             if (state.isSelectionMode) {
-                TopAppBar(
-                    title = { Text("${state.selectedIds.size} selected") },
-                    navigationIcon = {
-                        IconButton(onClick = vm::clearSelection) {
-                            Icon(Icons.Default.Close, contentDescription = "Close selection")
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = vm::selectAll) {
-                            Icon(Icons.Default.SelectAll, contentDescription = "Select all")
-                        }
-                    },
-                )
+                AppTopBar(
+                    title = "${state.selectedIds.size} selected",
+                    onBack = vm::clearSelection,
+                    backIcon = Icons.Default.Close,
+                    backLabel = "Close selection",
+                ) {
+                    IconButton(onClick = vm::selectAll) {
+                        Icon(Icons.Default.SelectAll, contentDescription = "Select all")
+                    }
+                }
             } else {
-                TopAppBar(
-                    title = {
-                        Text(
-                            text = state.title,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    actions = {
-                        IconButton(onClick = onOpenSearch) {
-                            Icon(Icons.Default.Search, contentDescription = "Search")
+                AppTopBar(title = state.title, onBack = onBack) {
+                    IconButton(onClick = onOpenSearch) {
+                        Icon(Icons.Default.Search, contentDescription = "Search")
+                    }
+                    // List or grid, remembered for every folder
+                    IconButton(onClick = { haptics.tick(); vm.setViewMode(!state.isGrid) }) {
+                        if (state.isGrid) {
+                            Icon(Icons.AutoMirrored.Filled.ViewList, contentDescription = "Show as list")
+                        } else {
+                            Icon(Icons.Default.GridView, contentDescription = "Show as grid")
                         }
-                        IconButton(onClick = { showSortSheet = true }) {
-                            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort and view")
-                        }
-                        if (state.isTrash) {
-                            IconButton(
-                                onClick = { showEmptyTrashDialog = true },
-                                enabled = state.items.isNotEmpty(),
-                            ) {
-                                Icon(Icons.Default.DeleteSweep, contentDescription = "Empty trash")
+                    }
+                    IconButton(onClick = { showSortSheet = true }) {
+                        Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort and view")
+                    }
+                    val canMakeFolder = !state.isTrash && !state.isSpecial
+                    val canEmptyTrash = state.isTrash && state.items.isNotEmpty()
+                    val canSelect = state.items.isNotEmpty()
+                    if (canMakeFolder || canEmptyTrash || canSelect) {
+                        Box {
+                            IconButton(onClick = { showMoreMenu = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "More options")
                             }
-                        } else if (!state.isSpecial) {
-                            IconButton(onClick = { showNewFolderDialog = true }) {
-                                Icon(Icons.Default.CreateNewFolder, contentDescription = "New folder")
+                            DropdownMenu(expanded = showMoreMenu, onDismissRequest = { showMoreMenu = false }) {
+                                if (canMakeFolder) {
+                                    DropdownMenuItem(
+                                        text = { Text("New folder") },
+                                        leadingIcon = { Icon(Icons.Default.CreateNewFolder, contentDescription = null) },
+                                        onClick = { showMoreMenu = false; showNewFolderDialog = true },
+                                    )
+                                }
+                                if (canSelect) {
+                                    DropdownMenuItem(
+                                        text = { Text("Select items") },
+                                        leadingIcon = { Icon(Icons.Default.Checklist, contentDescription = null) },
+                                        onClick = { showMoreMenu = false; vm.enterSelectionMode(state.items.first()) },
+                                    )
+                                }
+                                if (canEmptyTrash) {
+                                    DropdownMenuItem(
+                                        text = { Text("Empty trash") },
+                                        leadingIcon = { Icon(Icons.Default.DeleteSweep, contentDescription = null) },
+                                        onClick = { showMoreMenu = false; showEmptyTrashDialog = true },
+                                    )
+                                }
                             }
                         }
-                        if (state.items.isNotEmpty()) {
-                            IconButton(onClick = {
-                                if (state.items.isNotEmpty()) vm.enterSelectionMode(state.items.first())
-                            }) {
-                                Icon(Icons.Default.Checklist, contentDescription = "Select items")
-                            }
-                        }
-                    },
-                )
+                    }
+                }
             }
         },
         bottomBar = {
@@ -456,6 +476,8 @@ fun FolderScreen(
                         if (!state.isGrid) {
                             LazyColumn(
                                 state = listState,
+                                // The last row scrolls clear of the Upload button
+                                contentPadding = PaddingValues(top = 4.dp, bottom = FabClearance),
                                 modifier = Modifier.fillMaxSize(),
                             ) {
                                 items(state.items, key = { it.id }) { item ->
@@ -502,9 +524,9 @@ fun FolderScreen(
                             LazyVerticalGrid(
                                 columns = GridCells.Adaptive(minSize = 160.dp),
                                 state = gridState,
-                                contentPadding = PaddingValues(12.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = FabClearance),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.fillMaxSize(),
                             ) {
                                 items(state.items, key = { it.id }) { item ->

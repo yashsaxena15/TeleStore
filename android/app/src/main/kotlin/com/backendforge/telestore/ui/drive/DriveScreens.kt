@@ -1,5 +1,6 @@
 package com.backendforge.telestore.ui.drive
 
+import com.backendforge.telestore.ui.components.AppTopBar
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -110,7 +111,7 @@ fun DriveAccountsScreen(container: AppContainer, onBack: () -> Unit, onOpen: (Cl
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("Google Drive") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } })
+            AppTopBar(title = "Google Drive", onBack = onBack)
         },
     ) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

@@ -22,14 +22,16 @@ val Inter = FontFamily(
     Font(R.font.inter_bold, FontWeight.Bold),
 )
 
-// Dark: "Midnight" (design A). Near-black ground, indigo accent.
+// Dark: "Midnight" (design A). Near-black ground, indigo accent for primary actions and selection.
 private val Dark = darkColorScheme(
     primary = Color(0xFF818CF8),
     onPrimary = Color(0xFF0B0B0F),
     primaryContainer = Color(0xFF6366F1),
     onPrimaryContainer = Color.White,
     secondary = Color(0xFFA5B4FC),
-    secondaryContainer = Color(0xFF312E81),
+    // Selection (the tab under your finger, chosen rows): a quieter indigo, so purple stands out
+    // only where it means something. Surfaces and plain folders stay neutral grey.
+    secondaryContainer = Color(0xFF2A2950),
     onSecondaryContainer = Color(0xFFE0E7FF),
     tertiary = Color(0xFF86EFAC),
     tertiaryContainer = Color(0xFF14532D),

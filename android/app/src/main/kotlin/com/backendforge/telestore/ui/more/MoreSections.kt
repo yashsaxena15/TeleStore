@@ -42,7 +42,7 @@ import com.backendforge.telestore.ui.components.ProgressBar
 fun SectionLabel(text: String) {
     Text(
         text, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 20.dp, bottom = 4.dp),
+        modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 16.dp, bottom = 6.dp),
     )
 }
 

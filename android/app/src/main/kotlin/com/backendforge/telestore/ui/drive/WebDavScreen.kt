@@ -1,5 +1,6 @@
 package com.backendforge.telestore.ui.drive
 
+import com.backendforge.telestore.ui.components.AppTopBar
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,7 +38,7 @@ fun WebDavScreen(container: AppContainer, session: Session, onBack: () -> Unit) 
     val address = container.api().url("webdav").toString().trimEnd('/') + "/"
     val google = session.username.startsWith("google_")
     Scaffold(
-        topBar = { TopAppBar(title = { Text("WebDAV") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } }) },
+        topBar = { AppTopBar(title = "WebDAV", onBack = onBack) },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(

@@ -62,6 +62,62 @@ fun FileGridCard(
         animationSpec = tween(180), label = "card selection",
     )
     val pictureScale by SelectionMotion.scale(isSelected)
+    if (item.isFolder) {
+        // A folder has no picture: a short card (icon, name, ⋮) instead of a big coloured block,
+        // so a screen holds many folders, not three
+        Card(
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = cardColor),
+            modifier = modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .combinedClickable(
+                    onClick = { if (isSelectionMode) onToggleSelect() else onClick() },
+                    onLongClick = { haptics.longPress(); onLongClick() },
+                ),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().height(56.dp).padding(start = 12.dp, end = 4.dp),
+            ) {
+                FileKindBox(
+                    kind = item.kind,
+                    folderColor = item.color,
+                    iconSize = 22.dp,
+                    shapeRadius = 8.dp,
+                    modifier = Modifier.size(34.dp).graphicsLayer { scaleX = pictureScale; scaleY = pictureScale },
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = item.name,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                if (item.starred) {
+                    Icon(Icons.Default.Star, contentDescription = "Starred", tint = Color(0xFFFBBF24), modifier = Modifier.padding(start = 4.dp).size(14.dp))
+                }
+                if (item.protected) {
+                    ProtectedBadge(modifier = Modifier.padding(start = 4.dp))
+                }
+                if (isSelectionMode) {
+                    Checkbox(checked = isSelected, onCheckedChange = { onToggleSelect() })
+                } else {
+                    IconButton(onClick = onOpenActions, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Actions for ${item.name}",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
+        }
+        return
+    }
     Card(
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor),

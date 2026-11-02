@@ -29,7 +29,7 @@ object FolderPaths {
 
     /**
      * Breadcrumb pairs of (label, path) from root to [path].
-     * E.g. "/Home/Movies/2024" -> [("Home", "/Home"), ("Movies", "/Home/Movies"), ("2024", "/Home/Movies/2024")]
+     * E.g. "/Home/Movies/2024" -> [("Files", "/Home"), ("Movies", "/Home/Movies"), ("2024", "/Home/Movies/2024")]
      */
     fun crumbs(path: String): List<Pair<String, String>> {
         val normalized = path.trimEnd('/')
@@ -43,7 +43,8 @@ object FolderPaths {
         var currentPath = ""
         for (segment in segments) {
             currentPath += "/$segment"
-            result.add(segment to currentPath)
+            // The top folder is the Files tab, so its crumb says "Files"
+            result.add((if (currentPath == TeleStoreApi.HOME) Place.HOME.title else segment) to currentPath)
         }
         return result
     }

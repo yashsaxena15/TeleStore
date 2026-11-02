@@ -78,8 +78,12 @@ import com.backendforge.telestore.player.formatTime
 import com.backendforge.telestore.ui.components.FileThumbnail
 import com.backendforge.telestore.ui.components.folderTint
 import com.backendforge.telestore.ui.components.NewFolderDialog
-import java.util.Calendar
 import com.backendforge.telestore.ui.components.ProgressBar
+import com.backendforge.telestore.ui.components.AppTopBar
+import com.backendforge.telestore.ui.components.CompactChip
+import com.backendforge.telestore.ui.components.FabClearance
+import com.backendforge.telestore.core.HomeCards
+import androidx.compose.foundation.layout.heightIn
 
 /** Places Home links to, besides files and folders. */
 enum class HomeShortcut(val label: String) { PLAYLISTS("Playlists"), STARRED("Starred"), RECENT("Recent"), VAULT("Vault"), TRASH("Trash") }
@@ -111,10 +115,10 @@ fun HomeScreen(
     var newFolder by remember { mutableStateOf(false) }
 
     val unread by container.unreadNotifications.collectAsStateWithLifecycle()
-    // The header pads for the status bar itself (and scrolls away with the page), so the
-    // Scaffold mustn't add that space a second time
+    // The top bar pads for the status bar itself, so the Scaffold mustn't add that space a second time
     Scaffold(
         contentWindowInsets = WindowInsets(0),
+        topBar = { Header(session.username, unread, onNotifications, onAccount) },
         floatingActionButton = {
             Box {
                 FloatingActionButton(onClick = { newMenu = true }, containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer) {
@@ -131,20 +135,20 @@ fun HomeScreen(
         PullToRefreshBox(isRefreshing = state.loading, onRefresh = { haptics.confirm(); vm.refresh() }, modifier = Modifier.fillMaxSize().padding(padding)) {
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(160.dp),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                // The bottom room lets the last folders scroll clear of the + button
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = FabClearance),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                full { Header(session.username, unread, onNotifications, onAccount) }
                 full { SearchBar(onSearch) }
                 full {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 2.dp)) {
                         items(listOf(FileKind.VIDEO to "Videos", FileKind.PHOTO to "Photos", FileKind.AUDIO to "Music", FileKind.DOCUMENT to "Docs")) { (kind, label) ->
-                            AssistChip(onClick = { onKind(kind) }, label = { Text(label) }, shape = RoundedCornerShape(17.dp))
+                            CompactChip(label, onClick = { onKind(kind) })
                         }
                         items(HomeShortcut.entries.toList()) { s ->
-                            AssistChip(onClick = { onShortcut(s) }, label = { Text(s.label) }, shape = RoundedCornerShape(17.dp))
+                            CompactChip(s.label, onClick = { onShortcut(s) })
                         }
                     }
                 }
@@ -152,8 +156,9 @@ fun HomeScreen(
                 if (watching.isNotEmpty()) {
                     full { SectionTitle("Continue watching") }
                     full {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            items(watching, key = { it.fileId }) { entry -> ContinueCard(entry, api, onClick = { onResume(entry) }) }
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            // Two whole cards across (and a peek of the next), so the time left is never cut off at the edge
+                            items(watching, key = { it.fileId }) { entry -> ContinueCard(entry, api, Modifier.fillParentMaxWidth(0.46f), onClick = { onResume(entry) }) }
                         }
                     }
                 }
@@ -188,20 +193,10 @@ private fun androidx.compose.foundation.lazy.grid.LazyGridScope.full(content: @C
     item(span = { GridItemSpan(maxLineSpan) }) { content() }
 }
 
+/** Home's top bar: the same as every other screen's, with notifications and the account on the right. */
 @Composable
 private fun Header(username: String, unread: Int, onNotifications: () -> Unit, onAccount: () -> Unit) {
-    val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
-    val greeting = when (hour) {
-        in 5..11 -> "Good morning"
-        in 12..16 -> "Good afternoon"
-        else -> "Good evening"
-    }
-    Row(Modifier.statusBarsPadding().padding(top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        AppLogo(30)
-        Column(Modifier.weight(1f).padding(start = 12.dp)) {
-            Text(greeting, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(username.substringBefore('@').ifEmpty { "Welcome" }, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+    AppTopBar(title = "Home") {
         IconButton(onClick = onNotifications) {
             BadgedBox(badge = { if (unread > 0) Badge { Text(if (unread > 99) "99+" else unread.toString()) } }) {
                 Icon(Icons.Outlined.Notifications, contentDescription = if (unread > 0) "Notifications, $unread new" else "Notifications")
@@ -209,10 +204,10 @@ private fun Header(username: String, unread: Int, onNotifications: () -> Unit, o
         }
         // Room for the badge: "99+" reaches past the bell's button and the avatar hid the "+"
         Box(
-            Modifier.padding(start = 12.dp).size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer).clickable(onClick = onAccount),
+            Modifier.padding(start = 8.dp, end = 8.dp).size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest).clickable(onClick = onAccount),
             contentAlignment = Alignment.Center,
         ) {
-            Text(username.firstOrNull()?.uppercase() ?: "?", color = MaterialTheme.colorScheme.onSecondaryContainer, fontWeight = FontWeight.Bold)
+            Text(username.firstOrNull()?.uppercase() ?: "?", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -250,35 +245,47 @@ private fun SearchBar(onSearch: () -> Unit) {
 
 @Composable
 private fun SectionTitle(text: String, action: String? = null, onAction: () -> Unit = {}) {
-    Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
         if (action != null) TextButton(onClick = onAction) { Text(action) }
     }
 }
 
 @Composable
-private fun ContinueCard(entry: WatchEntry, api: TeleStoreApi, onClick: () -> Unit) {
-    Column(Modifier.width(200.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick)) {
-        Box(Modifier.fillMaxWidth().height(112.dp).clip(RoundedCornerShape(12.dp))) {
+private fun ContinueCard(entry: WatchEntry, api: TeleStoreApi, modifier: Modifier, onClick: () -> Unit) {
+    Column(modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick)) {
+        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp))) {
             FileThumbnail(item = entry.asFile(), api = api, modifier = Modifier.fillMaxSize(), shapeRadius = 12.dp, iconSize = 32.dp)
-            Text(
-                "${formatTime(entry.leftMs)} left", color = Color.White, style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).background(Color(0x99000000), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
-            )
             ProgressBar(
                 progress = { entry.progress }, modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp),
                 trackColor = Color(0x55FFFFFF),
             )
         }
-        Text(PlayQueue.title(entry.asFile()), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+        // The title gives way (…) to the time left, which always shows in full
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                PlayQueue.title(entry.asFile()), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Text(
+                "${formatTime(entry.leftMs)} left", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1, softWrap = false, modifier = Modifier.padding(start = 6.dp),
+            )
+        }
     }
 }
 
 @Composable
 private fun RecentCard(item: FileItem, api: TeleStoreApi, onClick: () -> Unit) {
-    Column(Modifier.width(140.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick)) {
+    // Photos say when they were taken, not "IMG_20261029_17…"
+    val label = remember(item.id, item.name, item.timelineDate) { HomeCards.recentLabel(item) }
+    Column(Modifier.width(132.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick)) {
         FileThumbnail(item = item, api = api, modifier = Modifier.fillMaxWidth().aspectRatio(1.4f), shapeRadius = 12.dp, iconSize = 30.dp)
-        Text(item.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+        Text(
+            label.ifEmpty { " " }, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            color = if (label == item.name) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp),
+        )
     }
 }
 
@@ -290,9 +297,10 @@ private fun FolderTile(folder: FileItem, onClick: () -> Unit) {
         color = MaterialTheme.colorScheme.surfaceContainer,
         modifier = Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp)),
     ) {
-        Column(Modifier.padding(14.dp)) {
-            Icon(Icons.Filled.Folder, contentDescription = null, tint = folderTint(folder.color) ?: MaterialTheme.colorScheme.primaryContainer)
-            Text(folder.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+        // One compact line: icon and name side by side
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Folder, contentDescription = null, tint = folderTint(folder.color) ?: MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+            Text(folder.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 10.dp))
         }
     }
 }
