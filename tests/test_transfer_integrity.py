@@ -71,9 +71,9 @@ def test_worker_machines_check_downloads_the_same_way(worker):
     with pytest.raises(RuntimeError) as e:
         worker.check_download("RisingOS-6.2-ota.zip", 2040, 0, GOOGLE_LIMIT_PAGE)
     assert worker.is_gdrive_quota_error(str(e.value))  # reported as Google's limit, so it waits
-    with pytest.raises(RuntimeError, match="sent a web page"):
+    with pytest.raises(ValueError, match="sent a web page"):
         worker.check_download("data.f2fs.win015", 60, 0, OTHER_PAGE)
-    with pytest.raises(RuntimeError, match="Only part of"):
+    with pytest.raises(ValueError, match="Only part of"):
         worker.check_download("a.bin", 10, 20, b"\x00")
     worker.check_download("lesson.htm", 60, 60, OTHER_PAGE)
     assert worker.HTML_NAMES == download_check.HTML_NAMES

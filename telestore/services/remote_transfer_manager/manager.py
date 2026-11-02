@@ -20,11 +20,12 @@ from telestore.db import database
 from telestore.services.pipeline_uploader import upload_part_task
 from telestore.services.disk_budget import AsyncPartSlots, ThreadPartSlots
 from telestore.services import download_check
+from telestore.transfer_core import SpeedMeter, eta_seconds
 from telestore.services.priority_manager import priority_manager
 from telestore.services.torrent_manager import torrent_manager, parse_torrent_bytes
 
 from telestore.services.remote_transfer_manager.common import logger
-from telestore.services.remote_transfer_manager.helpers import GoogleDriveQuotaExceededError, MODERN_USER_AGENT, finalize_multipart_group_if_ready, get_file_type, get_remote_db, is_gdrive_quota_error, probe_resource_for_range
+from telestore.services.remote_transfer_manager.helpers import GoogleDriveQuotaExceededError, MODERN_USER_AGENT, google_limit_pause, finalize_multipart_group_if_ready, get_file_type, get_remote_db, is_gdrive_quota_error, probe_resource_for_range
 from telestore.services.remote_transfer_manager.pipeline import PipelinedStreamWriter
 
 # Largest piece sent to Telegram as one message; bigger files go up in parts of this size
@@ -36,6 +37,8 @@ MEDIA_BLOCK_RETRIES = 3
 
 RUNNING_STATUSES = ["downloading", "uploading_tg", "discovering"]
 ACTIVE_STATUSES = ["queued", *RUNNING_STATUSES, "paused_quota"]
+# Not moving: their speeds are 0
+STILL_STATUSES = ("queued", "paused", "paused_quota", "completed", "failed", "cancelled")
 # Waiting files shown per folder leech on the Transfers page (the summary counts all of them)
 GROUP_PREVIEW_SIZE = 20
 
@@ -167,6 +170,7 @@ class RemoteTransferManager:
                                     "$set": {
                                         "status": "downloading",
                                         "claimed_by": "master-vm1",
+                                        "worker": "main",
                                         "claimed_at": now_utc,
                                         "phase": "Starting local transfer...",
                                         "updated_at": now_utc
@@ -504,6 +508,9 @@ class RemoteTransferManager:
                     "group_id": group_id,
                     "group_name": root_folder_name,
                     "group_type": "folder",
+                    "group_source_url": url,  # the folder link, shown with the copy and used to check it at the end
+                    "group_folder_id": folder_id,
+                    "group_destination": clean_dest,
                     "group_total_items": len(folder_files),
                     "created_at": now,
                     "updated_at": now
@@ -732,14 +739,14 @@ class RemoteTransferManager:
         local_path = os.path.join(tg_dir, filename)
 
         last_report = [0.0]
-        started = time.time()
+        meter = SpeedMeter()
 
         def on_progress(done: int, total: int):
             now_t = time.time()
+            speed = meter.update(done)
             if now_t - last_report[0] < 0.8 and done != total:
                 return
             last_report[0] = now_t
-            speed = int(done / max(0.1, now_t - started))
             self._update_task(task_id, {
                 "status": "downloading",
                 "transferred_bytes": done,
@@ -1129,23 +1136,22 @@ class RemoteTransferManager:
 
         # 6. Stream directly from Telegram into Google Drive Resumable Upload
         last_progress_time = [time.time()]
-        last_bytes = [0]
+        meter = SpeedMeter()
 
         async def progress_cb(cur_transferred: int, total_sz: Optional[int]):
             if cancel_event.is_set():
                 raise InterruptedError("Cancelled by user")
             now_t = time.time()
+            speed = meter.update(cur_transferred)
             dt = now_t - last_progress_time[0]
             if dt >= 0.8 or (total_sz and cur_transferred >= total_sz):
-                speed = int((cur_transferred - last_bytes[0]) / max(0.1, dt))
                 last_progress_time[0] = now_t
-                last_bytes[0] = cur_transferred
                 pct = round((cur_transferred / total_sz) * 100, 1) if total_sz and total_sz > 0 else 0
                 rem_bytes = max(0, total_sz - cur_transferred) if total_sz else 0
                 eta = int(rem_bytes / max(1, speed)) if speed > 0 and total_sz else 0
                 self._update_task(task_id, {
                     "transferred_bytes": cur_transferred,
-                    "speed_bps": speed,
+                    "speed_bps": speed, "download_bps": 0, "upload_bps": speed,
                     "progress": pct,
                     "eta_seconds": eta,
                     "phase": f"Streaming to Google Drive ({pct}%)"
@@ -1192,30 +1198,11 @@ class RemoteTransferManager:
                 if self._pause_blocked_media(task_doc, e):
                     return
                 if is_gdrive_quota_error(e):
-                    logger.warning(f"Google Drive quota exceeded for task {task_id}: {err_text}")
-                    cooldown_until = datetime.now(timezone.utc) + timedelta(hours=24)
-                    coll = get_remote_db()["RemoteTransfers"]
-                    group_id = task_doc.get("group_id")
-                    target_query = {"user_id": str(task_doc["user_id"]), "status": {"$in": ["queued", "downloading"]}}
-                    if group_id:
-                        target_query["group_id"] = group_id
-                    else:
-                        target_query["task_id"] = task_id
-
-                    coll.update_many(
-                        target_query,
-                        {
-                            "$set": {
-                                "status": "paused_quota",
-                                "cooldown_until": cooldown_until,
-                                "phase": "Google Drive quota exceeded. Auto-resumes in 24h 🕒",
-                                "error_message": "Google Drive 24h download limit reached. Transfer will automatically resume when quota resets.",
-                                "speed_bps": 0,
-                                "updated_at": datetime.now(timezone.utc)
-                            },
-                            "$unset": {"claimed_by": "", "claimed_at": ""}
-                        }
-                    )
+                    # Google's limit is per file: only this one waits, the rest of its folder carries on
+                    logger.warning(f"Google Drive's download limit for task {task_id}: {err_text}")
+                    get_remote_db()["RemoteTransfers"].update_one(
+                        {"task_id": task_id, "status": {"$in": ["queued", "downloading", "uploading_tg"]}},
+                        google_limit_pause(task_doc, datetime.now(timezone.utc)))
                     return
 
                 logger.error(f"Task {task_id} failed: {e}", exc_info=True)
@@ -1315,8 +1302,8 @@ class RemoteTransferManager:
                         resp.raise_for_status()
 
                     transferred = 0
-                    start_time = time.time()
-                    last_rep = start_time
+                    meter = SpeedMeter()
+                    last_rep = time.time()
 
                     with open(part_file_path, "wb") as pf:
                         for chunk in resp.iter_content(chunk_size=2 * 1024 * 1024):
@@ -1340,10 +1327,9 @@ class RemoteTransferManager:
                                 pf.write(chunk)
                                 transferred += len(chunk)
                                 now = time.time()
+                                speed = meter.update(transferred)
                                 if now - last_rep >= 1.0:
                                     last_rep = now
-                                    dt = max(0.1, now - start_time)
-                                    speed = int(transferred / dt)
                                     prog = min(99.0, round((transferred / part_size) * 100, 1)) if part_size > 0 else 0
                                     eta = int((part_size - transferred) / speed) if (speed > 0 and part_size > transferred) else 0
                                     self._update_task(task_id, {
@@ -1507,8 +1493,7 @@ class RemoteTransferManager:
         estimated_total = [task_doc.get("filesize", 0)]
         announced = [0]  # the size the source itself gave for this download (checked at the end)
         last_progress_time = [time.time()]
-        last_dl = [0]
-        last_up = [0]
+        dl_meter, up_meter = SpeedMeter(), SpeedMeter()
         # Max 2 parts on disk, each reserved from the server's disk budget
         disk_semaphore = ThreadPartSlots(expected_total=int(estimated_total[0] or 0))
         budget_slots = [disk_semaphore]
@@ -1528,20 +1513,19 @@ class RemoteTransferManager:
                 raise InterruptedError("Cancelled by user")
 
             now_t = time.time()
+            dl_speed, up_speed = dl_meter.update(cur_dl), up_meter.update(cur_up)
             dt = now_t - last_progress_time[0]
             if dt >= 0.8 or (total_sz and (cur_dl >= total_sz or cur_up >= total_sz)):
-                dl_speed = max(0, (cur_dl - last_dl[0]) / dt) if dt > 0 else 0
-                up_speed = max(0, (cur_up - last_up[0]) / dt) if dt > 0 else 0
                 last_progress_time[0] = now_t
-                last_dl[0] = cur_dl
-                last_up[0] = cur_up
 
                 if total_sz and total_sz > 0:
                     dl_pct = (cur_dl / total_sz) * 50.0
                     up_pct = (cur_up / total_sz) * 50.0
                     overall_progress = min(99.5, round(dl_pct + up_pct, 1))
                     active_speed = max(dl_speed, up_speed)
-                    eta = int((total_sz - cur_up) / active_speed) if (active_speed > 0 and cur_up < total_sz) else 0
+                    # Done when the last byte is in Telegram: the upload's pace, or the download's while it leads
+                    pace = up_speed if cur_dl >= total_sz else min((v for v in (dl_speed, up_speed) if v > 0), default=0)
+                    eta = eta_seconds(total_sz - cur_up, pace)
 
                     if cur_dl < total_sz:
                         phase = f"Streaming Part {writer.current_part_index}: DL {dl_speed/1024/1024:.1f}MB/s | UP {up_speed/1024/1024:.1f}MB/s ({overall_progress}%)"
@@ -1558,7 +1542,7 @@ class RemoteTransferManager:
                     "transferred_bytes": cur_up,
                     "filesize": total_sz or cur_dl,
                     "progress": overall_progress,
-                    "speed_bps": active_speed,
+                    "speed_bps": active_speed, "download_bps": dl_speed, "upload_bps": up_speed,
                     "eta_seconds": eta,
                     "phase": phase,
                     "status": "uploading_tg" if cur_dl >= (total_sz or 1) else "downloading"
@@ -2184,15 +2168,22 @@ class RemoteTransferManager:
                 await asyncio.to_thread(_do_direct_download)
                 writer.finish()
 
-            if not upload_tasks or writer.total_bytes == 0:
-                raise ValueError("No data received or transfer was cancelled.")
-
             # The real file, not an error page the source sent instead, and all of it
             download_check.check(filename_holder[0], writer.total_bytes, announced[0], writer.head)
 
             # Ensure folder hierarchy exists in MongoDB
             database.Files.create_folder_path(destination_path, owner_id=str(user_id))
             file_type = get_file_type(filename_holder[0])
+
+            if writer.total_bytes == 0:
+                # The download finished and the file is empty (the source said nothing else)
+                logger.info(f"[REMOTE_TRANSFER] Task {task_id}: '{filename_holder[0]}' is empty; saved as a 0-byte record.")
+                database.Files.save_empty(filename_holder[0], destination_path, str(user_id), file_type=file_type, is_vault=is_vault, key=task_id)
+                self._update_task(task_id, {"status": "completed", "progress": 100.0, "eta_seconds": 0, "filesize": 0,
+                                            "transferred_bytes": 0, "phase": "Completed (an empty file, 0 bytes)"})
+                return
+            if not upload_tasks:
+                raise ValueError("No data received or transfer was cancelled.")
 
             # --- STEP 2: Finalize Telegram Storage Registration ---
             if len(upload_tasks) == 1 and writer.parts[0].get("part_index") == 1 and writer.total_bytes <= PART_MAX_SIZE:
@@ -2291,6 +2282,7 @@ class RemoteTransferManager:
         try:
             coll = get_remote_db()["RemoteTransfers"]
             updates["updated_at"] = datetime.now(timezone.utc)
+            _fill_speeds(updates)
             if updates.get("error_message"):
                 # Keep what really happened for the logs; the user reads one plain sentence
                 raw = updates["error_message"]
@@ -2444,25 +2436,48 @@ class RemoteTransferManager:
             "status": {"$in": ["completed", "cancelled", "failed"]}
         }).sort("updated_at", -1).limit(40))
 
-        docs = active_docs + history_docs
-        for d in docs:
-            d["_id"] = str(d["_id"])
-            if isinstance(d.get("created_at"), datetime):
-                d["created_at"] = d["created_at"].isoformat()
-            if isinstance(d.get("updated_at"), datetime):
-                d["updated_at"] = d["updated_at"].isoformat()
-            if isinstance(d.get("cooldown_until"), datetime):
-                d["cooldown_until"] = d["cooldown_until"].isoformat()
-            # Sign-in headers stay on the server; older failures may still hold raw source text
-            d.pop("custom_headers", None)
-            d.pop("error_detail", None)
-            d["error_message"] = friendly_error(d.get("error_message"))
-            for part in d.get("parts") or []:
-                if isinstance(part, dict):
-                    part.pop("custom_headers", None)
+        docs = [_public_task(d) for d in active_docs + history_docs]
 
         group_ids = sorted({d["group_id"] for d in docs if d.get("group_id")})
-        return {"tasks": docs, "groups": self._group_summaries(coll, uid, group_ids)}
+        return {"tasks": docs, "groups": _with_checks(self._group_summaries(coll, uid, group_ids))}
+
+    def get_group_tasks(self, user_id: str, group_id: str, filter: str = "all", q: str = "", offset: int = 0, limit: int = 50) -> Optional[Dict[str, Any]]:
+        """One folder copy's files, a page at a time (a folder can hold thousands): [filter] is all,
+        active, waiting, failed or done; [q] matches part of the name. None when the folder isn't theirs."""
+        coll = get_remote_db()["RemoteTransfers"]
+        uid = str(user_id)
+        if not coll.find_one({"user_id": uid, "group_id": group_id}, {"_id": 1}):
+            return None
+        offset, limit = max(0, int(offset)), max(1, min(200, int(limit)))
+        base: Dict[str, Any] = {"user_id": uid, "group_id": group_id}
+        if q:
+            base["filename"] = {"$regex": re.escape(q.strip()), "$options": "i"}
+        # Running first, then failed, waiting and finished; each in a sensible order
+        sections = [(s, order) for key, s, order in GROUP_FILTER_SECTIONS if filter in ("all", key)]
+        total = sum(coll.count_documents({**base, "status": {"$in": statuses}}) for statuses, _ in sections)
+        page, skip = [], offset
+        for statuses, order in sections:
+            if len(page) >= limit:
+                break
+            query = {**base, "status": {"$in": statuses}}
+            count = coll.count_documents(query)
+            if skip >= count:
+                skip -= count
+                continue
+            page += list(coll.find(query, {"custom_headers": 0}).sort(order).skip(skip).limit(limit - len(page)))
+            skip = 0
+        return {"tasks": [_public_task(d) for d in page], "total": total, "offset": offset, "limit": limit,
+                "summary": _with_checks(self._group_summaries(coll, uid, [group_id])).get(group_id, {})}
+
+    def retry_failed(self, group_id: str, user_id: str) -> int:
+        """Queues a folder copy's failed files again (only those)."""
+        res = get_remote_db()["RemoteTransfers"].update_many(
+            {"group_id": group_id, "user_id": str(user_id), "status": "failed"},
+            {"$set": {"status": "queued", "phase": "Queued (retrying)", "progress": 0, "transferred_bytes": 0,
+                      "speed_bps": 0, "download_bps": 0, "upload_bps": 0, "error_message": None,
+                      "updated_at": datetime.now(timezone.utc)},
+             "$unset": {"cooldown_until": "", "claimed_by": "", "claimed_at": "", "error_detail": ""}})
+        return res.modified_count
 
     @staticmethod
     def _group_summaries(coll, user_id: str, group_ids: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -2476,12 +2491,16 @@ class RemoteTransferManager:
                 "filesize": {"$sum": {"$ifNull": ["$filesize", 0]}},
                 "transferred": {"$sum": {"$ifNull": ["$transferred_bytes", 0]}},
                 "speed": {"$sum": {"$ifNull": ["$speed_bps", 0]}},
+                "down": {"$sum": {"$ifNull": ["$download_bps", 0]}},
+                "up": {"$sum": {"$ifNull": ["$upload_bps", 0]}},
                 "resumes_at": {"$min": "$cooldown_until"},
+                "created_at": {"$min": "$created_at"},
             }},
         ])
         summaries: Dict[str, Dict[str, Any]] = {}
         for row in rows:
-            group = summaries.setdefault(row["_id"]["group"], {"total": 0, "counts": {}, "filesize": 0, "transferred_bytes": 0, "speed_bps": 0})
+            group = summaries.setdefault(row["_id"]["group"], {"total": 0, "counts": {}, "filesize": 0, "transferred_bytes": 0, "speed_bps": 0,
+                                                               "download_bps": 0, "upload_bps": 0, "created_at": None})
             group["total"] += row["count"]
             group["counts"][row["_id"]["status"]] = row["count"]
             group["filesize"] += row["filesize"]
@@ -2489,16 +2508,79 @@ class RemoteTransferManager:
             # Only files moving now: finished ones can still hold their last speed
             if row["_id"]["status"] in ("downloading", "uploading_tg"):
                 group["speed_bps"] += row["speed"]
+                group["download_bps"] += row.get("down", 0)
+                group["upload_bps"] += row.get("up", 0)
+            if isinstance(row.get("created_at"), datetime):
+                started = row["created_at"].isoformat()
+                group["created_at"] = min(filter(None, [group["created_at"], started]))
             # When files paused by Google Drive's daily limit resume by themselves
             if row["_id"]["status"] == "paused_quota" and isinstance(row.get("resumes_at"), datetime):
                 at = row["resumes_at"]
                 at = at.replace(tzinfo=timezone.utc) if at.tzinfo is None else at.astimezone(timezone.utc)
                 group["resumes_at"] = at.replace(tzinfo=None).isoformat(timespec="seconds") + "Z"
+        # Name, source folder link and destination, from one of its files
+        for group_id, group in summaries.items():
+            one = coll.find_one({"user_id": user_id, "group_id": group_id},
+                                {"group_name": 1, "group_source_url": 1, "destination_path": 1, "source_type": 1, "source_url": 1})
+            one = one or {}
+            group["name"] = one.get("group_name")
+            group["destination_path"] = one.get("destination_path")
+            group["source_url"] = one.get("group_source_url") or (one.get("source_url") if one.get("source_type") == "gdrive_folder" else None)
         # Why files failed: the latest reason, so a folder doesn't just say "3 failed"
         for group_id, group in summaries.items():
             if group["counts"].get("failed"):
                 failed = coll.find_one({"user_id": user_id, "group_id": group_id, "status": "failed"}, {"error_message": 1}, sort=[("updated_at", -1)])
                 group["error"] = friendly_error((failed or {}).get("error_message"))
         return summaries
+
+# The folder screen's filters: (key, statuses, order)
+GROUP_FILTER_SECTIONS = [
+    ("active", ["discovering", "downloading", "uploading_tg"], [("updated_at", -1)]),
+    ("failed", ["failed"], [("updated_at", -1)]),
+    ("waiting", ["queued", "paused_quota"], [("created_at", 1), ("_id", 1)]),
+    ("done", ["completed", "cancelled"], [("updated_at", -1), ("_id", -1)]),
+]
+
+
+def _with_checks(summaries: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Adds the end-of-copy check against the source folder (folder_check.py) to copies that had one."""
+    if not summaries:
+        return summaries
+    try:
+        for row in get_remote_db()["TransferGroups"].find({"group_id": {"$in": list(summaries)}, "check": {"$exists": True}}, {"group_id": 1, "check": 1}):
+            summaries[row["group_id"]]["check"] = row["check"]
+    except Exception as e:
+        logger.debug(f"No folder checks: {e}")
+    return summaries
+
+
+def _public_task(d: dict) -> dict:
+    """A task as the apps read it: dates as text, the machine working on it, no sign-in headers or raw errors."""
+    d["_id"] = str(d["_id"])
+    for key in ("created_at", "updated_at", "cooldown_until", "claimed_at"):
+        if isinstance(d.get(key), datetime):
+            d[key] = d[key].isoformat()
+    if not d.get("worker") and d.get("claimed_by"):
+        d["worker"] = "main" if d["claimed_by"] == "master-vm1" else d["claimed_by"]
+    # Sign-in headers stay on the server; older failures may still hold raw source text
+    d.pop("custom_headers", None)
+    d.pop("error_detail", None)
+    d["error_message"] = friendly_error(d.get("error_message"))
+    for part in d.get("parts") or []:
+        if isinstance(part, dict):
+            part.pop("custom_headers", None)
+    return d
+
+
+def _fill_speeds(updates: dict) -> None:
+    """Download and upload speed beside the total: a step that only gives one speed is downloading
+    (or uploading, while saving to Telegram), and anything not moving shows 0."""
+    if updates.get("status") in STILL_STATUSES:
+        updates.update(speed_bps=0, download_bps=0, upload_bps=0)
+    elif "speed_bps" in updates and "download_bps" not in updates and "upload_bps" not in updates:
+        speed = int(updates["speed_bps"] or 0)
+        uploading = updates.get("status") == "uploading_tg"
+        updates.update(download_bps=0 if uploading else speed, upload_bps=speed if uploading else 0)
+
 
 remote_transfer_manager = RemoteTransferManager(max_concurrent=2)

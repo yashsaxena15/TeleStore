@@ -319,8 +319,8 @@ class TestWebDav:
         monkeypatch.chdir(tmp_path)
         res = self._put(b"")
         assert res.status_code == 201
-        doc = database.Files.insert_one.call_args.args[0]
-        assert doc["file_size"] == 0 and doc["message_id"] is None and doc["file_name"] == "new.txt" and doc["file_path"] == "/Home"
+        args, kwargs = database.Files.save_empty.call_args
+        assert args[:3] == ("new.txt", "/Home", "42") and kwargs["file_caption"] == "WebDAV upload: new.txt"
 
     def test_vault_files_are_hidden_in_starred_and_trash(self, client):
         from telestore.api.routes.webdav import transfer

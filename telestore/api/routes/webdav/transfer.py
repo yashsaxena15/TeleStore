@@ -287,16 +287,8 @@ async def handle_put(request: Request, segments: List[str], owner_id: str, defau
                 os.remove(current_part_file)
             # Windows Explorer and Finder create a file empty first, then send its contents in a second
             # PUT. Telegram can't hold an empty file, so it is a record with no message (0 bytes).
-            empty = {"chat_id": None, "message_id": None, "file_unique_id": f"empty_{upload_id}", "file_size": 0,
-                     "thumbnail": None, "file_type": file_type, "parts": None, "is_split": False,
-                     "modified_date": datetime.now(timezone.utc).isoformat()}
-            existing = database.Files.find_one({"file_name": file_name, "file_path": target_folder_path, "owner_id": owner_id, "trashed": {"$ne": True}})
-            if existing:
-                database.Files.update_one({"_id": existing["_id"]}, {"$set": empty})
-            else:
-                database.Files.insert_one({**empty, "file_name": file_name, "file_caption": f"WebDAV upload: {file_name}",
-                                           "file_path": target_folder_path, "owner_id": owner_id,
-                                           "starred": False, "trashed": False, "is_vault": False})
+            database.Files.save_empty(file_name, target_folder_path, owner_id, file_type=file_type,
+                                      file_caption=f"WebDAV upload: {file_name}", key=upload_id)
             return Response(status_code=201)
 
         # Case 1: Single-part file (<= 1950MB)

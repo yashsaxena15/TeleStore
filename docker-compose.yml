@@ -9,6 +9,9 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
+    environment:
+      # Logs live in the cache volume, so they survive restarts and rebuilds
+      LOG_DIR: /app/cache/logs
     ports:
       - "127.0.0.1:9000:8000"
     volumes:

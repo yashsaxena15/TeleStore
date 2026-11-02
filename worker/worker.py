@@ -6,15 +6,28 @@ import asyncio
 import logging
 import secrets
 import urllib.parse
-import re
 import aiohttp
+from logging.handlers import RotatingFileHandler
 from pyrogram import Client
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
+# transfer_core.py (shared with the main server) sits next to this file on worker machines;
+# run from the repo, it is telestore/transfer_core.py
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "telestore"))
+from transfer_core import (HEAD_BYTES, HTML_NAMES, SpeedMeter, check_download, eta_seconds,  # noqa: E402,F401
+                           is_google_limit, looks_like_html, retry_after_flood)
+
+LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 logger = logging.getLogger("tele_worker")
+# Kept across restarts: logs/worker.log next to this file (5 files of 10 MB)
+LOG_DIR = os.getenv("LOG_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs"))
+try:
+    os.makedirs(LOG_DIR, exist_ok=True)
+    _file_log = RotatingFileHandler(os.path.join(LOG_DIR, "worker.log"), maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8")
+    _file_log.setFormatter(logging.Formatter(LOG_FORMAT))
+    logging.getLogger().addHandler(_file_log)
+except OSError as e:
+    logger.warning(f"Logs are not kept in a file ({e})")
 
 MASTER_URL = os.getenv("MASTER_URL", "http://localhost:8000").rstrip("/")
 WORKER_KEY = os.getenv("WORKER_KEY", "").strip()
@@ -35,36 +48,7 @@ HEADERS = {
 }
 
 def is_gdrive_quota_error(msg: str) -> bool:
-    m = msg.lower()
-    return (
-        "too many users have viewed or downloaded" in m or
-        "too many users have downloaded" in m or
-        "quota exceeded" in m or
-        "download quota" in m
-    )
-
-# A finished download must be the file: not an error page the source sent instead (Google Drive
-# answers "200 OK" with a small notice when its download limit is reached), and all of it.
-# The same checks as the master's telestore/services/download_check.py.
-HTML_NAMES = (".htm", ".html", ".xhtml", ".shtml", ".mht", ".mhtml")
-HEAD_BYTES = 4096
-_QUOTA_PAGE = re.compile(r"too many users have (viewed or )?downloaded|download quota|quota (was |has been )?exceeded", re.I)
-
-
-def looks_like_html(head: bytes) -> bool:
-    start = head[:1024].lstrip(b"\xef\xbb\xbf \t\r\n").lower()
-    return start.startswith((b"<!doctype html", b"<html")) or (start.startswith(b"<") and b"<html" in start and b"<head" in head[:HEAD_BYTES].lower())
-
-
-def check_download(filename: str, received: int, expected: int, head: bytes) -> None:
-    """Raises when the bytes received aren't [filename] as the source announced it."""
-    if head and not (filename or "").lower().endswith(HTML_NAMES) and looks_like_html(head):
-        text = re.sub(r"<[^>]+>", " ", head.decode("utf-8", "ignore"))
-        if _QUOTA_PAGE.search(text):
-            raise RuntimeError(f"Google Drive daily download quota exceeded for '{filename}' (it sent a notice instead of the file).")
-        raise RuntimeError(f"The source sent a web page instead of '{filename}' ({received} bytes). Check the link, or try again later.")
-    if expected and expected > 0 and received != expected:
-        raise RuntimeError(f"Only part of '{filename}' arrived: {received} of {expected} bytes. Try again.")
+    return is_google_limit(msg)
 
 
 class TaskCancelled(Exception):
@@ -86,6 +70,7 @@ class DistributedWorker:
         self.session: aiohttp.ClientSession = None
         self.running = True
         self.bot_clients = {}
+        self.last_report = {}  # task_id → the last progress sent (resent while waiting for Telegram)
         os.makedirs(WORK_DIR, exist_ok=True)
 
     async def get_or_create_bot(self, token: str, api_id: int, api_hash: str) -> Client:
@@ -122,7 +107,8 @@ class DistributedWorker:
                 logger.warning(f"Heartbeat failed: {e}")
             await asyncio.sleep(15)
 
-    async def report_progress(self, task_id: str, transferred: int, total: int, speed: int, progress: float, eta: int, phase: str):
+    async def report_progress(self, task_id: str, transferred: int, total: int, speed: int, progress: float, eta: int, phase: str,
+                              stage: str = "download"):
         try:
             payload = {
                 "task_id": task_id,
@@ -130,10 +116,14 @@ class DistributedWorker:
                 "transferred_bytes": transferred,
                 "filesize": total,
                 "speed_bps": speed,
+                "stage": stage,
+                "download_bps": speed if stage == "download" else 0,
+                "upload_bps": speed if stage == "upload" else 0,
                 "progress": progress,
                 "eta_seconds": eta,
                 "phase": phase
             }
+            self.last_report[task_id] = payload
             async with self.session.post(
                 f"{MASTER_URL}/api/worker/update-progress",
                 headers=HEADERS,
@@ -152,21 +142,41 @@ class DistributedWorker:
     def upload_progress(self, task_id: str, label: str):
         """A Telegram upload's progress callback: tells the master every few seconds that this worker is
         still busy, so a long upload isn't taken back as abandoned."""
-        state = {"start": time.time(), "last": 0.0}
+        state = {"last": 0.0}
+        meter = SpeedMeter()
 
         async def progress(current: int, total: int):
             now = time.time()
+            speed = meter.update(current)
             if now - state["last"] < UPLOAD_REPORT_SECONDS:
                 return
             state["last"] = now
-            speed = int(current / max(0.1, now - state["start"]))
             prog = round(current / total * 100, 1) if total else 0
-            eta = int((total - current) / speed) if (total > current and speed > 0) else 0
+            eta = eta_seconds(total - current, speed)
             try:
-                await self.report_progress(task_id, current, total, speed, prog, eta, f"{label} @ {round(speed/1024/1024, 1)} MB/s ({prog}%)")
+                await self.report_progress(task_id, current, total, speed, prog, eta, f"{label} @ {round(speed/1024/1024, 1)} MB/s ({prog}%)", "upload")
             except TaskCancelled:
                 pass  # an upload can't stop half-way; the master ignores its result
         return progress
+
+    async def send(self, upload, task_id: str):
+        """A Telegram upload; when Telegram says to slow down (FLOOD_WAIT), waits as long as it asks and tries again."""
+        def waiting(seconds: int):
+            logger.warning(f"Telegram asks to wait {seconds} s before sending more (task {task_id}); trying again then.")
+
+        async def wait(seconds: float):
+            # Still busy with it: the master takes back a task that goes quiet for 2 minutes
+            end = time.monotonic() + seconds
+            while (left := end - time.monotonic()) > 0:
+                last = self.last_report.get(task_id)
+                if last:
+                    try:
+                        await self.report_progress(task_id, last["transferred_bytes"], last["filesize"], 0, last["progress"], int(left),
+                                                   f"Telegram asks to wait {int(left)} s before sending more", "upload")
+                    except TaskCancelled:
+                        pass  # the upload is stopped by its own result being ignored
+                await asyncio.sleep(min(30, left))
+        return await retry_after_flood(upload, on_wait=waiting, sleep=wait)
 
     async def report_complete(self, payload: dict):
         try:
@@ -271,8 +281,8 @@ class DistributedWorker:
                         chunk_size = 512 * 1024
                         transferred = 0
                         head = b""
-                        start_time = time.time()
-                        last_rep_time = start_time
+                        meter = SpeedMeter()
+                        last_rep_time = time.time()
                         while True:
                             chunk = await resp.content.read(chunk_size)
                             if not chunk:
@@ -282,12 +292,11 @@ class DistributedWorker:
                             pf.write(chunk)
                             transferred += len(chunk)
                             now = time.time()
+                            speed = meter.update(transferred)
                             if now - last_rep_time >= 1.5:
                                 last_rep_time = now
-                                elapsed = max(0.1, now - start_time)
-                                speed = int(transferred / elapsed)
                                 prog = round((transferred / part_size) * 100, 1) if part_size > 0 else 0
-                                eta = int((part_size - transferred) / speed) if (part_size > transferred and speed > 0) else 0
+                                eta = eta_seconds(part_size - transferred, speed)
                                 phase = f"Leeching Part {part_index}/{total_parts} @ {round(speed/1024/1024, 1)} MB/s ({prog}%)"
                                 await self.report_progress(task_id, transferred, part_size, speed, prog, eta, phase)
 
@@ -296,17 +305,17 @@ class DistributedWorker:
                 # Upload part file to Telegram Cloud
                 step = "uploading to Telegram"
                 logger.info(f"Worker {WORKER_ID} uploading Part {part_index}/{total_parts} ({transferred} bytes) to Telegram...")
-                await self.report_progress(task_id, transferred, part_size, 0, 99.0, 0, f"Uploading Part {part_index}/{total_parts} to Telegram ☁️")
+                await self.report_progress(task_id, transferred, part_size, 0, 99.0, 0, f"Uploading Part {part_index}/{total_parts} to Telegram ☁️", "upload")
                 target_name = f"{filename}.part{part_index}"
                 caption = f"{filename} (Part {part_index})"
-                msg = await bot.send_document(
+                msg = await self.send(lambda: bot.send_document(
                     chat_id=chat_id,
                     document=part_path,
                     caption=caption,
                     file_name=target_name,
                     force_document=True,
                     progress=self.upload_progress(task_id, f"Uploading Part {part_index}/{total_parts} to Telegram ☁️")
-                )
+                ), task_id)
                 uniq_id = getattr(msg.document, "file_unique_id", f"w_{msg.id}")
 
                 try:
@@ -369,7 +378,7 @@ class DistributedWorker:
 
                 transferred = 0
                 part_index = 1
-                start_time = time.time()
+                meter = SpeedMeter()
                 last_rep_time = 0
 
                 current_part_path = os.path.join(task_dir, f"{filename}.part{part_index}")
@@ -389,18 +398,18 @@ class DistributedWorker:
                         if is_single:
                             try:
                                 if ext in ['.mp4', '.mkv', '.avi', '.mov', '.webm']:
-                                    msg = await bot.send_video(chat_id=chat_id, video=p_path, caption=caption, file_name=target_name, progress=progress)
+                                    msg = await self.send(lambda: bot.send_video(chat_id=chat_id, video=p_path, caption=caption, file_name=target_name, progress=progress), task_id)
                                 elif ext in ['.mp3', '.wav', '.ogg', '.flac', '.m4a']:
-                                    msg = await bot.send_audio(chat_id=chat_id, audio=p_path, caption=caption, file_name=target_name, progress=progress)
+                                    msg = await self.send(lambda: bot.send_audio(chat_id=chat_id, audio=p_path, caption=caption, file_name=target_name, progress=progress), task_id)
                                 elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
-                                    msg = await bot.send_photo(chat_id=chat_id, photo=p_path, caption=caption, progress=progress)
+                                    msg = await self.send(lambda: bot.send_photo(chat_id=chat_id, photo=p_path, caption=caption, progress=progress), task_id)
                                 else:
-                                    msg = await bot.send_document(chat_id=chat_id, document=p_path, caption=caption, file_name=target_name, force_document=True, progress=progress)
+                                    msg = await self.send(lambda: bot.send_document(chat_id=chat_id, document=p_path, caption=caption, file_name=target_name, force_document=True, progress=progress), task_id)
                             except Exception as upload_err:
                                 logger.warning(f"[WORKER_UPLOAD] Specialized upload failed ({upload_err}), falling back to document upload...")
-                                msg = await bot.send_document(chat_id=chat_id, document=p_path, caption=caption, file_name=target_name, force_document=True, progress=progress)
+                                msg = await self.send(lambda: bot.send_document(chat_id=chat_id, document=p_path, caption=caption, file_name=target_name, force_document=True, progress=progress), task_id)
                         else:
-                            msg = await bot.send_document(chat_id=chat_id, document=p_path, caption=caption, file_name=target_name, force_document=True, progress=progress)
+                            msg = await self.send(lambda: bot.send_document(chat_id=chat_id, document=p_path, caption=caption, file_name=target_name, force_document=True, progress=progress), task_id)
 
                         file_obj = msg.document or msg.video or msg.audio or (msg.photo and msg.photo[-1] if isinstance(msg.photo, list) else msg.photo)
                         uniq_id = getattr(file_obj, "file_unique_id", f"w_{msg.id}")
@@ -435,12 +444,11 @@ class DistributedWorker:
                     part_bytes_written += chunk_len
 
                     now = time.time()
+                    speed = meter.update(transferred)
                     if now - last_rep_time >= 1.5:
                         last_rep_time = now
-                        elapsed = max(0.1, now - start_time)
-                        speed = int(transferred / elapsed)
                         prog = round((transferred / filesize) * 100, 1) if filesize > 0 else 0
-                        eta = int((filesize - transferred) / speed) if (filesize > transferred and speed > 0) else 0
+                        eta = eta_seconds(filesize - transferred, speed)
                         phase = f"Leeching @ {round(speed/1024/1024, 1)} MB/s ({prog}%)"
                         await self.report_progress(task_id, transferred, filesize, speed, prog, eta, phase)
 
@@ -460,6 +468,13 @@ class DistributedWorker:
 
                 current_part_file.close()
                 check_download(filename, transferred, announced, head)
+
+                if transferred == 0:
+                    # The download finished and the file is empty: Telegram can't hold 0 bytes, the master saves a record
+                    logger.info(f"Task {task_id}: '{filename}' is empty; reported as a 0-byte file.")
+                    await self.report_complete({"task_id": task_id, "user_id": user_id, "chat_id": chat_id, "destination_path": dest_path,
+                                                "file_name": filename, "file_size": 0, "is_vault": is_vault, "is_empty": True})
+                    return
 
                 # Final part
                 is_single = (part_index == 1)
@@ -520,6 +535,7 @@ class DistributedWorker:
             is_quota = is_gdrive_quota_error(err_msg)
             await self.report_fail(task_id, err_msg, is_quota)
         finally:
+            self.last_report.pop(task_id, None)
             shutil.rmtree(task_dir, ignore_errors=True)
 
     async def run(self):

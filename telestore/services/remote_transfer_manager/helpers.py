@@ -2,6 +2,8 @@
 
 import os
 import re
+
+from telestore.transfer_core import GoogleLimitReached, is_google_limit
 from typing import Optional, Dict
 from datetime import datetime, timezone
 import urllib.parse
@@ -24,20 +26,12 @@ def get_file_type(fname: str) -> str:
         return "photo"
     return "document"
 
-class GoogleDriveQuotaExceededError(RuntimeError):
-    """Raised when Google Drive rate limits public downloads due to daily quota exhaustion."""
-    pass
+# Google Drive's download limit (raised by downloads, waited out by the queue); shared with worker machines
+GoogleDriveQuotaExceededError = GoogleLimitReached
+
 
 def is_gdrive_quota_error(err: Exception) -> bool:
-    if isinstance(err, GoogleDriveQuotaExceededError):
-        return True
-    msg = str(err).lower()
-    return (
-        "too many users have viewed or downloaded" in msg or
-        "too many users have downloaded" in msg or
-        "quota exceeded" in msg or
-        "download quota" in msg
-    )
+    return is_google_limit(err)
 
 _GOOGLE_ERRORS = (
     # (pattern in the raw error, what the user reads)
@@ -293,3 +287,26 @@ async def finalize_multipart_group_if_ready(group_id: str, sample_task_doc: dict
     )
     logger.info(f"[MULTI_RANGE] Group {group_id}: Successfully finalized multi-part file '{file_name}' ({len(parts)} parts) into database!")
     return True
+
+
+def google_limit_pause(task_doc: dict, now: datetime, machine: Optional[str] = None) -> dict:
+    """The update that makes one file wait for Google's download limit (only that file: the limit is
+    per file, the rest of its folder carries on). It waits 6 h, then 12 h, then 24 h if it hits the
+    limit again, and the queue resumes it by itself (cooldown_until)."""
+    from datetime import timedelta
+    from telestore.transfer_core import google_limit_wait_hours
+    hits = int(task_doc.get("quota_hits") or 0)
+    until = now + timedelta(hours=google_limit_wait_hours(hits))
+    where = f" (on {machine})" if machine else ""
+    return {
+        "$set": {
+            "status": "paused_quota",
+            "cooldown_until": until,
+            "quota_hits": hits + 1,
+            "phase": f"Google's download limit for this file{where}. Tries again at {until.strftime('%H:%M')} UTC",
+            "error_message": "Google Drive's download limit for this file was reached. It tries again by itself later.",
+            "speed_bps": 0, "download_bps": 0, "upload_bps": 0,
+            "updated_at": now,
+        },
+        "$unset": {"claimed_by": "", "claimed_at": ""},
+    }

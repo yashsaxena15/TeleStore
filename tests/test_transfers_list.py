@@ -48,7 +48,8 @@ def test_a_big_folder_sends_a_few_rows_and_a_summary():
     ids = [t["task_id"] for t in result["tasks"]]
     assert "rt_single" in ids and "rt_run" in ids and "rt_done" in ids
     assert sum(1 for i in ids if i.startswith("rt_q")) == GROUP_PREVIEW_SIZE
-    assert result["groups"]["grp"] == {
+    group = result["groups"]["grp"]
+    assert {k: group[k] for k in ("total", "counts", "filesize", "transferred_bytes", "speed_bps")} == {
         "total": 38001,
         "counts": {"queued": 31000, "completed": 7000, "downloading": 1},
         "filesize": 9100, "transferred_bytes": 9040, "speed_bps": 5,

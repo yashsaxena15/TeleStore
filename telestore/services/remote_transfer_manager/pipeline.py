@@ -143,9 +143,8 @@ class PipelinedStreamWriter:
             if self._closed:
                 return
             self._closed = True
+            # An empty file has no part to send (Telegram refuses 0 bytes): it is saved as a record instead
             if self.current_part_file is not None and self.current_part_bytes > 0:
-                self._seal_current_part(is_final=True)
-            elif len(self.parts) == 0 and self.current_part_file is not None:
                 self._seal_current_part(is_final=True)
 
     def flush(self):
