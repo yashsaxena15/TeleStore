@@ -762,6 +762,28 @@ test.describe("photos", () => {
         await expect(page.getByText("No favourites yet")).toBeVisible();
     });
 
+    for (const tag of ["", "@phone "]) {
+        test(`${tag}the header buttons sit side by side without overlapping`, async ({ page }) => {
+            await page.goto("/photos");
+            await expect(page.getByRole("heading", { level: 1, name: "Photos" })).toBeVisible();
+            const photos = page.locator(".gphotos").first();
+            const names = ["Collections", "Create", /^Notifications/, "Account and Photos settings"];
+            const boxes = [];
+            for (const name of names) boxes.push(await photos.getByRole("button", { name }).first().boundingBox());
+            const width = page.viewportSize().width;
+            for (let i = 0; i < boxes.length; i++) {
+                expect(boxes[i].width).toBeLessThanOrEqual(48);
+                expect(boxes[i].x + boxes[i].width).toBeLessThanOrEqual(width);
+                if (i) expect(boxes[i].x).toBeGreaterThanOrEqual(boxes[i - 1].x + boxes[i - 1].width - 0.5);
+            }
+            await expect(photos.getByText("Notifications", { exact: true })).toHaveCount(0);
+            await photos.getByRole("button", { name: /^Notifications/ }).click();
+            const list = await page.getByRole("dialog").boundingBox();
+            expect(list.x + list.width).toBeLessThanOrEqual(width);
+            expect(list.y).toBeGreaterThan(boxes[2].y);
+        });
+    }
+
     test("Photos view switches the layout and remembers it", async ({ page }) => {
         await page.goto("/photos");
         await page.getByRole("button", { name: "Account and Photos settings" }).click();
