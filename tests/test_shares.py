@@ -340,6 +340,7 @@ class TestPeople:
         share_id = _share_with(world, "alice", "viewer")
         mine = world.client.get("/shares/mine").json()["shares"]
         assert [s["item"]["name"] for s in mine] == ["Trip"] and mine[0]["members"] == 1
+        assert mine[0]["location"] == "/Home"
         _as(world, ALICE)
         mine_alice = world.client.get("/shares/with-me").json()["shares"]
         assert mine_alice[0]["share_id"] == share_id and mine_alice[0]["owner"]["name"] == "Owner"
