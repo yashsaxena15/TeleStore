@@ -944,6 +944,8 @@ fun MainScreen(
                         onDownload = ::download,
                         onDownloadFolder = { path, name -> downloadShareFolder(shareId, path, name) },
                         onUpload = { path -> uploadToShare(shareId, path) },
+                        onToggleOffline = ::toggleOffline,
+                        offlineIds = offlineIds,
                     )
                 }
                 composable("webdav") { WebDavScreen(container, session, onBack = { navController.popBackStack() }) }

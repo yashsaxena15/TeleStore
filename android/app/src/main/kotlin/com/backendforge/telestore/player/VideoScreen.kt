@@ -679,8 +679,11 @@ private fun Details(
         }
         item {
             LazyRow(contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                item { ActionChip(if (item.starred) Icons.Filled.Star else Icons.Filled.StarBorder, if (item.starred) "Starred" else "Star", onStar) }
-                item { ActionChip(Icons.AutoMirrored.Filled.PlaylistAdd, "Save", onSave) }
+                // Stars and playlists are the viewer's own: not for someone else's shared video
+                if (!item.fromShare) {
+                    item { ActionChip(if (item.starred) Icons.Filled.Star else Icons.Filled.StarBorder, if (item.starred) "Starred" else "Star", onStar) }
+                    item { ActionChip(Icons.AutoMirrored.Filled.PlaylistAdd, "Save", onSave) }
+                }
                 item { ActionChip(Icons.Filled.Download, "Download", onDownload) }
                 item { ActionChip(Icons.Filled.Info, "Info", onInfo) }
             }

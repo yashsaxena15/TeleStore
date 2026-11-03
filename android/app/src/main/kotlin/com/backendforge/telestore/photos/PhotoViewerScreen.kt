@@ -414,7 +414,8 @@ private fun ViewerMenu(
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, containerColor = Color.Black) {
         MenuRow(Icons.Outlined.Info, "About", pick(onAbout))
         HorizontalDivider(color = Color(0xFF46464F))
-        if (source.item != null) {
+        // Archive is the owner's: not for someone else's shared photo
+        if (source.item != null && !source.item.fromShare) {
             if (source.item.archived) MenuRow(Icons.Outlined.Unarchive, "Unarchive", pick(onArchive))
             else MenuRow(Icons.Outlined.Archive, "Archive", pick(onArchive))
         }

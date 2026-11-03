@@ -95,7 +95,7 @@ class TransferStore(context: Context) {
 
     /** A finished download of this server file, if its local copy still exists. */
     fun offlineCopy(context: Context, fileId: String): Uri? {
-        val item = _items.value.lastOrNull { it.fileId == fileId && it.remotePath == null && it.status == TransferStatus.DONE && it.localUri != null } ?: return null
+        val item = _items.value.lastOrNull { it.fileId == fileId && (it.remotePath == null || it.offline) && it.status == TransferStatus.DONE && it.localUri != null } ?: return null
         // A copy inside the app is handed out through the app's FileProvider (players, viewers, other apps)
         val uri = if (item.offline) OfflineFiles.shareable(context, Uri.parse(item.localUri)) ?: return null else Uri.parse(item.localUri)
         val exists = runCatching { context.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false }.getOrDefault(false)
@@ -104,7 +104,7 @@ class TransferStore(context: Context) {
 
     /** Server files that have a downloaded copy on this phone (for the "Offline" label). */
     fun offlineIds(): Set<String> = _items.value
-        .filter { it.status == TransferStatus.DONE && it.fileId != null && it.remotePath == null }
+        .filter { it.status == TransferStatus.DONE && it.fileId != null && (it.remotePath == null || it.offline) }
         .mapNotNull { it.fileId }.toSet()
 
     @Synchronized

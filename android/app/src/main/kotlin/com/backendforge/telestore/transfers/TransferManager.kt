@@ -59,7 +59,11 @@ class TransferManager(private val context: Context) {
     fun saveOffline(items: List<FileItem>, folder: String? = null): Int {
         val kept = store.items.value.filter { it.offline && (it.status == TransferStatus.DONE || !it.status.finished) }.mapNotNull { it.fileId }.toSet()
         val transfers = items.filter { !it.isFolder && it.id !in kept }.map {
-            PhoneTransfer(direction = Direction.DOWNLOAD, name = it.name, size = it.size ?: 0, fileId = it.id, offline = true, offlineFolder = folder)
+            PhoneTransfer(
+                direction = Direction.DOWNLOAD, name = it.name, size = it.size ?: 0, fileId = it.id, offline = true, offlineFolder = folder,
+                // Someone else's shared file comes through its share
+                remotePath = it.shareId?.let { share -> "/shares/$share/dl/${it.id}" },
+            )
         }
         store.add(transfers)
         transfers.forEach { enqueue(it) }

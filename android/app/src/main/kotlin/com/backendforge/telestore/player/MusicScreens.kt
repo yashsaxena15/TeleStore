@@ -232,10 +232,12 @@ fun NowPlayingScreen(state: MusicState, controller: MusicController, container: 
                         Text(state.artist, color = muted, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     if (state.isPlaying) EqualizerBars(onGround.copy(alpha = 0.85f))
-                    // The heart: Liked music (a playlist on both the app and the website)
+                    // The heart: Liked music (a playlist on both the app and the website). Liked music,
+                    // playlists and stars are the listener's own: not for someone else's shared song
+                    val ownSong = item?.fromShare != true
                     val isLiked = item?.id in liked
                     val heartScale by animateFloatAsState(if (isLiked) 1f else 0.9f, spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "heart")
-                    IconButton(onClick = {
+                    if (ownSong) IconButton(onClick = {
                         val song = item ?: return@IconButton
                         haptics.click()
                         scope.launch {
@@ -254,7 +256,7 @@ fun NowPlayingScreen(state: MusicState, controller: MusicController, container: 
                             tint = onGround, modifier = Modifier.scale(heartScale),
                         )
                     }
-                    IconButton(onClick = {
+                    if (ownSong) IconButton(onClick = {
                         val song = item ?: return@IconButton
                         scope.launch {
                             try {
@@ -272,7 +274,7 @@ fun NowPlayingScreen(state: MusicState, controller: MusicController, container: 
                 }
 
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
-                    item { Chip(Icons.AutoMirrored.Filled.PlaylistAdd, "Add to playlist", onGround) { item?.let { container.playlists.requestAdd(listOf(it)) } } }
+                    if (item?.fromShare != true) item { Chip(Icons.AutoMirrored.Filled.PlaylistAdd, "Add to playlist", onGround) { item?.let { container.playlists.requestAdd(listOf(it)) } } }
                     item { Chip(Icons.Filled.Download, "Download", onGround) { item?.let { container.transfers.download(it); message = "Downloading ${it.name}. See Transfers." } } }
                     item { Chip(Icons.Filled.Lyrics, "Lyrics", onGround) { sheet = MusicSheet.LYRICS } }
                     item { Chip(Icons.Filled.Bedtime, state.sleepLabel ?: "Sleep timer", onGround) { sheet = MusicSheet.SLEEP } }
