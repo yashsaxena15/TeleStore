@@ -170,6 +170,10 @@ def task_finished(task_id: str) -> None:
                 title, body = f"{what} finished", f"{name}: {done} file(s) saved." if done != 1 else f"{name} saved."
             target = {"type": "transfers"} if failed else _folder_target(task.get("destination_path"))
             record(owner, kind, title, body, target, dedupe=f"group:{group_id}")
+            if task.get("group_folder_id"):
+                # A Drive folder copy: list the folder again and copy what is missing
+                from telestore.services.remote_transfer_manager.folder_check import check_in_background
+                check_in_background(group_id)
         else:
             name = task.get("filename") or "File"
             if task["status"] == "failed":

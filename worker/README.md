@@ -22,6 +22,15 @@ Cloud providers often cap VPS network cards at 50–100 Mbps (5–12 MB/s). By a
 
 ---
 
+## Files on a worker machine
+
+A worker runs `worker.py` with `transfer_core.py` beside it. That second file is
+`telestore/transfer_core.py` from this repo, shared with the main server (download checks,
+speeds, Google's per-file limit, Telegram's rate limit): copy both whenever either changes.
+Logs are kept in `logs/worker.log` next to them (5 files of 10 MB), across restarts.
+
+---
+
 ## How to Add a Worker VM (3 Simple Steps)
 
 ### Step 1: Ensure Master has a Secret Key

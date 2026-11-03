@@ -1,6 +1,6 @@
 # telestore/api/routes/remote_transfer.py
 
-from fastapi import APIRouter, Request, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Request, Depends, HTTPException, UploadFile, File, Form, Query
 from pydantic import BaseModel, Field
 import asyncio
 import posixpath
@@ -158,6 +158,32 @@ async def resume_remote_group(
     user_id = str(user.telegram_user_id or user.username)
     resumed_count = remote_transfer_manager.resume_group(body.group_id, user_id)
     return {"success": True, "resumed_count": resumed_count, "message": f"Resumed {resumed_count} transfer(s) in folder."}
+
+@router.get("/groups/{group_id}/tasks")
+async def get_remote_group_tasks(
+    group_id: str,
+    filter: str = Query("all", pattern="^(all|active|waiting|failed|done)$"),
+    q: str = Query("", max_length=200),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    user: User = Depends(require_auth)
+):
+    """One folder copy's files, a page at a time, with search and a filter."""
+    user_id = str(user.telegram_user_id or user.username)
+    page = await asyncio.to_thread(remote_transfer_manager.get_group_tasks, user_id, group_id, filter, q, offset, limit)
+    if page is None:
+        raise HTTPException(status_code=404, detail="Folder transfer not found.")
+    return page
+
+@router.post("/retry-failed")
+async def retry_failed_in_group(
+    body: ResumeRemoteGroupModel,
+    user: User = Depends(require_upload)
+):
+    """Queue a folder copy's failed files again (only those)."""
+    user_id = str(user.telegram_user_id or user.username)
+    count = remote_transfer_manager.retry_failed(body.group_id, user_id)
+    return {"success": True, "retried_count": count, "message": f"Retrying {count} failed file(s)."}
 
 @router.post("/retry")
 async def retry_remote_task(

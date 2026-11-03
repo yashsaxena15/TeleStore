@@ -40,6 +40,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$SCRIPT_DIR/worker.py" ]; then
     sudo -u "$TARGET_USER" cp "$SCRIPT_DIR/worker.py" "$TARGET_DIR/worker.py"
     sudo -u "$TARGET_USER" cp "$SCRIPT_DIR/requirements.txt" "$TARGET_DIR/requirements.txt"
+    # Shared with the main server: download checks, speeds, Google's limit, Telegram's rate limit
+    sudo -u "$TARGET_USER" cp "$SCRIPT_DIR/../telestore/transfer_core.py" "$TARGET_DIR/transfer_core.py"
 fi
 
 echo "[3/4] Installing Python dependencies in venv..."

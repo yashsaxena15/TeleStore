@@ -130,6 +130,24 @@ class Files(Collection):
             logger.warning(f"'{file_name}' (message {message_id}) is already recorded in {existing.get('file_path')}; left there instead of {file_path}")
         return existing
 
+    def save_empty(self, file_name: str, file_path: str, owner_id: str, file_type: str = "document", file_caption: str = None,
+                   is_vault: bool = False, key: str = None) -> dict:
+        """Records an empty file (0 bytes). Telegram can't hold one, so it is a record with no message
+        behind it; an existing file of that name in [file_path] is emptied instead of doubled."""
+        from datetime import datetime, timezone
+        import secrets
+        empty = {"chat_id": None, "message_id": None, "file_unique_id": f"empty_{key or secrets.token_hex(8)}", "file_size": 0,
+                 "thumbnail": None, "file_type": file_type, "parts": None, "is_split": False,
+                 "modified_date": datetime.now(timezone.utc).isoformat()}
+        existing = self.find_one({"file_name": file_name, "file_path": file_path, "owner_id": owner_id, "trashed": {"$ne": True}})
+        if existing:
+            self.update_one({"_id": existing["_id"]}, {"$set": empty})
+            return {**existing, **empty}
+        doc = {**empty, "file_name": file_name, "file_caption": file_caption or f"Uploaded file: {file_name}", "file_path": file_path,
+               "owner_id": owner_id, "starred": False, "trashed": False, "is_vault": bool(is_vault)}
+        self.insert_one(doc)
+        return doc
+
     def add_multipart_file(
         self,
         chat_id: int,

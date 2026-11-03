@@ -72,9 +72,10 @@ class TimeZoneFormatter(logging.Formatter):
         return f"{time_str} - {name_str} - {func_str} - {level_str} - {msg_str}"
 
 def setup_logger(name=__name__, log_level=logging.INFO):
-    log_dir = "logs"
+    # LOG_DIR keeps logs across restarts and rebuilds (docker-compose points it at the cache volume)
+    log_dir = os.getenv("LOG_DIR", "logs")
     if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
+        os.makedirs(log_dir, exist_ok=True)
     
     logger = logging.getLogger(name)
     logger.setLevel(log_level)
@@ -112,4 +113,11 @@ def setup_logger(name=__name__, log_level=logging.INFO):
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
     logger.propagate = False
+    # Loggers made with logging.getLogger (transfers, workers' routes, uvicorn…) go to the same file
+    root = logging.getLogger()
+    if not any(getattr(h, "_telestore_file", False) for h in root.handlers):
+        file_handler._telestore_file = True
+        root.addHandler(file_handler)
+        if root.level > log_level or root.level == logging.NOTSET:
+            root.setLevel(log_level)
     return logger

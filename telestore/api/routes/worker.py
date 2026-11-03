@@ -1,6 +1,6 @@
 # telestore/api/routes/worker.py
 
-from telestore.services.remote_transfer_manager.helpers import friendly_error
+from telestore.services.remote_transfer_manager.helpers import friendly_error, google_limit_pause
 from telestore.services import event_service
 from fastapi import APIRouter, Request, HTTPException, Header, Depends, status
 from telestore.security.credentials import require_admin
@@ -60,6 +60,10 @@ class ProgressUpdateModel(BaseModel):
     progress: float
     eta_seconds: int
     phase: str
+    # Newer workers: the step ("download" or "upload") and each side's speed now
+    stage: Optional[str] = None
+    download_bps: Optional[int] = None
+    upload_bps: Optional[int] = None
 
 
 class CompleteTaskModel(BaseModel):
@@ -73,6 +77,7 @@ class CompleteTaskModel(BaseModel):
     is_vault: bool = False
     is_multipart: bool = False
     is_range_part: bool = False
+    is_empty: bool = False  # a 0-byte file: nothing was sent to Telegram, it is saved as a record
     part_info: Optional[Dict[str, Any]] = None
     # Single part:
     message_id: Optional[int] = None
@@ -163,6 +168,7 @@ async def claim_task(
             "$set": {
                 "status": "downloading",
                 "claimed_by": body.worker_id,
+                "worker": body.worker_id,
                 "claimed_at": now,
                 "phase": f"Leeching via Worker ({body.worker_id})",
                 "updated_at": now
@@ -234,11 +240,15 @@ async def update_progress(
         _still_theirs(body.task_id, body.worker_id),
         {
             "$set": {
-                "status": "downloading",
+                "status": "uploading_tg" if body.stage == "upload" else "downloading",
                 "claimed_by": body.worker_id,
+                "worker": body.worker_id,
                 "transferred_bytes": body.transferred_bytes,
                 "filesize": body.filesize,
                 "speed_bps": body.speed_bps,
+                # Older workers send one speed: it is the step they are on
+                "download_bps": body.download_bps if body.download_bps is not None else (0 if body.stage == "upload" else body.speed_bps),
+                "upload_bps": body.upload_bps if body.upload_bps is not None else (body.speed_bps if body.stage == "upload" else 0),
                 "progress": body.progress,
                 "eta_seconds": body.eta_seconds,
                 "phase": f"[{body.worker_id}] {body.phase}",
@@ -305,7 +315,10 @@ async def complete_task(
         file_type = get_file_type(body.file_name)
 
         # 2. Add file record to Files collection
-        if not body.is_multipart and body.message_id:
+        if body.is_empty:
+            database.Files.save_empty(body.file_name, body.destination_path, str(body.user_id), file_type=file_type,
+                                      is_vault=body.is_vault, key=body.task_id)
+        elif not body.is_multipart and body.message_id:
             database.Files.claim_upload(
                 chat_id=body.chat_id,
                 message_id=body.message_id,
@@ -355,7 +368,8 @@ async def complete_task(
                 "progress": 100,
                 "transferred_bytes": body.file_size,
                 "filesize": body.file_size,
-                "phase": f"Completed via {body.worker_id} 🎉",
+                "phase": f"Completed via {body.worker_id} 🎉" if not body.is_empty else f"Completed via {body.worker_id} (an empty file, 0 bytes)",
+                "speed_bps": 0, "download_bps": 0, "upload_bps": 0, "eta_seconds": 0,
                 "error_message": None,
                 "updated_at": now
             }
@@ -382,23 +396,10 @@ async def fail_task(
         return {"status": "ignored"}
 
     if body.is_quota_error:
-        # Put task in 24h cooldown paused_quota
-        cooldown_until = now + timedelta(hours=24)
-        target_time = cooldown_until.strftime("%H:%M UTC")
-        coll.update_one(
-            theirs,
-            {
-                "$set": {
-                    "status": "paused_quota",
-                    "cooldown_until": cooldown_until,
-                    "phase": f"Google Drive quota reached on {body.worker_id}. Auto-resumes at {target_time} 🕒",
-                    "error_message": body.error_message,
-                    "updated_at": now
-                },
-                "$unset": {"claimed_by": "", "claimed_at": ""}
-            }
-        )
-        logger.warning(f"[WORKER_QUOTA] Task {body.task_id} hit Google Drive quota on {body.worker_id}. Paused for 24h.")
+        # Only this file waits for Google's limit (it is per file); the queue resumes it by itself
+        task = coll.find_one({"task_id": body.task_id}, {"quota_hits": 1}) or {}
+        coll.update_one(theirs, google_limit_pause(task, now, body.worker_id))
+        logger.warning(f"[WORKER_QUOTA] Task {body.task_id} hit Google Drive's limit on {body.worker_id}. Only this file waits.")
     else:
         coll.update_one(
             theirs,
@@ -408,6 +409,7 @@ async def fail_task(
                     "error_message": friendly_error(body.error_message),
                     "error_detail": f"[{body.worker_id}] {body.error_message}"[:2000],
                     "phase": f"Failed: {body.error_message[:60]}",
+                    "speed_bps": 0, "download_bps": 0, "upload_bps": 0,
                     "updated_at": now
                 }
             }
