@@ -15,6 +15,8 @@ import { ProtectionDialog } from "@/features/protection/ProtectionDialog";
 // Sign-in and the 404 page are only needed when shown
 const Login = lazy(() => import("@/features/auth/Login"));
 const NotFound = lazy(() => import("@/app/pages/NotFound"));
+// The public page of a shared link (no sign-in)
+const SharedLink = lazy(() => import("@/app/pages/SharedLink"));
 const queryClient = new QueryClient();
 // Debug component to log current route
 const RouteDebugger = () => {
@@ -28,6 +30,7 @@ const AppRoutes = () => {
       <RouteDebugger />
       <Routes>
         <Route path="/login" element={<Suspense fallback={null}><Login /></Suspense>}/>
+        <Route path="/s/:token" element={<Suspense fallback={null}><SharedLink /></Suspense>}/>
         <Route path="/settings" element={<Index />}/>
         <Route path="/profile" element={<Index />}/>
         <Route path="/downloads" element={<Index />}/>
@@ -36,6 +39,8 @@ const AppRoutes = () => {
         <Route path="/photos" element={<Index />}/>
         <Route path="/playlists/*" element={<Index />}/>
         <Route path="/offline" element={<Index />}/>
+        <Route path="/shared-with-me" element={<Index />}/>
+        <Route path="/shared-by-me" element={<Index />}/>
         <Route path="/users" element={<Index />}/>
         <Route path="/" element={<Index />}/>
         {/* Handle dynamic paths for file explorer */}

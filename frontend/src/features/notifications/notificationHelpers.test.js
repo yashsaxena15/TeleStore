@@ -26,6 +26,7 @@ describe("targetRoute", () => {
         expect(targetRoute({ type: "transfers" })).toEqual({ view: "transfers" });
         expect(targetRoute({ type: "playlists" })).toEqual({ view: "playlists" });
         expect(targetRoute({ type: "settings" })).toEqual({ view: "settings" });
+        expect(targetRoute({ type: "shared", share_id: "sh_1" })).toEqual({ view: "shared-with-me" });
         expect(targetRoute({ type: "folder", path: "/Home/Music" })).toEqual({ folderPath: "/Home/Music" });
         expect(targetRoute({ type: "file", path: "/Telegram Inbox", id: "f1" })).toEqual({ folderPath: "/Telegram Inbox" });
         expect(targetRoute({ type: "folder" })).toEqual({ view: "files" });

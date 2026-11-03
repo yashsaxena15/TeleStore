@@ -192,6 +192,8 @@ export async function request(path, { method = 'GET', body, query, timeout, fall
 
 const post = (path, body, opts = {}) => request(path, { method: 'POST', body, ...opts });
 const put = (path, body, opts = {}) => request(path, { method: 'PUT', body, ...opts });
+const patch = (path, body, opts = {}) => request(path, { method: 'PATCH', body, ...opts });
+const del = (path, opts = {}) => request(path, { method: 'DELETE', ...opts });
 const enc = encodeURIComponent;
 const withToken = (url) => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
@@ -262,6 +264,26 @@ export const api = {
     getStorageAnalytics: () => request('/files/analytics', { fallback: 'Failed to fetch storage analytics' }),
     uploadFile: (file, path = '/', onProgress) => uploadFile(file, path, onProgress),
     uploadFileChunked: (file, path = '/', onProgress) => uploadFileChunked(file, path, onProgress),
+
+    // ── Sharing (docs/sharing-api.md) ──────────────────────────────────
+    // The Share dialog: each change answers with the item's ShareView
+    getShare: (itemId) => request(`/shares/item/${enc(itemId)}`, { fallback: "Couldn't load sharing" }),
+    updateShareLink: (itemId, settings) => put(`/shares/item/${enc(itemId)}/link`, settings, { fallback: "Couldn't change the link" }),
+    resetShareLink: (itemId) => post(`/shares/item/${enc(itemId)}/link/reset`, undefined, { fallback: "Couldn't reset the link" }),
+    addShareMember: (itemId, who, role) => post(`/shares/item/${enc(itemId)}/members`, { who, role }, { fallback: "Couldn't add that person" }),
+    changeShareMember: (itemId, userId, role) => patch(`/shares/item/${enc(itemId)}/members/${enc(userId)}`, { role }, { fallback: "Couldn't change the role" }),
+    removeShareMember: (itemId, userId) => del(`/shares/item/${enc(itemId)}/members/${enc(userId)}`, { fallback: "Couldn't remove that person" }),
+    stopSharing: (itemId) => del(`/shares/item/${enc(itemId)}`, { fallback: "Couldn't stop sharing" }),
+    sharedByMe: () => request('/shares/mine', { timeout: 15000, fallback: "Couldn't load your shared items" }),
+    sharedWithMe: () => request('/shares/with-me', { timeout: 15000, fallback: "Couldn't load what's shared with you" }),
+    // Inside a share you're a member of (paths are relative to the shared folder; "" is the folder itself)
+    browseShare: (shareId, path = '') => request(`/shares/${enc(shareId)}/browse`, { query: { path }, timeout: 15000, fallback: "Couldn't open this shared folder" }),
+    shareZipInfo: (shareId, path = '') => request(`/shares/${enc(shareId)}/zip-info`, { query: { path }, timeout: 30000, fallback: "Couldn't prepare the download" }),
+    shareNewFolder: (shareId, path, name) => post(`/shares/${enc(shareId)}/folders`, { path, name }, { fallback: "Couldn't create the folder" }),
+    shareRename: (shareId, fileId, newName) => post(`/shares/${enc(shareId)}/rename`, { file_id: fileId, new_name: newName }, { fallback: "Couldn't rename it" }),
+    shareMove: (shareId, fileId, targetPath) => post(`/shares/${enc(shareId)}/move`, { file_id: fileId, target_path: targetPath }, { fallback: "Couldn't move it" }),
+    shareTrash: (shareId, fileId) => post(`/shares/${enc(shareId)}/trash`, { file_id: fileId }, { fallback: "Couldn't move it to Trash" }),
+    shareUpload: (shareId, file, path, onProgress) => uploadFileChunked(file, path, onProgress, shareId),
 
     // ── Account and users ──────────────────────────────────────────────
     checkAuth: () => request('/auth/check', { timeout: 3000, fallback: 'Failed to check sign-in' }),

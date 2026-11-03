@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, Download, ExternalLink, Star, RotateCcw, Copy, Check, Link as LinkIcon, Info, ShieldCheck } from "lucide-react";
+import { X, Download, ExternalLink, Star, RotateCcw, Copy, Check, Link as LinkIcon, Info, ShieldCheck, Share2, Users } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { getApiBaseUrl, fetchWithTimeout, api } from "@/lib/api";
 import { cn, formatBytes, copyStreamUrl } from "@/lib/utils";
@@ -8,6 +8,8 @@ import { Thumbnail } from "./Thumbnail";
 import { FolderIcon } from "./items/FolderIcon";
 import { getTypeInfo, TYPE_TONE } from "./lib/explorerItems";
 import { getItemDuration, isItemStarred } from "./lib/fileCardHelpers";
+import { canShare } from "@/features/sharing/shareHelpers";
+import { requestShare } from "@/features/sharing/requestShare";
 
 const formatDateTime = (value) => {
     if (!value) return "Unknown";
@@ -64,7 +66,7 @@ const CopyField = ({ label, value, onCopy }) => {
 };
 
 // The body of the details view; used by the desktop side pane and the phone sheet.
-const ItemDetails = ({ item, selectionCount, selectionSize, thumbnailSrc, locationPath, isTrash, isCloud, cloudAccountId, onOpen, onDownload, onToggleStar, onRestore }) => {
+const ItemDetails = ({ item, selectionCount, selectionSize, thumbnailSrc, locationPath, isTrash, isCloud, isVault, onShared, cloudAccountId, onOpen, onDownload, onToggleStar, onRestore }) => {
     const { loading, stats } = useFolderStats(item);
     if (!item) {
         return (<div className="flex flex-col items-center justify-center text-center gap-2 py-16 px-6 text-muted-foreground">
@@ -100,6 +102,7 @@ const ItemDetails = ({ item, selectionCount, selectionSize, thumbnailSrc, locati
         {!isFolder && !isTrash && <button type="button" className={actionBtn} onClick={() => onDownload(item)}><Download className="w-3.5 h-3.5"/>Download</button>}
         {!isTrash && !item.is_virtual && <button type="button" className={actionBtn} onClick={() => onToggleStar(item)} aria-pressed={starred}><Star className={cn("w-3.5 h-3.5", starred && "fill-warning text-warning")}/>{starred ? "Starred" : "Star"}</button>}
         {isTrash && <button type="button" className={actionBtn} onClick={() => onRestore(item)}><RotateCcw className="w-3.5 h-3.5"/>Restore</button>}
+        {!isTrash && !isCloud && !isVault && canShare(item) && <button type="button" className={actionBtn} onClick={() => requestShare(item, onShared)}><Share2 className="w-3.5 h-3.5"/>Share</button>}
         {!isFolder && !isTrash && !isCloud && !item.is_cloud && <button type="button" className={actionBtn} onClick={() => copyStreamUrl(item.name)}><LinkIcon className="w-3.5 h-3.5"/>Stream link</button>}
       </div>
       <dl className="grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs border-t border-border pt-3">
@@ -110,6 +113,7 @@ const ItemDetails = ({ item, selectionCount, selectionSize, thumbnailSrc, locati
         <dt className="text-muted-foreground">Location</dt><dd className="font-mono text-[11.5px] break-all">{item.file_path || locationPath}</dd>
         <dt className="text-muted-foreground">Modified</dt><dd className="font-mono text-[11.5px]">{formatDateTime(item.modified)}</dd>
         {(item.protected || item.protected_by) && (<><dt className="text-muted-foreground">Protection</dt><dd className="flex items-center gap-1 text-[11.5px]"><ShieldCheck className="w-3.5 h-3.5 text-primary" aria-hidden="true"/>{item.protected ? "Protected from deletion" : `Protected by folder “${item.protected_by}”`}</dd></>)}
+        {item.shared && (<><dt className="text-muted-foreground">Sharing</dt><dd className="flex items-center gap-1 text-[11.5px]"><Users className="w-3.5 h-3.5 text-primary" aria-hidden="true"/>Shared</dd></>)}
         {isTrash && item.trashed_at && (<><dt className="text-muted-foreground">Deleted</dt><dd className="font-mono text-[11.5px]">{formatDateTime(item.trashed_at)}</dd></>)}
         {item.message_id && (<><dt className="text-muted-foreground">Telegram</dt><dd className="font-mono text-[11.5px] break-all">message {item.message_id}</dd></>)}
       </dl>

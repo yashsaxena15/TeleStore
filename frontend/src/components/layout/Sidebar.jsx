@@ -144,7 +144,10 @@ export const Sidebar = ({ selectedFilter, activeView = "files", onNavigateView, 
 
       <nav className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar pb-2 ${collapsed ? "px-2" : "px-2"}`}>
         <SectionLabel collapsed={collapsed}>Library</SectionLabel>
-        {LIBRARY.map(({ name, icon: Icon, filter }) => (<button key={filter} onClick={() => onNavigateView("files", filter)} {...dropProps(filter)} className={`${navClass(activeView === "files" && selectedFilter === filter, collapsed)} ${dragOverFilter === filter ? "ring-2 ring-primary ring-inset" : ""}`} title={collapsed ? name : undefined} aria-label={name}>
+        {LIBRARY.map(({ name, icon: Icon, filter, view }) => view ? (<button key={view} onClick={() => onNavigateView(view)} className={navClass(activeView === view, collapsed)} title={collapsed ? name : undefined} aria-label={name}>
+            <Icon className="w-4 h-4 shrink-0"/>
+            {!collapsed && <span className="truncate">{name}</span>}
+          </button>) : (<button key={filter} onClick={() => onNavigateView("files", filter)} {...dropProps(filter)} className={`${navClass(activeView === "files" && selectedFilter === filter, collapsed)} ${dragOverFilter === filter ? "ring-2 ring-primary ring-inset" : ""}`} title={collapsed ? name : undefined} aria-label={name}>
             <Icon className="w-4 h-4 shrink-0"/>
             {!collapsed && <span className="truncate">{name}</span>}
             {!collapsed && filter === "vault" && !isVaultUnlocked && <Lock className="w-3 h-3 ml-auto text-muted-foreground/70"/>}

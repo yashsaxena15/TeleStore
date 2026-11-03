@@ -788,7 +788,7 @@ isLoading, cutItem, cutItems = [], hasClipboard, isClipboardPasted, onFileUpload
       </div>
       {selectedItems.size > 0 && (<SelectionBar count={selectedItems.size} allSelected={selectedItems.size === items.length} actions={selectionActions} onAction={handleSelectionAction} onClear={clearSelection} onToggleAll={handleSelectAllToggle} busy={batchBusy}/>)}
       </div>
-      <DetailsPane open={detailsOpen} isMobile={isMobile} onClose={() => onDetailsOpenChange?.(false)} item={detailsItem} selectionCount={selectedList.length} selectionSize={selectedList.reduce((sum, it) => sum + (it.type === "folder" ? 0 : it.size || 0), 0)} thumbnailSrc={detailsItem?.thumbnail ? loadedThumbnails[detailsItem.thumbnail] : undefined} locationPath={locationPath} isTrash={section === "trash" || section === "drive-trash"} isCloud={isCloudMode} cloudAccountId={cloudAccountId} onOpen={handleItemOpen} onDownload={onDownload} onToggleStar={(it) => onToggleStar?.(it)} onRestore={(it) => onRestoreItem?.(it)}/>
+      <DetailsPane open={detailsOpen} isMobile={isMobile} onClose={() => onDetailsOpenChange?.(false)} item={detailsItem} selectionCount={selectedList.length} selectionSize={selectedList.reduce((sum, it) => sum + (it.type === "folder" ? 0 : it.size || 0), 0)} thumbnailSrc={detailsItem?.thumbnail ? loadedThumbnails[detailsItem.thumbnail] : undefined} locationPath={locationPath} isTrash={section === "trash" || section === "drive-trash"} isCloud={isCloudMode} isVault={isVaultMode} onShared={onRefresh} cloudAccountId={cloudAccountId} onOpen={handleItemOpen} onDownload={onDownload} onToggleStar={(it) => onToggleStar?.(it)} onRestore={(it) => onRestoreItem?.(it)}/>
       </div>
 
       {/* Context Menu */}
