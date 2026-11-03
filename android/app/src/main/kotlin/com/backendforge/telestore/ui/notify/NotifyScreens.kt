@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.OndemandVideo
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Storage
@@ -96,6 +97,7 @@ private fun iconFor(kind: String): ImageVector = when (NotificationKind.of(kind)
     NotificationKind.SIGN_IN -> Icons.AutoMirrored.Filled.Login
     NotificationKind.BACKUP -> Icons.Default.PhotoCamera
     NotificationKind.OFFLINE -> Icons.Default.CloudDone
+    NotificationKind.SHARE -> Icons.Default.People
     null -> Icons.Default.Notifications
 }
 
