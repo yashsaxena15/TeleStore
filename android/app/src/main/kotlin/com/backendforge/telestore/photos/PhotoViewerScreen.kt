@@ -298,7 +298,8 @@ fun PhotoViewerScreen(
                     if (line.isNotEmpty()) Text(line, color = Color(0xFFD6D6DC), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 val starred = current.item?.starred == true
-                IconButton(onClick = {
+                // Someone else's shared photo: view, share and download only
+                if (current.item?.fromShare != true) IconButton(onClick = {
                     serverAction(current) { item ->
                         val now = api.setStarred(item, !item.starred)
                         replace(current, current.copy(item = item.copy(starred = now)))
@@ -347,9 +348,11 @@ fun PhotoViewerScreen(
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 BarAction(Icons.Outlined.Share, "Share") { share(current) }
-                BarAction(Icons.Outlined.Tune, "Edit") { onEdit(current) }
-                BarAction(Icons.Filled.Add, "Add to") { if (current.item != null) addTo = current else toast("Back this up first: it's only on this phone.") }
-                BarAction(Icons.Outlined.Delete, "Trash") { trash(current) }
+                if (current.item?.fromShare != true) {
+                    BarAction(Icons.Outlined.Tune, "Edit") { onEdit(current) }
+                    BarAction(Icons.Filled.Add, "Add to") { if (current.item != null) addTo = current else toast("Back this up first: it's only on this phone.") }
+                    BarAction(Icons.Outlined.Delete, "Trash") { trash(current) }
+                }
             }
         }
     }
