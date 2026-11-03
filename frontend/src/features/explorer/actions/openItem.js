@@ -8,10 +8,12 @@ import { getItemKey } from "../lib/fileCardHelpers";
 
 export function createOpenItem({ canArchive = true, cloudAccountId, items, lastOpenTimeRef, onDownload, onNavigate, playMedia, setArchiveInspect, setDocumentReader, setImageViewer, setIsSelectionMode, setLastSelectedIndex, setSelectedItems }) {
 const handleItemOpen = (item) => {
+    // One double-click (or double tap) opens an item once; another item opens straight away
     const now = Date.now();
-    if (now - lastOpenTimeRef.current < 250)
+    const last = lastOpenTimeRef.current;
+    if (last && last.id === item.id && now - last.at < 250)
         return;
-    lastOpenTimeRef.current = now;
+    lastOpenTimeRef.current = { id: item.id, at: now };
     // Saved copies need a blob: address first (a moment's work); make them for the whole folder at once
     const saved = item.type === "folder" ? [] : [item, ...items].filter((it) => !it.is_cloud && isSavedOffline(it.id));
     if (saved.some((it) => !offlineUrlSync(it.id))) {
