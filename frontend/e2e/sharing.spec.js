@@ -83,6 +83,11 @@ test.describe("Share dialog", () => {
         await expect(page.getByText("1 person")).toBeVisible();
         await page.getByRole("button", { name: "Share Hans Zimmer - Dune Suite.flac" }).click();
         await expect(page.getByRole("dialog", { name: "Share “Hans Zimmer - Dune Suite.flac”" }).getByText("Family", { exact: true })).toBeVisible();
+        // Show in folder: back to your files, in the folder that holds it
+        await page.keyboard.press("Escape");
+        await page.getByRole("button", { name: "Show Hans Zimmer - Dune Suite.flac in its folder" }).click();
+        await expect(page).not.toHaveURL(/\/shared-by-me$/);
+        await expect(row(page, "Hans Zimmer - Dune Suite.flac").first()).toBeVisible();
     });
 });
 

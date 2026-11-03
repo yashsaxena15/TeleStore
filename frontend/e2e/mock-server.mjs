@@ -324,7 +324,7 @@ const shareRoute = (req, res, url, body) => {
     if (parts[1] === "mine") {
         const shares = Object.keys(SHARE_VIEWS).filter(isShared).map((id) => {
             const v = shareView(id);
-            return { share_id: v.share_id, item: v.item, trashed: false, link: v.link, members: v.members.length, created_at: "2026-11-01T10:00:00Z" };
+            return { share_id: v.share_id, item: v.item, location: byId(id)?.file_path || "/Home", trashed: false, link: v.link, members: v.members.length, created_at: "2026-11-01T10:00:00Z" };
         });
         return send(res, 200, { shares });
     }

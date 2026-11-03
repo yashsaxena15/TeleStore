@@ -1,7 +1,7 @@
 // Shared by me: your files and folders that are shared with people or by link. Each opens the
 // Share dialog.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Globe, Share2, Users } from "lucide-react";
+import { FolderOpen, Globe, Share2, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -43,6 +43,9 @@ export const SharedByMePage = () => {
                     </span>
                   </span>
                 </button>
+                {s.location && !s.trashed && (<Button type="button" size="sm" variant="ghost" className="shrink-0" aria-label={`Show ${s.item.name} in its folder`} title="Show in folder" onClick={() => window.dispatchEvent(new CustomEvent("changeCategory", { detail: { folderPath: s.location } }))}>
+                    <FolderOpen className="w-4 h-4"/><span className="hidden sm:inline ml-1.5">Show in folder</span>
+                  </Button>)}
               </li>);
             })}
         </ul>)}
