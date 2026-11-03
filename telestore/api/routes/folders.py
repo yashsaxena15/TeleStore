@@ -251,6 +251,7 @@ async def get_folder_download_info(
             "file_path": {"$regex": f"^{escaped}(/|$)"},
             "file_type": {"$ne": "folder"},
             "owner_id": user_id,
+            "trashed": {"$ne": True},
         }
         files = list(database.Files.find(query))
         files.sort(key=lambda x: (x.get("file_path", ""), x.get("file_name", "")))
@@ -319,6 +320,7 @@ async def download_folder_zip(
             "file_path": {"$regex": f"^{escaped}(/|$)"},
             "file_type": {"$ne": "folder"},
             "owner_id": user_id,
+            "trashed": {"$ne": True},
         }
         files = list(database.Files.find(query))
         files.sort(key=lambda x: (x.get("file_path", ""), x.get("file_name", "")))
@@ -332,55 +334,71 @@ async def download_folder_zip(
 
         part_files = raw_parts[part - 1]
         zip_filename = f"{folder_name}.zip" if len(raw_parts) == 1 else f"{folder_name}-part{part}.zip"
-
-        files_with_arcnames = []
-        for f in part_files:
-            f_dir = f.get("file_path", "")
-            f_name = f.get("file_name", "unnamed_file")
-            try:
-                rel_dir = os.path.relpath(f_dir, full_path)
-            except ValueError:
-                rel_dir = "."
-
-            if rel_dir == "." or not rel_dir:
-                arcname = f"{folder_name}/{f_name}"
-            else:
-                arcname = f"{folder_name}/{rel_dir}/{f_name}"
-
-            arcname = arcname.replace("\\", "/").replace("//", "/")
-            files_with_arcnames.append({
-                "arcname": arcname,
-                "doc": f,
-            })
-
-        bot_manager = getattr(request.app.state, 'bot_manager', None)
-        if not bot_manager:
-            raise HTTPException(status_code=503, detail="Bot manager not available")
-
-        client = bot_manager.get_least_busy_client() if hasattr(bot_manager, 'get_least_busy_client') else None
-        if not client:
-            raise HTTPException(status_code=503, detail="No available bot clients")
-
-        active_clients = bot_manager.client_list if (hasattr(bot_manager, 'client_list') and bot_manager.client_list) else [client]
-        byte_streamer = ByteStreamer(client)
-
-        encoded_filename = urllib.parse.quote(zip_filename)
-        ascii_fallback = re.sub(r'[^\x20-\x7E]', '_', zip_filename).replace('"', '_').replace('\\', '_')
-        if not ascii_fallback.strip('_ '):
-            ascii_fallback = "archive.zip"
-        headers = {
-            "Content-Disposition": f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded_filename}',
-            "Content-Type": "application/zip",
-            "Cache-Control": "no-cache",
-        }
-
-        return StreamingResponse(
-            generate_zip_stream(files_with_arcnames, byte_streamer, active_clients),
-            media_type="application/zip",
-            headers=headers,
-        )
+        return zip_response(request, part_files, full_path, folder_name, zip_filename)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error in folder zip download: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def zip_parts(files: list, folder_name: str, url_for_part) -> dict:
+    """A folder's zip split into parts of at most MAX_ZIP_PART_SIZE, each with its address."""
+    raw_parts = partition_files_for_zip(files, MAX_ZIP_PART_SIZE) if files else []
+    parts = []
+    for idx, part_files in enumerate(raw_parts, 1):
+        parts.append({
+            "part_index": idx,
+            "name": f"{folder_name}.zip" if len(raw_parts) == 1 else f"{folder_name}-part{idx}.zip",
+            "size": sum(int(f.get("file_size") or 0) for f in part_files),
+            "files_count": len(part_files),
+            "download_url": url_for_part(idx),
+        })
+    return {
+        "folder_name": folder_name,
+        "total_files": len(files),
+        "total_size": sum(int(f.get("file_size") or 0) for f in files),
+        "total_parts": len(raw_parts),
+        "parts": parts,
+    }
+
+
+def zip_response(request: Request, part_files: list, full_path: str, folder_name: str, zip_filename: str):
+    """Streams [part_files] (all inside [full_path]) as one zip, straight from Telegram."""
+    files_with_arcnames = []
+    for f in part_files:
+        f_dir = f.get("file_path", "")
+        f_name = f.get("file_name", "unnamed_file")
+        try:
+            rel_dir = os.path.relpath(f_dir, full_path)
+        except ValueError:
+            rel_dir = "."
+        if rel_dir == "." or not rel_dir:
+            arcname = f"{folder_name}/{f_name}"
+        else:
+            arcname = f"{folder_name}/{rel_dir}/{f_name}"
+        files_with_arcnames.append({"arcname": arcname.replace("\\", "/").replace("//", "/"), "doc": f})
+
+    bot_manager = getattr(request.app.state, 'bot_manager', None)
+    if not bot_manager:
+        raise HTTPException(status_code=503, detail="Bot manager not available")
+    client = bot_manager.get_least_busy_client() if hasattr(bot_manager, 'get_least_busy_client') else None
+    if not client:
+        raise HTTPException(status_code=503, detail="No available bot clients")
+    active_clients = bot_manager.client_list if (hasattr(bot_manager, 'client_list') and bot_manager.client_list) else [client]
+    byte_streamer = ByteStreamer(client)
+
+    encoded_filename = urllib.parse.quote(zip_filename)
+    ascii_fallback = re.sub(r'[^\x20-\x7E]', '_', zip_filename).replace('"', '_').replace('\\', '_')
+    if not ascii_fallback.strip('_ '):
+        ascii_fallback = "archive.zip"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded_filename}',
+        "Content-Type": "application/zip",
+        "Cache-Control": "no-cache",
+    }
+    return StreamingResponse(
+        generate_zip_stream(files_with_arcnames, byte_streamer, active_clients),
+        media_type="application/zip",
+        headers=headers,
+    )

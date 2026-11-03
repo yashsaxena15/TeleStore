@@ -87,9 +87,18 @@ def _release_all(session: dict) -> None:
         _release_part(session, part)
 
 
+def _uploader(user: User) -> str:
+    return str(user.telegram_user_id) if user.telegram_user_id else user.username
+
+
+def _is_uploader(session: dict, user: User) -> bool:
+    """Whether [user] started this upload (an editor uploading into a shared folder isn't its owner)."""
+    return session.get("uploader", session.get("user_id")) == _uploader(user)
+
+
 def _session_for(upload_id: str, user: User) -> dict:
     session = _active_upload_sessions.get(upload_id)
-    if not session or session["user_id"] != str(user.telegram_user_id):
+    if not session or not _is_uploader(session, user):
         raise HTTPException(status_code=404, detail="Upload session not found or expired")
     return session
 
@@ -128,6 +137,9 @@ class InitUploadRequest(BaseModel):
     taken_at: Optional[str] = None
     # A video's length in seconds (the phone's backup sends it), for the "0:38" on Photos' tiles
     duration: Optional[float] = None
+    # Into a folder someone shared with the caller as editor: path is then inside that folder,
+    # and the file belongs to the folder's owner
+    share_id: Optional[str] = None
 
 
 def _taken_at(value: Optional[str]) -> Optional[str]:
@@ -145,6 +157,12 @@ def _taken_at(value: Optional[str]) -> Optional[str]:
 
 @router.post("/upload/init")
 async def init_chunked_upload(req: InitUploadRequest, user: User = Depends(require_upload)):
+    uploader = _uploader(user)
+    if req.share_id:
+        from telestore.api.routes.shares import upload_target
+        owner, target = upload_target(req.share_id, req.path or "", user)
+        req = req.model_copy(update={"path": target})
+        user = owner
     if not user.telegram_user_id:
         raise HTTPException(status_code=400, detail="TELEGRAM_NOT_VERIFIED: Please verify your Telegram account before uploading files")
     _expire_idle_sessions()
@@ -157,7 +175,8 @@ async def init_chunked_upload(req: InitUploadRequest, user: User = Depends(requi
 
     # The same file to the same folder after a page reload: continue where it stopped
     old = _active_upload_sessions.get(req.resume_upload_id or "")
-    if old and old["user_id"] == str(user.telegram_user_id) and old["filename"] == req.filename \
+    if old and old["user_id"] == str(user.telegram_user_id) and old.get("uploader", old["user_id"]) == uploader \
+            and old["filename"] == req.filename \
             and old["filesize"] == req.filesize and old["path"] == (req.path or "/Home") and not old.get("error") \
             and old.get("status") not in ("processing", "completed"):
         old["last_activity"] = time.time()
@@ -177,6 +196,7 @@ async def init_chunked_upload(req: InitUploadRequest, user: User = Depends(requi
         "taken_at": _taken_at(req.taken_at),
         "duration": req.duration if req.duration and 0 < req.duration <= 7 * 86400 else None,
         "user_id": str(user.telegram_user_id),
+        "uploader": uploader,
         "created_at": datetime.datetime.utcnow().isoformat(),
         "last_activity": time.time(),
         "total_chunks": max(1, math.ceil(req.filesize / CHUNK_SIZE)),
@@ -241,7 +261,8 @@ async def _store_chunk(request: Request, session: dict, index: int, data: bytes,
 async def _send_part(request: Request, session: dict, part: int, user: User) -> None:
     """Sends a complete part to Telegram in the background (the browser keeps sending)."""
     bot_manager = getattr(request.app.state, "bot_manager", None)
-    user_data = database.Users.find_one({"telegram_user_id": user.telegram_user_id}) or {}
+    # The file's owner's index chat (an editor's upload into a shared folder goes to its owner's)
+    user_data = database.Users.find_one({"telegram_user_id": int(session["user_id"])}) or {}
     chat_id = user_data.get("index_chat_id")
     client = bot_manager.get_least_busy_client() if bot_manager else None
     if not chat_id or not client:
@@ -372,7 +393,7 @@ async def get_upload_status(upload_id: str, user: User = Depends(require_auth)):
     session = _active_upload_sessions.get(upload_id)
     if not session:
         raise HTTPException(status_code=404, detail="Upload session not found or expired")
-    if session.get("user_id") != str(user.telegram_user_id):
+    if not _is_uploader(session, user):
         raise HTTPException(status_code=403, detail="Forbidden")
     status = session.get("status", "uploading")
     if status == "completed":
@@ -392,7 +413,7 @@ class AbortUploadRequest(BaseModel):
 async def abort_chunked_upload(req: AbortUploadRequest, user: User = Depends(require_auth)):
     upload_id = req.upload_id
     session = _active_upload_sessions.get(upload_id)
-    if session and session.get("user_id") and session["user_id"] != str(user.telegram_user_id):
+    if session and session.get("user_id") and not _is_uploader(session, user):
         raise HTTPException(status_code=403, detail="Forbidden")
     _active_upload_sessions.pop(upload_id, None)
     priority_manager.notify_user_upload_finished(upload_id)

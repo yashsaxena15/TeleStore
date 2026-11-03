@@ -98,6 +98,15 @@ async def get_all_files_route(
             f_dict['id'] = str(f_dict['id'])  # Convert ObjectId to string
             f_dict['file_unique_id'] = f.file_unique_id  # Include file_unique_id for streaming
             files_list.append(f_dict)
+        # The "Shared" mark: items shared with someone or by a working link
+        try:
+            from telestore.services import share_service
+            marked = share_service.shared_ids(f["id"] for f in files_list)
+        except Exception as share_err:
+            logger.warning(f"Couldn't read which items are shared: {share_err}")
+            marked = set()
+        for f_dict in files_list:
+            f_dict["shared"] = f_dict["id"] in marked
 
         # Photos: videos without a length get it read in the background, a few per page
         if path == "all" and (kind or "").lower() == "media":
@@ -152,6 +161,21 @@ async def get_storage_analytics_route(user: User = Depends(require_auth)):
 
 # Add file upload endpoint
 
+def _owns_thumbnail(request: Request, thumb_id: str, auth_token: Optional[str]) -> bool:
+    """Whether the signed-in account has a file with this Telegram thumbnail."""
+    try:
+        user = require_auth(request)
+        ids = [i for i in {user.username, str(user.telegram_user_id) if user.telegram_user_id else None} if i]
+    except HTTPException:
+        from telestore.api.state import cached_token_valid
+        data = cached_token_valid(auth_token) if auth_token else None
+        if not data:
+            return False
+        account = database.Users.getUser(data.get("username")) or {}
+        ids = [i for i in {data.get("username"), str(account["telegram_user_id"]) if account.get("telegram_user_id") else None} if i]
+    return bool(database.Files.find_one({"thumbnail": thumb_id, "owner_id": {"$in": ids}}))
+
+
 @router.get("/thumbnail/{file_id}")
 async def get_file_thumbnail(file_id: str, request: Request, auth_token: str = None):
     # Check authentication - first try the normal auth, then check for token in query params
@@ -169,6 +193,11 @@ async def get_file_thumbnail(file_id: str, request: Request, auth_token: str = N
             if not db_token_data:
                 raise HTTPException(status_code=401, detail="Authentication required")
             shared_tokens[auth_token] = cached_token(db_token_data)
+
+    # Only a thumbnail of one of the caller's own files (shared files have their own thumbnail
+    # route); any signed-in account used to be able to fetch any file's thumbnail by its id
+    if not _owns_thumbnail(request, file_id, auth_token):
+        raise HTTPException(status_code=404, detail="Thumbnail not available")
 
     try:
         bot_manager = request.app.state.bot_manager

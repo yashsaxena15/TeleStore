@@ -99,15 +99,6 @@ async def stream_handler(request: Request, file_name: str):
     import urllib.parse
     decoded_file_name = urllib.parse.unquote(file_name)
     
-    # Get bot manager from app state
-    bot_manager = request.app.state.bot_manager if hasattr(request.app.state, 'bot_manager') else None
-    if not bot_manager:
-        raise HTTPException(status_code=500, detail="Bot manager not available")
-    
-    client: Client = bot_manager.get_least_busy_client() if hasattr(bot_manager, 'get_least_busy_client') else None
-    if not client:
-        raise HTTPException(status_code=500, detail="No available bot clients")
-    
     # Look up the file in the database using file_id, path, or file name
     try:
         file_id_param = request.query_params.get("file_id")
@@ -162,6 +153,28 @@ async def stream_handler(request: Request, file_name: str):
             if not is_vault_unlocked(request):
                 raise HTTPException(status_code=403, detail="Vault is locked. Please unlock Private Vault first.")
         
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Exception looking up file with name {decoded_file_name}: {e}")
+        raise HTTPException(status_code=404, detail="File not found or inaccessible")
+    return await stream_document(request, file_data, decoded_file_name)
+
+
+async def stream_document(request: Request, file_data: dict, fallback_name: str = "file"):
+    """Streams one stored file from Telegram (ranges, split files, inline or download).
+
+    Callers have already checked that the requester may read [file_data] and set
+    request.state.is_watch (inline viewing) or not (a download).
+    """
+    bot_manager = request.app.state.bot_manager if hasattr(request.app.state, 'bot_manager') else None
+    if not bot_manager:
+        raise HTTPException(status_code=500, detail="Bot manager not available")
+    client: Client = bot_manager.get_least_busy_client() if hasattr(bot_manager, 'get_least_busy_client') else None
+    if not client:
+        raise HTTPException(status_code=500, detail="No available bot clients")
+    decoded_file_name = fallback_name
+    try:
         # Get file unique ID for Telegram lookup
         file_unique_id = file_data.get("file_unique_id")
         chat_id = file_data.get("chat_id")
@@ -184,14 +197,12 @@ async def stream_handler(request: Request, file_name: str):
         
         # Reconstruct the full chat_id with -100 prefix if needed
             
+    except HTTPException:
+        raise
     except ValueError as e:
-        # Handle case where ID cannot be converted to integer
         print(f"ValueError converting file data: {e}")
         raise HTTPException(status_code=404, detail="Invalid file data")
-    except Exception as e:
-        print(f"Exception looking up file with name {decoded_file_name}: {e}")
-        raise HTTPException(status_code=404, detail="File not found or inaccessible")
-    
+
     clients_to_try = [client]
     if bot_manager and hasattr(bot_manager, 'client_list') and bot_manager.client_list:
         for c in bot_manager.client_list:
@@ -234,6 +245,7 @@ async def stream_handler(request: Request, file_name: str):
         parts_list=parts_list or parts,
         file_name=stored_file_name or file_name_db
     )
+
 
 # parse_range_header function has been moved to streaming_utils module
 

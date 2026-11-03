@@ -302,6 +302,11 @@ async def delete_file_route(
         
         # Delete the file/folder itself from database
         result = database.Files.delete_one({"_id": ObjectId(request.file_id), "owner_id": user_id})
+        try:
+            from telestore.services import share_service
+            share_service.forget([request.file_id])
+        except Exception as share_err:
+            logger.warning(f"Couldn't drop the shares of a deleted item: {share_err}")
         
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="File not found")

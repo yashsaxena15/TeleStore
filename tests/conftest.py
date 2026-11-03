@@ -84,7 +84,22 @@ def reset_db_mocks():
     password_limiter.__init__()
     pin_limiter.__init__()
 
-    yield
+    # Collections reached through get_remote_db (shares, notifications…) are empty stand-ins unless
+    # a test brings its own: without this each call waited 30 s for a database that isn't there
+    from collections import defaultdict
+    from unittest.mock import patch
+    from telestore.api.routes.shares import link_limiter
+    link_limiter.__init__(free_attempts=20, base_lock=30, max_lock=900)
+
+    def empty_collection():
+        coll = MagicMock()
+        coll.find.return_value = []
+        coll.find_one.return_value = None
+        return coll
+
+    with patch("telestore.services.remote_transfer_manager.helpers.get_remote_db",
+               return_value=defaultdict(empty_collection)):
+        yield
 
 
 @pytest.fixture
