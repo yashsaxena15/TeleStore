@@ -48,7 +48,7 @@ Errors come back as `{"detail": "<message to show>"}`:
 | PATCH | `/shares/item/{item_id}/members/{user_id}` | `{role}` | ShareView |
 | DELETE | `/shares/item/{item_id}/members/{user_id}` | | ShareView |
 | DELETE | `/shares/item/{item_id}` | | ShareView (no longer shared) |
-| GET | `/shares/mine` | | `{shares: [{share_id, item, trashed, link, members: <count>, created_at}]}` |
+| GET | `/shares/mine` | | `{shares: [{share_id, item, location: "/Home/…" (its folder in your files), trashed, link, members: <count>, created_at}]}` |
 
 How the link settings work:
 - `enabled: true` creates the link if there isn't one yet. Turning it off keeps its address, so
@@ -56,6 +56,7 @@ How the link settings work:
 - Setting `max_downloads` restarts the download count.
 
 What owners see in their own listings:
+- Thumbnails of your own items: `GET /files/preview/{id}` (works for photos and videos by item id).
 - `GET /files` items now carry `shared: true|false`, used for the "Shared" marker.
 - Vault items can't be shared, so clients hide Share for them.
 
