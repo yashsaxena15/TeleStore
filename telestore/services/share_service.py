@@ -446,6 +446,8 @@ def mine(user) -> List[dict]:
         out.append({
             "share_id": share["share_id"],
             "item": item_json(doc),
+            # Where your item is in your own files ("/Home/Trip"), to open it there
+            "location": doc.get("file_path") or "/Home",
             "trashed": bool(doc.get("trashed")),
             "link": _link_json(share),
             "members": len(share.get("members") or []),
