@@ -36,6 +36,8 @@ data class PhoneTransfer(
     val sourceUri: String? = null,
     val folder: String? = null,
     val uploadId: String? = null,
+    /** Into a folder shared with this account (as editor); [folder] is then relative to it. */
+    val shareId: String? = null,
     // Downloads
     val fileId: String? = null,
     /** A server path for folder ZIP parts (/folders/download-zip?…); null downloads [fileId]. */

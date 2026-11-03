@@ -141,6 +141,9 @@ import com.backendforge.telestore.ui.more.MoreScreen
 import com.backendforge.telestore.ui.search.SearchScreen
 import com.backendforge.telestore.ui.search.SearchViewModel
 import com.backendforge.telestore.ui.transfers.TransfersScreen
+import com.backendforge.telestore.ui.sharing.ShareBrowseScreen
+import com.backendforge.telestore.ui.sharing.SharedByMeScreen
+import com.backendforge.telestore.ui.sharing.SharedWithMeScreen
 
 private const val ROUTE_VIDEO = "video"
 private const val ROUTE_PLAYLISTS = "playlists"
@@ -260,7 +263,7 @@ fun MainScreen(
             // Looking inside needs archive tools; when the owner turned them off it opens like any file
             FileKind.ARCHIVE -> {
                 container.playback.document = item
-                navController.navigate(if (features.archives) ROUTE_ARCHIVE else ROUTE_DOCUMENT)
+                navController.navigate(if (features.archives && !item.fromShare) ROUTE_ARCHIVE else ROUTE_DOCUMENT)
             }
             FileKind.FOLDER -> return false
             // Documents show in the app; anything else offers another app
@@ -275,6 +278,8 @@ fun MainScreen(
     // ── Uploads and downloads ─────────────────────────────────────────────
     val scope = rememberCoroutineScope()
     var uploadFolder by remember { mutableStateOf(TeleStoreApi.HOME) }
+    // Set while picking files for a folder shared with this account (uploadFolder is then inside it)
+    var uploadShareId by remember { mutableStateOf<String?>(null) }
     var transferMessage by remember { mutableStateOf<String?>(null) }
     // "Add to playlist", asked for from any screen or player
     val addingToPlaylist by container.playlists.adding.collectAsStateWithLifecycle()
@@ -297,11 +302,11 @@ fun MainScreen(
         ) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
-    fun startUploads(uris: List<Uri>, folder: String) {
+    fun startUploads(uris: List<Uri>, folder: String, shareId: String? = null) {
         if (uris.isEmpty()) return
         askForNotifications()
         val files = uris.map { describe(context, it) }
-        val skipped = container.transfers.upload(files, folder)
+        val skipped = container.transfers.upload(files, folder, shareId)
         val queued = files.size - skipped.size
         transferMessage = buildString {
             if (queued > 0) append("Uploading $queued file${if (queued != 1) "s" else ""}. See Transfers.")
@@ -310,12 +315,34 @@ fun MainScreen(
     }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        startUploads(uris, uploadFolder)
+        startUploads(uris, uploadFolder, uploadShareId)
     }
 
     fun upload(folder: String) {
         uploadFolder = folder
+        uploadShareId = null
         picker.launch(arrayOf("*/*"))
+    }
+
+    /** Into [path] of a folder shared with this account (editors). */
+    fun uploadToShare(shareId: String, path: String) {
+        uploadFolder = path
+        uploadShareId = shareId
+        picker.launch(arrayOf("*/*"))
+    }
+
+    fun downloadShareFolder(shareId: String, path: String, name: String) {
+        askForNotifications()
+        scope.launch {
+            transferMessage = try {
+                val count = container.transfers.downloadShareFolder(container.api(), shareId, path)
+                if (count == 0) "This folder is empty." else "Downloading $name as ZIP ($count files). See Transfers."
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                (e as? ApiException)?.message ?: "Couldn't start the download."
+            }
+        }
     }
 
     fun download(item: FileItem) {
@@ -499,6 +526,7 @@ fun MainScreen(
             "playlists" -> navController.navigate(ROUTE_PLAYLISTS)
             "backup" -> navController.navigate("photos_backup")
             "settings" -> navController.navigate("settings_account")
+            "shared" -> t.shareId?.let { navController.navigate("shared/${Uri.encode(it)}") } ?: navController.navigate("shared_with_me")
             else -> navController.navigate(ROUTE_NOTIFICATIONS) { launchSingleTop = true }
         }
     }
@@ -800,6 +828,8 @@ fun MainScreen(
                             onNavigateAccount = { navController.navigate("settings_account") },
                             onNavigateDownloads = { navController.navigate("settings_downloads") },
                             onNavigateUsers = { navController.navigate("settings_users") },
+                            onNavigateSharedWithMe = { navController.navigate("shared_with_me") },
+                            onNavigateSharedByMe = { navController.navigate("shared_by_me") },
                         )
                     }
 
@@ -900,6 +930,22 @@ fun MainScreen(
                 composable("settings_account") { AccountScreen(container, onBack = { navController.popBackStack() }) }
                 composable("settings_downloads") { DownloadsScreen(container, onBack = { navController.popBackStack() }) }
                 composable("settings_users") { UsersScreen(container, session.username, onBack = { navController.popBackStack() }) }
+                composable("shared_with_me") {
+                    SharedWithMeScreen(container, onBack = { navController.popBackStack() }, onOpen = { navController.navigate("shared/${Uri.encode(it.shareId)}") })
+                }
+                composable("shared_by_me") { SharedByMeScreen(container, onBack = { navController.popBackStack() }) }
+                composable("shared/{shareId}", arguments = listOf(navArgument("shareId") { type = NavType.StringType })) { entry ->
+                    val shareId = entry.arguments?.getString("shareId") ?: return@composable
+                    ShareBrowseScreen(
+                        container,
+                        shareId,
+                        onBack = { navController.popBackStack() },
+                        onOpenFile = ::openFile,
+                        onDownload = ::download,
+                        onDownloadFolder = { path, name -> downloadShareFolder(shareId, path, name) },
+                        onUpload = { path -> uploadToShare(shareId, path) },
+                    )
+                }
                 composable("webdav") { WebDavScreen(container, session, onBack = { navController.popBackStack() }) }
 
                 composable(ROUTE_VAULT) {

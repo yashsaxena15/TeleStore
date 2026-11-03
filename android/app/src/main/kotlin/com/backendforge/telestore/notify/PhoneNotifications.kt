@@ -30,6 +30,7 @@ object PhoneNotifications {
 
     const val EXTRA_TARGET_TYPE = "telestore.target_type"
     const val EXTRA_TARGET_PATH = "telestore.target_path"
+    const val EXTRA_TARGET_SHARE = "telestore.target_share"
     const val EXTRA_SERVER_ID = "telestore.notification_id"
 
     fun createChannels(context: Context) {
@@ -101,6 +102,7 @@ object PhoneNotifications {
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             .putExtra(EXTRA_TARGET_TYPE, target?.type ?: "notifications")
             .apply { target?.path?.let { putExtra(EXTRA_TARGET_PATH, it) } }
+            .apply { target?.shareId?.let { putExtra(EXTRA_TARGET_SHARE, it) } }
             .apply { serverId?.let { putExtra(EXTRA_SERVER_ID, it) } }
         return PendingIntent.getActivity(context, requestCode, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }

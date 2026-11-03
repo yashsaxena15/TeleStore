@@ -467,7 +467,8 @@ class VideoViewModel(private val container: AppContainer) : ViewModel() {
     private fun saveProgress() {
         val s = _state.value
         val item = s.item ?: return
-        if (s.durationMs > 0) container.watchHistory.save(item, s.positionMs, s.durationMs)
+        // Shared videos aren't this account's: Continue watching couldn't open them later
+        if (s.durationMs > 0 && !item.fromShare) container.watchHistory.save(item, s.positionMs, s.durationMs)
     }
 
     private fun publishTracks(tracks: Tracks) {

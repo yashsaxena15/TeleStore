@@ -36,8 +36,9 @@ data class ShareItem(
         modified = modified,
         takenAt = takenAt,
         duration = duration,
-        // Any non-blank value makes the rows ask for a picture; the share's thumb address is used
-        thumbnail = if (hasThumb && !isFolder) SHARE_THUMB else null,
+        // Any non-blank value makes the rows ask for a picture; the share's thumb address is used.
+        // The owner's own items (no share) fall back to the usual preview.
+        thumbnail = if (hasThumb && !isFolder && shareId != null) SHARE_THUMB else null,
         shareId = shareId,
     )
 

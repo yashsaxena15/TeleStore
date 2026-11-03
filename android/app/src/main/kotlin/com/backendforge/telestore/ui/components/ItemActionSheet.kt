@@ -49,7 +49,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.filled.PersonAdd
 import com.backendforge.telestore.core.FileItem
+import com.backendforge.telestore.core.ShareRules
 import com.backendforge.telestore.core.TeleStoreApi
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -72,7 +74,10 @@ fun ItemActionSheet(
     onDownload: ((FileItem) -> Unit)? = null,
     onMoveToVault: ((FileItem) -> Unit)? = null,
     onCopyToDrive: ((FileItem) -> Unit)? = null,
+    /** "Send a copy": the file itself to another app. */
     onShare: ((FileItem) -> Unit)? = null,
+    /** "Share": the Share sheet (people and link); null hides it. */
+    onShareWithPeople: ((FileItem) -> Unit)? = null,
     onOpenWith: ((FileItem) -> Unit)? = null,
     onCompress: ((FileItem) -> Unit)? = null,
     /** Music and videos: opens "Add to playlist". */
@@ -216,10 +221,18 @@ fun ItemActionSheet(
                             onClick = { onDismiss(); onAddToPlaylist(item) },
                         )
                     }
-                    if (!item.isFolder && onShare != null) {
+                    // Vault items are never shared, with people or other apps
+                    if (onShareWithPeople != null && ShareRules.canShare(item)) {
+                        ActionRow(
+                            icon = Icons.Default.PersonAdd,
+                            label = "Share",
+                            onClick = { onDismiss(); onShareWithPeople(item) },
+                        )
+                    }
+                    if (!item.isFolder && onShare != null && !item.inVault) {
                         ActionRow(
                             icon = Icons.Default.Share,
-                            label = "Share to an app",
+                            label = "Send a copy",
                             onClick = { onDismiss(); onShare(item) },
                         )
                     }
