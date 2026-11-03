@@ -66,7 +66,16 @@ data class FileItem(
     val place: String? = null,
     /** A video's length in seconds, when the server knows it. */
     val duration: Double? = null,
+    /** Shared with other accounts or by a link (the "Shared" marker in the owner's lists). */
+    val shared: Boolean = false,
+    /**
+     * Set on items opened from Shared with me: their addresses go through that share (see
+     * [MediaUrls]) and owner-only actions are hidden. Never sent by the server.
+     */
+    @kotlinx.serialization.Transient val shareId: String? = null,
 ) {
+    /** Opened from a share someone else owns. */
+    val fromShare: Boolean get() = shareId != null
     /** The date for timelines: when it was taken, else when it was uploaded. */
     val timelineDate: String? get() = takenAt ?: modified
     val isFolder: Boolean get() = type == "folder"

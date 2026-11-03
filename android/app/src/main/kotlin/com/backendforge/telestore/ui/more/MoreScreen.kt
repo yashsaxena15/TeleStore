@@ -29,6 +29,8 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.FolderShared
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Group
@@ -83,6 +85,8 @@ fun MoreScreen(
     onNavigateAccount: () -> Unit = {},
     onNavigateDownloads: () -> Unit = {},
     onNavigateUsers: () -> Unit = {},
+    onNavigateSharedWithMe: () -> Unit = {},
+    onNavigateSharedByMe: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -157,6 +161,8 @@ fun MoreScreen(
 
             SectionLabel("Your files")
             NavGroup {
+                MoreNavRow(icon = Icons.Default.FolderShared, label = "Shared with me", onClick = onNavigateSharedWithMe)
+                MoreNavRow(icon = Icons.Default.People, label = "Shared by me", onClick = onNavigateSharedByMe)
                 MoreNavRow(icon = Icons.Default.Star, label = "Starred", onClick = onNavigateStarred)
                 MoreNavRow(icon = Icons.Default.Schedule, label = "Recent", onClick = onNavigateRecent)
                 MoreNavRow(icon = Icons.Default.CloudDone, label = "Offline files", onClick = onNavigateOffline)

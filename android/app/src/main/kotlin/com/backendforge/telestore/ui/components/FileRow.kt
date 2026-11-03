@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Checkbox
@@ -113,6 +114,10 @@ fun FileRow(
                         modifier = Modifier.size(16.dp),
                     )
                 }
+                if (item.shared) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    SharedBadge()
+                }
                 if (item.protected) {
                     Spacer(modifier = Modifier.width(6.dp))
                     ProtectedBadge()
@@ -148,6 +153,17 @@ fun ProtectedBadge(modifier: Modifier = Modifier) {
         imageVector = Icons.Default.Shield,
         contentDescription = "Protected from deletion",
         tint = MaterialTheme.colorScheme.primary,
+        modifier = modifier.size(14.dp),
+    )
+}
+
+/** The small people icon on items shared with others or by a link. */
+@Composable
+fun SharedBadge(modifier: Modifier = Modifier) {
+    Icon(
+        imageVector = Icons.Default.People,
+        contentDescription = "Shared",
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = modifier.size(14.dp),
     )
 }

@@ -19,9 +19,17 @@ data class ServerNotification(
     val read: Boolean = false,
 )
 
-/** Where tapping a notification goes: "transfers", "folder" (with [path]), "file", "playlists" or "settings". */
+/**
+ * Where tapping a notification goes: "transfers", "folder" (with [path]), "file", "playlists",
+ * "settings", or "shared" (Shared with me, with [shareId]).
+ */
 @Serializable
-data class NotificationTarget(val type: String = "", val path: String? = null, val id: String? = null)
+data class NotificationTarget(
+    val type: String = "",
+    val path: String? = null,
+    val id: String? = null,
+    @SerialName("share_id") val shareId: String? = null,
+)
 
 @Serializable
 data class NotificationList(
@@ -64,6 +72,7 @@ enum class NotificationKind(val wire: String, val label: String, val detail: Str
     INSTAGRAM("instagram", "Instagram", "Posts and reels saved from Instagram"),
     PLAYLIST_SYNC("playlist_sync", "Synced playlists", "New videos found in a playlist you follow"),
     INBOX("inbox", "Telegram Inbox", "Files sent to your Telegram Inbox"),
+    SHARE("share", "Sharing", "When someone shares a file or folder with you"),
     STORAGE("storage", "Storage", "When your storage is almost full"),
     SIGN_IN("sign_in", "New sign-ins", "When your account is signed in somewhere new");
 

@@ -100,7 +100,11 @@ class MainActivity : FragmentActivity() {
         // A tapped notification: open where it points, and mark it read on the server
         intent?.getStringExtra(PhoneNotifications.EXTRA_TARGET_TYPE)?.let { type ->
             val container = (application as TeleStoreApplication).container
-            container.pendingTarget.value = NotificationTarget(type, path = intent.getStringExtra(PhoneNotifications.EXTRA_TARGET_PATH))
+            container.pendingTarget.value = NotificationTarget(
+                type,
+                path = intent.getStringExtra(PhoneNotifications.EXTRA_TARGET_PATH),
+                shareId = intent.getStringExtra(PhoneNotifications.EXTRA_TARGET_SHARE),
+            )
             intent.getStringExtra(PhoneNotifications.EXTRA_SERVER_ID)?.let { id ->
                 lifecycleScope.launch { runCatching { container.unreadNotifications.value = container.api().markNotificationsRead(listOf(id)) } }
             }

@@ -134,6 +134,7 @@ fun FolderScreen(
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     var compressItems by remember { mutableStateOf<List<FileItem>?>(null) }
+    var sharingItem by remember { mutableStateOf<FileItem?>(null) }
     val haptics = rememberHaptics()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -609,6 +610,7 @@ fun FolderScreen(
             onMoveToVault = { vm.moveToVault(it) },
             onCopyToDrive = onCopyToDrive,
             onShare = onShare,
+            onShareWithPeople = if (state.isInbox || state.isTrash) null else ({ sharingItem = it }),
             onOpenWith = onOpenWith,
             onCompress = if (canArchive) { { compressItems = listOf(it) } } else null,
             onAddToPlaylist = onAddToPlaylist?.let { add -> { item: FileItem -> add(listOf(item)) } },
@@ -618,6 +620,21 @@ fun FolderScreen(
             onToggleProtected = { vm.setProtected(it, !it.protected) },
             onFolderColor = { colorItem = it },
             onDismiss = { actionItem = null },
+        )
+    }
+
+    sharingItem?.let { target ->
+        var changed by remember(target.id) { mutableStateOf(false) }
+        com.backendforge.telestore.ui.sharing.ShareSheet(
+            api = api,
+            itemId = target.id,
+            itemName = target.name,
+            onChanged = { changed = true },
+            onDismiss = {
+                sharingItem = null
+                // The "Shared" marker follows
+                if (changed) vm.refresh()
+            },
         )
     }
 

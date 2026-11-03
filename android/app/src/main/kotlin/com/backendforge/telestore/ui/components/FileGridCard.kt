@@ -99,6 +99,9 @@ fun FileGridCard(
                 if (item.starred) {
                     Icon(Icons.Default.Star, contentDescription = "Starred", tint = Color(0xFFFBBF24), modifier = Modifier.padding(start = 4.dp).size(14.dp))
                 }
+                if (item.shared) {
+                    SharedBadge(modifier = Modifier.padding(start = 4.dp))
+                }
                 if (item.protected) {
                     ProtectedBadge(modifier = Modifier.padding(start = 4.dp))
                 }
@@ -187,6 +190,10 @@ fun FileGridCard(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (item.shared) {
+                            SharedBadge()
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
                         if (item.protected) {
                             ProtectedBadge()
                             Spacer(modifier = Modifier.width(4.dp))

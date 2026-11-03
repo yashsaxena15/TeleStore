@@ -91,6 +91,7 @@ abstract class TransferWorker(context: Context, params: WorkerParameters) : Coro
         val target = when {
             failed -> NotificationTarget("transfers")
             t.offline -> NotificationTarget("offline")
+            t.direction == Direction.UPLOAD && t.shareId != null -> NotificationTarget("shared", shareId = t.shareId)
             t.direction == Direction.UPLOAD -> NotificationTarget("folder", path = t.folder)
             else -> NotificationTarget("transfers")
         }
@@ -135,7 +136,7 @@ abstract class TransferWorker(context: Context, params: WorkerParameters) : Coro
 class UploadWorker(context: Context, params: WorkerParameters) : TransferWorker(context, params) {
     override suspend fun run(transfer: PhoneTransfer) {
         val uri = Uri.parse(transfer.sourceUri ?: throw ApiException(0, "The file to upload is missing."))
-        val folder = transfer.folder ?: "/Home"
+        val folder = transfer.folder ?: if (transfer.shareId != null) "" else "/Home"
         val source = try {
             UriChunkSource(applicationContext, uri)
         } catch (e: Exception) {
@@ -148,6 +149,7 @@ class UploadWorker(context: Context, params: WorkerParameters) : TransferWorker(
                 name = transfer.name,
                 size = transfer.size,
                 folder = folder,
+                shareId = transfer.shareId,
                 onSession = { id -> store.update(transferId) { t -> t.copy(uploadId = id) } },
                 onProgress = { sent -> store.update(transferId, force = false) { t -> t.copy(done = sent) } },
                 onSaving = { store.update(transferId) { t -> t.copy(status = TransferStatus.SAVING, done = t.size, speedBps = 0) } },
