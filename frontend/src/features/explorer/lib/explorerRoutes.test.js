@@ -14,6 +14,8 @@ describe("explorer routes", () => {
         expect(viewFromPathname("/playlists/liked")).toBe("playlists");
         expect(viewFromPathname("/downloads")).toBe("transfers");
         expect(viewFromPathname("/offline")).toBe("offline");
+        expect(viewFromPathname("/shared-with-me")).toBe("shared-with-me");
+        expect(viewFromPathname("/shared-by-me")).toBe("shared-by-me");
     });
     it("round-trips folder paths", () => {
         for (const path of [["Home"], ["Home", "Movies"], ["Home", "My Films", "2024"], ["Home", "Telegram Inbox"], ["Private Vault"], ["Private Vault", "Tax"]]) {

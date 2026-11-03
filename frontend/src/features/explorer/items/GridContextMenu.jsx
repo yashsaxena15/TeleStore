@@ -12,6 +12,8 @@ import { trackArchiveTask } from "@/features/archives/archiveTracker";
 import { ContextMenu } from "../ContextMenu";
 import { isVideoItem } from "../fileTypes";
 import { getItemKey, isItemStarred } from "../lib/fileCardHelpers";
+import { canShare } from "@/features/sharing/shareHelpers";
+import { requestShare } from "@/features/sharing/requestShare";
 
 export const GridContextMenu = ({ offlineIndex, cloudAccountId, cloudFolderId, contextMenu, currentApiPath, currentPath, handleItemOpen, hasClipboard, isClipboardPasted, isCloudMode, isRestrictedEmptyArea, isTrashMode, isVaultMode, items, onCopy, onCut, onDelete, onDownload, onMoveToHome, onMoveToVault, onNewFolder, onPaste, onRefresh, onRename, onRestoreItem, onSelectionAction, onToggleStar, openDetails, selectedItems, setArchiveInspect, setCompressDialog, setContextMenu, triggerDirectoryUpload, triggerFileUpload }) => {
     // Right-clicking one of several selected items acts on all of them (the menu shows the count)
@@ -53,6 +55,8 @@ export const GridContextMenu = ({ offlineIndex, cloudAccountId, cloudFolderId, c
                 : protectedSelectionReason(targets);
     const colorTargets = !inTrash && !isCloudMode ? targets.filter((it) => it.type === "folder" && canProtect(it)) : [];
     const canColor = colorTargets.length > 0 && colorTargets.length === targets.length;
+    // Share: one item of your own, not in the Vault, Trash or Google Drive
+    const shareTarget = !onSelection && !inTrash && !isCloudMode && !isVaultMode && canShare(contextMenu.item) ? contextMenu.item : null;
     return (<ContextMenu x={contextMenu.x} y={contextMenu.y} itemType={contextMenu.itemType} itemName={contextMenu.itemName} isVideo={isVideo} onCopyStreamUrl={() => {
             if (!contextMenu.item)
                 return;
@@ -128,5 +132,5 @@ export const GridContextMenu = ({ offlineIndex, cloudAccountId, cloudFolderId, c
             }
         }} onCompress={() => {
             setCompressDialog(true);
-        }} isStarred={isItemStarred(contextMenu.item)} onToggleStar={() => contextMenu.item && onToggleStar?.(contextMenu.item)} isTrashMode={isTrashMode || cloudFolderId === "trash" || Boolean(contextMenu.item?.is_trashed)} onRestore={forSelection("restore", (item) => onRestoreItem?.(item))} isCloudMode={isCloudMode} isVirtualFolder={Boolean(contextMenu.item?.is_virtual)} isRestrictedEmptyArea={isRestrictedEmptyArea} onRefresh={onRefresh} onAddToPlaylist={addTargets.length > 0 && !isTrashMode ? () => requestAddToPlaylist(addTargets) : undefined} onMakeOffline={toSave.length ? () => makeAvailableOffline(toSave) : undefined} onRemoveOffline={toRemove.length ? () => removeOffline(toRemove) : undefined} onProtect={toProtect.length ? () => protectItems(toProtect, refreshFiles) : undefined} onUnprotect={toUnprotect ? () => removeProtection(toUnprotect, refreshFiles) : undefined} folderColor={canColor && colorTargets.every((f) => f.color === colorTargets[0].color) ? colorTargets[0].color : undefined} onSetFolderColor={canColor ? (color) => setFolderColor(colorTargets, color, refreshFiles) : undefined}/>);
+        }} isStarred={isItemStarred(contextMenu.item)} onToggleStar={() => contextMenu.item && onToggleStar?.(contextMenu.item)} isTrashMode={isTrashMode || cloudFolderId === "trash" || Boolean(contextMenu.item?.is_trashed)} onRestore={forSelection("restore", (item) => onRestoreItem?.(item))} isCloudMode={isCloudMode} isVirtualFolder={Boolean(contextMenu.item?.is_virtual)} isRestrictedEmptyArea={isRestrictedEmptyArea} onRefresh={onRefresh} onAddToPlaylist={addTargets.length > 0 && !isTrashMode ? () => requestAddToPlaylist(addTargets) : undefined} onMakeOffline={toSave.length ? () => makeAvailableOffline(toSave) : undefined} onRemoveOffline={toRemove.length ? () => removeOffline(toRemove) : undefined} onProtect={toProtect.length ? () => protectItems(toProtect, refreshFiles) : undefined} onUnprotect={toUnprotect ? () => removeProtection(toUnprotect, refreshFiles) : undefined} folderColor={canColor && colorTargets.every((f) => f.color === colorTargets[0].color) ? colorTargets[0].color : undefined} onSetFolderColor={canColor ? (color) => setFolderColor(colorTargets, color, refreshFiles) : undefined} onShare={shareTarget ? () => requestShare(shareTarget, refreshFiles) : undefined}/>);
 };

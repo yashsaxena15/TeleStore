@@ -1,12 +1,15 @@
 // Actions offered by the New menu, the phone + button and the command palette.
 // Each id is handled by FileExplorer's runShellAction().
-import { Upload, FolderUp, FolderPlus, Magnet, Cloud, Home, Inbox, Star, ShieldCheck, Trash2, Instagram, Clapperboard } from "lucide-react";
+import { Upload, FolderUp, FolderPlus, Magnet, Cloud, Home, Inbox, Star, ShieldCheck, Trash2, Instagram, Clapperboard, Users, Share2 } from "lucide-react";
 
-// Library places shown in the sidebar and the command palette (filter ids used by FileExplorer)
+// Library places shown in the sidebar and the command palette: filter ids used by FileExplorer,
+// or a page of their own (view)
 export const LIBRARY = [
     { name: "Home", icon: Home, filter: "all" },
     { name: "Telegram Inbox", icon: Inbox, filter: "inbox" },
     { name: "Starred", icon: Star, filter: "starred" },
+    { name: "Shared with me", icon: Users, view: "shared-with-me" },
+    { name: "Shared by me", icon: Share2, view: "shared-by-me" },
     { name: "Private Vault", icon: ShieldCheck, filter: "vault" },
     { name: "Trash", icon: Trash2, filter: "trash" },
 ];

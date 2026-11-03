@@ -31,7 +31,7 @@ export const CommandPalette = ({ open, onOpenChange, onNavigateView, onAction })
       <CommandList>
         <CommandEmpty>Nothing matches. Try “upload”, “trash” or “settings”.</CommandEmpty>
         <CommandGroup heading="Go to">
-          {LIBRARY.map(({ name, icon, filter }) => <Item key={filter} icon={icon} label={name} onSelect={() => onNavigateView("files", filter)}/>)}
+          {LIBRARY.map(({ name, icon, filter, view }) => <Item key={filter || view} icon={icon} label={name} onSelect={() => (view ? onNavigateView(view) : onNavigateView("files", filter))}/>)}
           {cloudAccounts.map((acc) => <Item key={acc.id} icon={Cloud} label={acc.account_name} keywords={["drive", "google", acc.account_email]} hint="Drive" onSelect={() => onNavigateView("files", `cloud:${acc.id}:root`)}/>)}
           <Item icon={ArrowUpDown} label="Transfers" keywords={["downloads", "uploads", "leech"]} onSelect={() => onNavigateView("transfers")}/>
           <Item icon={ListMusic} label="Playlists" keywords={["music", "liked", "songs", "queue"]} onSelect={() => onNavigateView("playlists")}/>

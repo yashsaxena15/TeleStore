@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Bell, Folder, HardDriveDownload, Images, Inbox, ListMusic, ArrowUpDown, LayoutGrid, Plus, Star, ShieldCheck, Trash2, HardDrive, Cloud, User, Settings, Users, Laptop, LogOut } from "lucide-react";
+import { Bell, Folder, HardDriveDownload, Images, Inbox, ListMusic, ArrowUpDown, LayoutGrid, Plus, Star, ShieldCheck, Trash2, HardDrive, Cloud, User, Settings, Users, Laptop, LogOut, Share2 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useTransferManager } from "@/features/transfers/useTransferManager";
 import { useCloudAccounts, useIsOwner, useUserProfile, displayName } from "@/hooks/useShellData";
@@ -65,6 +65,8 @@ export const MobileNav = ({ selectedFilter, activeView, onNavigateView, onAction
             <SheetRow icon={ListMusic} label="Playlists" onClick={() => go("playlists")}/>
             <SheetRow icon={HardDriveDownload} label="Offline" onClick={() => go("offline")}/>
             <SheetRow icon={Star} label="Starred" onClick={() => go("files", "starred")}/>
+            <SheetRow icon={Users} label="Shared with me" onClick={() => go("shared-with-me")}/>
+            <SheetRow icon={Share2} label="Shared by me" onClick={() => go("shared-by-me")}/>
             <SheetRow icon={ShieldCheck} label="Private Vault" onClick={() => go("files", "vault")}/>
             <SheetRow icon={Trash2} label="Trash" onClick={() => go("files", "trash")}/>
             <SheetRow icon={HardDrive} label="Storage" onClick={() => go("storage")}/>

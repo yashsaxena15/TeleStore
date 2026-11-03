@@ -70,7 +70,7 @@ const lockedReason = (f) => {
     const inner = f.file_type === "folder" && ALL().find((x) => PROTECTED.has(x.id) && `${x.file_path}/`.startsWith(`${fullPath(f)}/`));
     return inner ? `“${f.file_name}” contains a protected item (“${inner.file_name}”). Remove its protection first.` : null;
 };
-const withMarks = (f) => ({ ...f, protected: PROTECTED.has(f.id), color: f.file_type === "folder" ? (COLORS[f.id] || null) : null });
+const withMarks = (f) => ({ ...f, protected: PROTECTED.has(f.id), color: f.file_type === "folder" ? (COLORS[f.id] || null) : null, shared: isShared(f.id) });
 // Photo details (EXIF) for team-offsite.jpg
 const PHOTO_INFO = {
     f8: { width: 4032, height: 3024, megapixels: 12.2, camera_make: "Apple", camera_model: "iPhone 13", lens: "iPhone 13 back dual wide camera 5.1mm f/1.6", aperture: 1.8, exposure: 1 / 120, iso: 100, focal_length: 4.2, flash: false, taken_at: "2026-10-12T17:45:00", latitude: 15.55271, longitude: 73.75169, altitude: 12, format: "JPEG", file_size: 4_800_000, file_name: "team-offsite.jpg", folder: "/Home" },
@@ -265,6 +265,121 @@ const playlistRoute = (req, res, url, body) => {
 // A 1×1 PNG for thumbnails and previews
 const PIXEL = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
 
+// ── Sharing (docs/sharing-api.md) ──────────────────────────────────────────
+// Your items' Share dialogs, by item id. The flac starts shared with "family" as a viewer.
+const SHARE_VIEWS = {};
+const ACCOUNTS = { family: { user_id: "u2", username: "family", name: "Family", email: "family@example.com" }, "alice@example.com": { user_id: "u3", username: "alice", name: "Alice", email: "alice@example.com" } };
+const shareItemOf = (f) => ({ id: f.id, name: f.file_name, type: f.file_type, size: f.file_size, modified_date: f.modified_date, taken_at: null, duration: null, has_thumb: ["photo", "video"].includes(f.file_type), path: "" });
+const resetShares = () => {
+    Object.keys(SHARE_VIEWS).forEach((k) => delete SHARE_VIEWS[k]);
+    SHARE_VIEWS.f6 = { share_id: "sh_f6", link: null, members: [{ ...ACCOUNTS.family, role: "viewer" }] };
+};
+const isShared = (id) => Boolean(SHARE_VIEWS[id] && (SHARE_VIEWS[id].members.length || SHARE_VIEWS[id].link?.enabled));
+const shareView = (id) => {
+    const v = SHARE_VIEWS[id] || { share_id: null, link: null, members: [] };
+    const f = byId(id);
+    return { share_id: v.share_id, item: f ? shareItemOf(f) : null, link: v.link, members: v.members };
+};
+const linkState = (l) => (!l.enabled ? "off" : l.expires_at && new Date(l.expires_at) < new Date() ? "expired" : l.max_downloads && l.downloads >= l.max_downloads ? "used_up" : "active");
+// Shared with me: Alice's "Goa trip" folder (editor) and a menu she shared as viewer
+const GOA = { id: "s1", name: "Goa trip", type: "folder", size: 0, modified_date: "2026-10-30T10:00:00", has_thumb: false, path: "" };
+const MENU = { id: "s9", name: "menu.pdf", type: "document", size: 120_000, modified_date: "2026-10-29T10:00:00", has_thumb: false, path: "" };
+const GOA_FILES = {
+    "": [
+        { id: "s2", name: "Day 1", type: "folder", size: 0, modified_date: "2026-10-30T10:00:00", has_thumb: false, path: "" },
+        { id: "s3", name: "beach.jpg", type: "photo", size: 2_400_000, modified_date: "2026-10-30T10:00:00", has_thumb: true, path: "" },
+        { id: "s4", name: "notes.txt", type: "document", size: 1_200, modified_date: "2026-10-30T10:00:00", has_thumb: false, path: "" },
+    ],
+    "/Day 1": [{ id: "s5", name: "sunset.jpg", type: "photo", size: 3_100_000, modified_date: "2026-10-30T10:00:00", has_thumb: true, path: "/Day 1" }],
+};
+const WITH_ME = [
+    { share_id: "sh_w1", role: "editor", owner: { username: "alice", name: "Alice" }, item: GOA, shared_at: "2026-11-01T10:00:00Z" },
+    { share_id: "sh_w2", role: "viewer", owner: { username: "alice", name: "Alice" }, item: MENU, shared_at: "2026-10-31T10:00:00Z" },
+];
+const zipInfoFor = (prefix, name) => ({ folder_name: name, total_files: 3, total_size: 5_500_000, total_parts: 1, parts: [{ part_index: 1, name: `${name}.zip`, size: 5_500_000, files_count: 3, download_url: `${prefix}/zip?path=&part=1` }] });
+// Public links: "goa" is the folder, "menu" a file without downloads, "old" has expired
+const LINKS = {
+    goa: { info: { item: GOA, owner_name: "Alice", allow_download: true, expires_at: null, downloads_left: null } },
+    menu: { info: { item: MENU, owner_name: "Alice", allow_download: false, expires_at: null, downloads_left: null } },
+    old: { status: 410, detail: "This link has expired." },
+};
+const STAND_IN = () => Buffer.from("TeleStore stand-in file\n".repeat(64));
+const shareRoute = (req, res, url, body) => {
+    const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+    const data = body ? JSON.parse(body) : {};
+    // Public link: /share-links/{token}/… (records whether a sign-in was sent)
+    if (parts[0] === "share-links") {
+        requests.push({ method: req.method, path: url.pathname, body: url.search, auth: req.headers["x-auth-token"] || null });
+        const link = LINKS[parts[1]];
+        if (!link) return send(res, 404, { detail: "This link doesn't exist." });
+        if (link.status) return send(res, link.status, { detail: link.detail });
+        if (parts[2] === "info") return send(res, 200, link.info);
+        if (parts[2] === "list") return send(res, 200, { path: url.searchParams.get("path") || "", items: link.info.item.type === "folder" ? GOA_FILES[url.searchParams.get("path") || ""] || [] : [link.info.item] });
+        if (parts[2] === "zip-info") return link.info.allow_download ? send(res, 200, zipInfoFor(`/share-links/${parts[1]}`, link.info.item.name)) : send(res, 403, { detail: "The owner turned off downloads for this link." });
+        if (parts[2] === "thumb") return send(res, 200, PIXEL, "image/png");
+        return send(res, 200, STAND_IN(), "application/pdf");
+    }
+    if (req.method !== "GET") requests.push({ method: req.method, path: url.pathname, body });
+    if (parts[1] === "with-me") return send(res, 200, { shares: WITH_ME });
+    if (parts[1] === "mine") {
+        const shares = Object.keys(SHARE_VIEWS).filter(isShared).map((id) => {
+            const v = shareView(id);
+            return { share_id: v.share_id, item: v.item, trashed: false, link: v.link, members: v.members.length, created_at: "2026-11-01T10:00:00Z" };
+        });
+        return send(res, 200, { shares });
+    }
+    // The owner's Share dialog: /shares/item/{id}/…
+    if (parts[1] === "item") {
+        const id = parts[2];
+        if (!byId(id)) return send(res, 404, { detail: "Not found." });
+        const v = SHARE_VIEWS[id] || (SHARE_VIEWS[id] = { share_id: `sh_${id}`, link: null, members: [] });
+        if (parts[3] === "link" && parts[4] === "reset") {
+            if (v.link) v.link = { ...v.link, token: `${v.link.token}-new`, downloads: 0 };
+        }
+        else if (parts[3] === "link") {
+            const l = v.link || { enabled: false, token: `tok-${id}`, allow_download: true, expires_at: null, max_downloads: null, downloads: 0 };
+            l.enabled = data.enabled !== false;
+            if (data.allow_download !== undefined && data.allow_download !== null) l.allow_download = data.allow_download;
+            if (data.clear_expiry) l.expires_at = null;
+            else if (data.expires_at) l.expires_at = data.expires_at;
+            if (data.clear_limit) l.max_downloads = null;
+            else if (data.max_downloads) {
+                l.max_downloads = data.max_downloads;
+                l.downloads = 0;
+            }
+            v.link = l;
+        }
+        else if (parts[3] === "members" && req.method === "POST") {
+            const who = ACCOUNTS[String(data.who || "").toLowerCase()];
+            if (!who) return send(res, 404, { detail: "No TeleStore account has that username or email." });
+            v.members = [...v.members.filter((m) => m.user_id !== who.user_id), { ...who, role: data.role || "viewer" }];
+        }
+        else if (parts[3] === "members" && req.method === "PATCH") v.members = v.members.map((m) => (m.user_id === parts[4] ? { ...m, role: data.role } : m));
+        else if (parts[3] === "members" && req.method === "DELETE") v.members = v.members.filter((m) => m.user_id !== parts[4]);
+        else if (req.method === "DELETE") {
+            v.members = [];
+            v.link = v.link ? { ...v.link, enabled: false } : null;
+        }
+        if (v.link) v.link = { ...v.link, state: linkState(v.link) };
+        return send(res, 200, shareView(id));
+    }
+    // Inside a share you're a member of: /shares/{share_id}/…
+    const share = WITH_ME.find((s) => s.share_id === parts[1]);
+    if (!share) return send(res, 404, { detail: "This isn't shared with you." });
+    const action = parts[2];
+    if (action === "browse") {
+        const p = url.searchParams.get("path") || "";
+        const items = share.item.type === "folder" ? GOA_FILES[p] : [share.item];
+        if (!items) return send(res, 404, { detail: "That folder isn't part of this share." });
+        return send(res, 200, { share_id: share.share_id, role: share.role, owner: { name: share.owner.name }, root: share.item, path: p, items });
+    }
+    if (action === "zip-info") return send(res, 200, zipInfoFor(`/shares/${share.share_id}`, share.item.name));
+    if (action === "thumb") return send(res, 200, PIXEL, "image/png");
+    if (action === "dl") return send(res, 200, STAND_IN(), "application/pdf");
+    if (share.role !== "editor") return send(res, 403, { detail: "You can only view this folder." });
+    return send(res, 200, { success: true });
+};
+
 const listFiles = (url) => {
     const p = (url.searchParams.get("path") || "/Home").replace(/\/+$/, "") || "/Home";
     const under = url.searchParams.get("under");
@@ -433,6 +548,8 @@ const mutation = (req, res, url, body) => {
     send(res, 200, { success: true });
 };
 
+resetShares();
+
 http.createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     let body = "";
@@ -445,11 +562,13 @@ http.createServer((req, res) => {
                 resetNotifications();
                 resetDevices();
                 resetProtection();
+                resetShares();
                 UNLOCK = null;
                 SERVER = { archives_enabled: true };
             }
             return send(res, 200, requests);
         }
+        if (url.pathname.startsWith("/shares/") || url.pathname.startsWith("/share-links/")) return shareRoute(req, res, url, body);
         if (url.pathname.startsWith("/files/playlists")) {
             if (req.method !== "GET") requests.push({ method: req.method, path: url.pathname, body });
             return playlistRoute(req, res, url, body);

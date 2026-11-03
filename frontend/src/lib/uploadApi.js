@@ -23,7 +23,9 @@ export const formatEta = (seconds) => {
     return `${Math.round(seconds)}s`;
 };
 
-export async function uploadFileChunked(file, path = '/', onProgress) {
+// With shareId the file goes into a folder shared with you (as an editor); path is then relative
+// to the shared folder ("" is the folder itself)
+export async function uploadFileChunked(file, path = '/', onProgress, shareId) {
     const baseUrl = getApiBaseUrl();
     const apiUrl = baseUrl ? `${baseUrl}` : '';
     const authHeaders = authService.getAuthHeaders();
@@ -35,7 +37,12 @@ export async function uploadFileChunked(file, path = '/', onProgress) {
             ...authHeaders,
         },
         credentials: 'include',
-        body: JSON.stringify({
+        body: JSON.stringify(shareId ? {
+            filename: file.name,
+            filesize: file.size,
+            path: path || '',
+            share_id: shareId,
+        } : {
             filename: file.name,
             filesize: file.size,
             path: path || '/Home'

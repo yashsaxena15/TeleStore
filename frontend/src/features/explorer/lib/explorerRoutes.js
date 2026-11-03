@@ -4,13 +4,16 @@
 const SETTINGS_PATHS = new Set(["/settings", "/profile", "/users"]);
 const VAULT_ROOTS = new Set(["Private Vault", "Vault"]);
 
-/** "files" | "settings" | "storage" | "transfers" | "photos" | "playlists" | "offline" for a pathname. */
+/** "files" | "settings" | "storage" | "transfers" | "photos" | "playlists" | "offline" |
+ *  "shared-with-me" | "shared-by-me" for a pathname. */
 export function viewFromPathname(pathname = "/") {
     if (SETTINGS_PATHS.has(pathname)) return "settings";
     if (pathname === "/photos") return "photos";
     if (pathname === "/playlists" || pathname.startsWith("/playlists/")) return "playlists";
     if (pathname === "/storage") return "storage";
     if (pathname === "/offline") return "offline";
+    if (pathname === "/shared-with-me") return "shared-with-me";
+    if (pathname === "/shared-by-me") return "shared-by-me";
     if (pathname === "/transfers" || pathname === "/downloads") return "transfers";
     return "files";
 }

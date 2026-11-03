@@ -20,7 +20,7 @@ onUploadFolder, // Destructure the new prop
 isClipboardPasted, // Destructure the new prop
 hasClipboard, // Destructure the new prop
 disableDelete = false, // Destructure the new prop with default value
-onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false, isVideo = false, onCopyStreamUrl, selectedCount = 1, isStarred = false, onToggleStar, isTrashMode = false, onRestore, isVaultMode = false, onMoveToVault, onMoveToHome, isCloudMode = false, isVirtualFolder = false, isRestrictedEmptyArea = false, onAddToPlaylist, onMakeOffline, onRemoveOffline, onProtect, onUnprotect, folderColor, onSetFolderColor, hideDelete = false, protectionNote, }) => {
+onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false, isVideo = false, onCopyStreamUrl, selectedCount = 1, isStarred = false, onToggleStar, isTrashMode = false, onRestore, isVaultMode = false, onMoveToVault, onMoveToHome, isCloudMode = false, isVirtualFolder = false, isRestrictedEmptyArea = false, onAddToPlaylist, onMakeOffline, onRemoveOffline, onProtect, onUnprotect, folderColor, onSetFolderColor, hideDelete = false, protectionNote, onShare, }) => {
     const menuRef = useRef(null);
     const isMobile = useIsMobile();
     // Compress, extract and look inside: the owner can turn them off
@@ -175,6 +175,10 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                 break;
             case "move_to_home":
                 onMoveToHome?.();
+                onClose();
+                break;
+            case "share":
+                onShare?.();
                 onClose();
                 break;
             default:
@@ -467,12 +471,10 @@ onProperties, onInspectArchive, onExtractArchive, onCompress, isArchive = false,
                             action: "rename",
                             shortcut: "F2",
                         },
-                        {
-                            icon: Share2,
-                            label: "Share",
-                            action: "share",
-                            disabled: true,
-                        },
+                        // One item at a time, never in the Vault (see features/sharing)
+                        ...(onShare && !isVaultMode && selectedCount <= 1
+                            ? [{ icon: Share2, label: "Share", action: "share" }]
+                            : []),
                         ...(isVaultMode
                             ? [
                                 {

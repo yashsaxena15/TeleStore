@@ -30,6 +30,8 @@ export function targetRoute(target) {
         case "transfers": return { view: "transfers" };
         case "playlists": return { view: "playlists" };
         case "settings": return { view: "settings" };
+        // Someone shared a file or folder with you
+        case "shared": return { view: "shared-with-me" };
         case "folder":
         case "file": return target.path ? { folderPath: target.path } : { view: "files" };
         default: return null;

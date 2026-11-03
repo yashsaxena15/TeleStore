@@ -52,6 +52,9 @@ const PlaylistsPage = lazy(() => import("@/features/playlists/PlaylistsPage").th
 const AddToPlaylistDialog = lazy(() => import("@/features/playlists/AddToPlaylistDialog").then((m) => ({ default: m.AddToPlaylistDialog })));
 const PhotosPage = lazy(() => import("@/features/photos/PhotosPage").then((m) => ({ default: m.PhotosPage })));
 const OfflinePage = lazy(() => import("@/features/offline/OfflinePage").then((m) => ({ default: m.OfflinePage })));
+const SharedWithMePage = lazy(() => import("@/features/sharing/SharedWithMePage").then((m) => ({ default: m.SharedWithMePage })));
+const SharedByMePage = lazy(() => import("@/features/sharing/SharedByMePage").then((m) => ({ default: m.SharedByMePage })));
+const ShareDialog = lazy(() => import("@/features/sharing/ShareDialog").then((m) => ({ default: m.ShareDialog })));
 const StorageAnalyticsContent = lazy(() => import("@/features/storage/StorageAnalyticsContent").then((m) => ({ default: m.StorageAnalyticsContent })));
 const PanelLoading = () => (<div className="flex flex-1 items-center justify-center p-10 text-sm text-muted-foreground">Loading…</div>);
 export const FileExplorer = () => {
@@ -601,6 +604,9 @@ export const FileExplorer = () => {
         else if (target === 'offline') {
             navigate('/offline');
         }
+        else if (target === 'shared-with-me' || target === 'shared-by-me') {
+            navigate(`/${target}`);
+        }
         else {
             if (filter)
                 handleFilterChange(filter);
@@ -711,6 +717,14 @@ export const FileExplorer = () => {
             <Suspense fallback={<PanelLoading />}>
               <OfflinePage onShowInFolder={openFolderPath}/>
             </Suspense>
+          </div>) : view === "shared-with-me" ? (<div key="shared-with-me" className={PAGE_CLASS}>
+            <Suspense fallback={<PanelLoading />}>
+              <SharedWithMePage />
+            </Suspense>
+          </div>) : view === "shared-by-me" ? (<div key="shared-by-me" className={PAGE_CLASS}>
+            <Suspense fallback={<PanelLoading />}>
+              <SharedByMePage />
+            </Suspense>
           </div>) : view === "photos" ? (<div key="photos" className={PAGE_CLASS}>
             <Suspense fallback={<PanelLoading />}>
               <PhotosPage />
@@ -752,6 +766,7 @@ export const FileExplorer = () => {
       </div>
 
       <Suspense fallback={null}><AddToPlaylistDialog /></Suspense>
+      <Suspense fallback={null}><ShareDialog /></Suspense>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} onNavigateView={handleNavigateView} onAction={runShellAction}/>
       <WhenOpen open={connectDriveOpen}><ConnectCloudModal open={connectDriveOpen} onOpenChange={setConnectDriveOpen} onSuccess={() => window.dispatchEvent(new Event("cloudAccountsChanged"))}/></WhenOpen>
 
