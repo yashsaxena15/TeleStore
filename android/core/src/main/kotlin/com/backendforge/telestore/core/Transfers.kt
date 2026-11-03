@@ -212,6 +212,8 @@ class ChunkedUploader(
     private val takenAt: String? = null,
     /** A video's length in seconds, for Photos' "0:38". */
     private val durationSeconds: Double? = null,
+    /** Into a folder shared with this account (as editor); [folder] is then relative to it. */
+    private val shareId: String? = null,
 ) {
     suspend fun upload(resumeId: String? = null): FileItem? {
         require(size > 0) { "Empty files can't be uploaded." }
@@ -223,7 +225,7 @@ class ChunkedUploader(
                 "processing" -> return waitUntilSaved(resumeId)
             }
         }
-        val session = api.uploadInit(name, size, folder, resumeId, takenAt, durationSeconds)
+        val session = api.uploadInit(name, size, folder, resumeId, takenAt, durationSeconds, shareId)
         onSession(session.uploadId)
         val chunk = session.chunkSize
         val sent = AtomicLong(session.received.sumOf { lengthOf(it, chunk) })

@@ -353,15 +353,24 @@ class TeleStoreApi(
 
     // ── Playback ────────────────────────────────────────────────────────────────
     /** Size, length, audio tracks and subtitles of a video (the server probes it once, then caches it). */
-    suspend fun mediaInfo(item: FileItem): MediaInfo = get(media.info(item))
+    suspend fun mediaInfo(item: FileItem): MediaInfo {
+        // Only the owner's files can be probed; shared ones play as they are
+        if (item.fromShare) throw ApiException(0, "Not available for shared files.")
+        return get(media.info(item))
+    }
 
     // ── Uploads (the website's chunked protocol) ────────────────────────────────
     /** Starts an upload, or continues [resumeId] when the server still has it. */
-    suspend fun uploadInit(name: String, size: Long, folder: String, resumeId: String? = null, takenAt: String? = null, durationSeconds: Double? = null): UploadSession =
+    /** With [shareId], [folder] is relative to that shared folder ("" is the folder itself) and the file goes to its owner. */
+    suspend fun uploadInit(
+        name: String, size: Long, folder: String, resumeId: String? = null, takenAt: String? = null, durationSeconds: Double? = null,
+        shareId: String? = null,
+    ): UploadSession =
         post(url("files/upload/init"), buildJsonObject {
             put("filename", name)
             put("filesize", size)
             put("path", folder)
+            shareId?.let { put("share_id", it) }
             resumeId?.let { put("resume_upload_id", it) }
             takenAt?.let { put("taken_at", it) }
             durationSeconds?.let { put("duration", it) }
@@ -628,6 +637,88 @@ class TeleStoreApi(
         put("ids", kotlinx.serialization.json.JsonArray(ids.map { kotlinx.serialization.json.JsonPrimitive(it) }))
         put("all", all)
     }).unread
+
+    // ── Sharing (the owner's Share dialog) ──────────────────────────────────────
+    suspend fun shareView(itemId: String): ShareView = get(shareItemUrl(itemId))
+
+    /** Turns the link on or off and changes its settings (see [LinkSettings]). */
+    suspend fun setShareLink(itemId: String, settings: LinkSettings): ShareView =
+        put(shareItemUrl(itemId, "link"), buildJsonObject {
+            put("enabled", settings.enabled)
+            settings.allowDownload?.let { put("allow_download", it) }
+            settings.expiresAt?.let { put("expires_at", it) }
+            if (settings.clearExpiry) put("clear_expiry", true)
+            settings.maxDownloads?.let { put("max_downloads", it) }
+            if (settings.clearLimit) put("clear_limit", true)
+        })
+
+    /** A new link address; the old one stops working. */
+    suspend fun resetShareLink(itemId: String): ShareView = post(shareItemUrl(itemId, "link/reset"), buildJsonObject { })
+
+    /** [who]: a username or email. */
+    suspend fun addShareMember(itemId: String, who: String, role: ShareRole): ShareView =
+        post(shareItemUrl(itemId, "members"), buildJsonObject {
+            put("who", who.trim())
+            put("role", role.wire)
+        })
+
+    suspend fun setShareMemberRole(itemId: String, userId: String, role: ShareRole): ShareView =
+        call(
+            Request.Builder().url(shareMemberUrl(itemId, userId))
+                .patch(buildJsonObject { put("role", role.wire) }.toString().toRequestBody(JSON)).build(),
+        )
+
+    suspend fun removeShareMember(itemId: String, userId: String): ShareView =
+        call(Request.Builder().url(shareMemberUrl(itemId, userId)).delete().build())
+
+    /** Removes everyone and turns the link off. */
+    suspend fun stopSharing(itemId: String): ShareView = call(Request.Builder().url(shareItemUrl(itemId)).delete().build())
+
+    suspend fun sharedByMe(): List<MyShare> = get<SharedByMe>(url("shares/mine")).shares
+
+    // ── Shared with me ──────────────────────────────────────────────────────────
+    suspend fun sharedWithMe(): List<ShareWithMe> = get<SharedWithMe>(url("shares/with-me")).shares
+
+    /** A folder of a share; [path] is relative to the shared folder ("" = the shared folder). */
+    suspend fun browseShare(shareId: String, path: String = ""): ShareBrowse =
+        get(shareUrl(shareId, "browse").newBuilder().addQueryParameter("path", path).build())
+
+    /** A shared folder (or one inside it) as zip parts. */
+    suspend fun shareZipInfo(shareId: String, path: String = ""): FolderDownloadInfo =
+        get(shareUrl(shareId, "zip-info").newBuilder().addQueryParameter("path", path).build())
+
+    // Editors only (a viewer gets 403)
+    suspend fun shareNewFolder(shareId: String, path: String, name: String): MessageReply =
+        post(shareUrl(shareId, "folders"), buildJsonObject {
+            put("path", path)
+            put("name", name.trim())
+        })
+
+    suspend fun shareRename(shareId: String, fileId: String, newName: String): MessageReply =
+        post(shareUrl(shareId, "rename"), buildJsonObject {
+            put("file_id", fileId)
+            put("new_name", newName.trim())
+        })
+
+    /** [targetPath] is relative to the shared folder. */
+    suspend fun shareMove(shareId: String, fileId: String, targetPath: String): MessageReply =
+        post(shareUrl(shareId, "move"), buildJsonObject {
+            put("file_id", fileId)
+            put("target_path", targetPath)
+        })
+
+    /** Goes to the owner's Trash. */
+    suspend fun shareTrash(shareId: String, fileId: String): MessageReply =
+        post(shareUrl(shareId, "trash"), buildJsonObject { put("file_id", fileId) })
+
+    private fun shareItemUrl(itemId: String, rest: String? = null): HttpUrl =
+        url("shares/item").newBuilder().addPathSegment(itemId).apply { if (rest != null) addPathSegments(rest) }.build()
+
+    private fun shareMemberUrl(itemId: String, userId: String): HttpUrl =
+        shareItemUrl(itemId, "members").newBuilder().addPathSegment(userId).build()
+
+    private fun shareUrl(shareId: String, rest: String): HttpUrl =
+        url("shares").newBuilder().addPathSegment(shareId).addPathSegments(rest).build()
 
     // ── Your devices ────────────────────────────────────────────────────────────
     /** Where this account is signed in, this phone first. */
