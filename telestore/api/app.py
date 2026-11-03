@@ -27,6 +27,7 @@ from telestore.api.routes.vault import router as vault_router
 from telestore.api.routes.playlists import router as playlists_router
 from telestore.api.routes.remote_transfer import router as remote_transfer_router
 from telestore.api.routes.cloud import router as cloud_router
+from telestore.api.routes.shares import router as shares_router
 from telestore.api.routes.worker import router as worker_router
 from telestore.api.routes.frontend import router as frontend_router
 from telestore.api.routes.webdav import router as webdav_router
@@ -163,6 +164,8 @@ app.include_router(remote_transfer_router)
 app.include_router(remote_transfer_router, prefix="/api")
 app.include_router(cloud_router)
 app.include_router(cloud_router, prefix="/api")
+app.include_router(shares_router)
+app.include_router(shares_router, prefix="/api")
 app.include_router(worker_router)
 # Built frontend assets. The folder is absent until `npm run build` (e.g. in CI or a
 # fresh checkout), so check_dir=False lets the API start without it.

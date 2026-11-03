@@ -17,6 +17,8 @@ API_PREFIXES = (
     "users",
     "telegram",
     "dl",
+    "shares",
+    "share-links",
     "watch",
     "api",
     "docs",
