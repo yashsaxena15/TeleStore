@@ -344,6 +344,10 @@ export const api = {
     resumeRemoteGroup: (group_id) => post('/transfers/remote/resume-group', { group_id }, { fallback: 'Failed to resume folder transfers' }),
     retryRemoteTransfer: (task_id) => post('/transfers/remote/retry', { task_id }, { fallback: 'Failed to retry remote transfer' }),
     clearCompletedRemoteTasks: () => post('/transfers/remote/clear-completed', undefined, { fallback: 'Failed to clear completed tasks' }),
+    // One page of a folder transfer's files: filter is all, active, waiting, failed or done; q matches names
+    getRemoteGroupTasks: (group_id, { filter = 'all', q = '', offset = 0, limit = 50 } = {}) => request(`/transfers/remote/groups/${enc(group_id)}/tasks`, { query: { filter, q: q.trim(), offset, limit }, fallback: "Couldn't load this folder's files" }),
+    // Re-queues only the files of a folder transfer that failed
+    retryFailedRemote: (group_id) => post('/transfers/remote/retry-failed', { group_id }, { fallback: "Couldn't retry the failed files" }),
 
     // ── Streaming cache ────────────────────────────────────────────────
     getMediaCacheStats: () => request('/media/cache/stats', { soft: null }),

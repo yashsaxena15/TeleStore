@@ -76,6 +76,59 @@ const PHOTO_INFO = {
     f8: { width: 4032, height: 3024, megapixels: 12.2, camera_make: "Apple", camera_model: "iPhone 13", lens: "iPhone 13 back dual wide camera 5.1mm f/1.6", aperture: 1.8, exposure: 1 / 120, iso: 100, focal_length: 4.2, flash: false, taken_at: "2026-10-12T17:45:00", latitude: 15.55271, longitude: 73.75169, altitude: 12, format: "JPEG", file_size: 4_800_000, file_name: "team-offsite.jpg", folder: "/Home" },
 };
 
+// Folder transfers' files, for GET /transfers/remote/groups/{id}/tasks (paged, searchable, filtered).
+// "Other Tools": 120 files; 40 done, 1 downloading on vm2, 2 failed, 3 waiting for Google's limit, the rest queued.
+const TOOLS_RESUMES = "2026-11-02T16:08:00Z";
+const TOOLS_FILES = Array.from({ length: 120 }, (_, n) => {
+    const i = n + 1;
+    const status = i <= 40 ? "completed" : i === 41 ? "downloading" : i <= 43 ? "failed" : i <= 46 ? "paused_quota" : "queued";
+    return {
+        task_id: `tool-${i}`, filename: `file-${String(i).padStart(3, "0")}.bin`, status, filesize: 200_000_000,
+        transferred_bytes: status === "completed" ? 200_000_000 : status === "downloading" ? 80_000_000 : 0,
+        progress: status === "completed" ? 100 : status === "downloading" ? 40 : 0,
+        download_bps: status === "downloading" ? 5_976_883 : 0, upload_bps: 0, speed_bps: status === "downloading" ? 5_976_883 : 0,
+        worker: status === "downloading" ? "vm2" : status === "completed" ? "main" : undefined,
+        cooldown_until: status === "paused_quota" ? TOOLS_RESUMES : undefined,
+        error_message: status === "failed" ? "Google Drive answered 500" : undefined,
+        source_url: `https://drive.google.com/file/d/tool${i}`, destination_path: "/Home/Other Tools",
+        group_id: "tools1", group_name: "Other Tools", source_type: "gdrive_file", created_at: "2026-11-02T07:00:00Z",
+    };
+});
+const TOOLS_SUMMARY = {
+    name: "Other Tools", total: 120, counts: { completed: 40, downloading: 1, failed: 2, paused_quota: 3, queued: 74 },
+    filesize: 24_000_000_000, transferred_bytes: 8_080_000_000, speed_bps: 5_976_883, download_bps: 5_976_883, upload_bps: 0,
+    resumes_at: TOOLS_RESUMES, error: "Google Drive answered 500", source_url: "https://drive.google.com/drive/folders/tools",
+    destination_path: "/Home/Other Tools", created_at: "2026-11-02T07:00:00Z",
+};
+const GROUP_FILES = {
+    tools1: { files: TOOLS_FILES, summary: TOOLS_SUMMARY },
+    drive1: {
+        files: [
+            { task_id: "g0", filename: "IMG_000.jpg", filesize: 2_000_000, transferred_bytes: 2_000_000, status: "completed", progress: 100, group_id: "drive1", group_name: "Goa trip" },
+            { task_id: "g1", filename: "IMG_001.jpg", filesize: 2_000_000, transferred_bytes: 0, status: "failed", progress: 0, group_id: "drive1", group_name: "Goa trip", error_message: "Google Drive refused the download (its sign-in had expired). Tap Retry." },
+            { task_id: "g2", filename: "IMG_002.jpg", filesize: 2_000_000, transferred_bytes: 0, status: "failed", progress: 0, group_id: "drive1", group_name: "Goa trip", error_message: "Google Drive refused the download (its sign-in had expired). Tap Retry." },
+        ],
+        summary: null,
+    },
+};
+const GROUP_ORDER = { discovering: 0, downloading: 0, uploading_tg: 0, failed: 1, queued: 2, paused_quota: 2, completed: 3, cancelled: 3 };
+const GROUP_FILTER = { active: ["discovering", "downloading", "uploading_tg"], waiting: ["queued", "paused_quota"], failed: ["failed"], done: ["completed", "cancelled"] };
+const groupTasks = (id, url) => {
+    const group = GROUP_FILES[id];
+    if (!group) return null;
+    const filter = url.searchParams.get("filter") || "all";
+    const q = (url.searchParams.get("q") || "").toLowerCase();
+    const offset = Number(url.searchParams.get("offset") || 0);
+    const limit = Number(url.searchParams.get("limit") || 50);
+    const matching = group.files
+        .filter((t) => filter === "all" || (GROUP_FILTER[filter] || []).includes(t.status))
+        .filter((t) => !q || t.filename.toLowerCase().includes(q))
+        .map((t, i) => ({ t, i }))
+        .sort((a, b) => GROUP_ORDER[a.t.status] - GROUP_ORDER[b.t.status] || a.i - b.i)
+        .map(({ t }) => t);
+    return { tasks: matching.slice(offset, offset + limit), total: matching.length, offset, limit, summary: group.summary || ROUTES["/transfers/remote/tasks"].groups[id] };
+};
+
 const ROUTES = {
     "/files/protection": { method: "password", email_hint: null },
     "/auth/check": { authenticated: true, username: "admin" },
@@ -108,12 +161,14 @@ const ROUTES = {
     },
     "/media/cache/stats": { chunk_count: 1820, header_count: 44, total_size_formatted: "18.2 GB", max_size_formatted: "25 GB", usage_percent: 45.5, free_disk_space_formatted: "112 GB" },
     "/transfers/remote/tasks": { tasks: [
-        { task_id: "t1", filename: "ubuntu-24.04.1-desktop-amd64.iso", filesize: 5_700_000_000, transferred_bytes: 3_600_000_000, speed_bps: 12_400_000, status: "downloading", progress: 63, source_type: "magnet", peer_count: 48 },
+        { task_id: "t1", filename: "ubuntu-24.04.1-desktop-amd64.iso", filesize: 5_700_000_000, transferred_bytes: 3_600_000_000, speed_bps: 12_400_000, download_bps: 11_744_051, upload_bps: 655_949, status: "downloading", progress: 63, source_type: "magnet", peer_count: 48, worker: "vm2", source_url: "magnet:?xt=urn:btih:ubuntu2404", destination_path: "/Home/ISO", created_at: "2026-11-02T08:00:00Z" },
         { task_id: "t5", filename: "old-backup.tar.gz", filesize: 1_200_000_000, transferred_bytes: 0, status: "failed", progress: 0, source_type: "url", error_message: "HTTP 403 from source", created_at: "2026-10-18T20:00:00Z" },
         // A Google Drive folder copy whose files failed (the summary says why)
         { task_id: "g1", filename: "IMG_001.jpg", filesize: 2_000_000, transferred_bytes: 0, status: "failed", progress: 0, source_type: "direct_url", group_id: "drive1", group_name: "Goa trip", group_type: "folder", error_message: "Google Drive refused the download (its sign-in had expired). Tap Retry.", created_at: "2026-10-27T20:00:00Z" },
     ], groups: {
-        drive1: { total: 3, counts: { completed: 1, failed: 2 }, filesize: 6_000_000, transferred_bytes: 2_000_000, speed_bps: 0, error: "Google Drive refused the download (its sign-in had expired). Tap Retry." },
+        drive1: { total: 3, counts: { completed: 1, failed: 2 }, filesize: 6_000_000, transferred_bytes: 2_000_000, speed_bps: 0, error: "Google Drive refused the download (its sign-in had expired). Tap Retry.", name: "Goa trip", source_url: "https://drive.google.com/drive/folders/goa", destination_path: "/Home/Goa trip" },
+        // A big folder still running while three of its files wait for Google's limit (only a summary is sent)
+        tools1: { ...TOOLS_SUMMARY },
     } },
 };
 
@@ -358,6 +413,12 @@ const mutation = (req, res, url, body) => {
     if (url.pathname === "/transfers/remote/instagram") {
         return send(res, 200, { success: true, message: "Importing 2 items from @nasa.", count: 2, tasks: [] });
     }
+    if (url.pathname === "/transfers/remote/retry-failed") {
+        const group = GROUP_FILES[JSON.parse(body || "{}").group_id];
+        if (!group) return send(res, 404, { detail: "Folder transfer not found." });
+        const n = group.files.filter((t) => t.status === "failed").length;
+        return send(res, 200, { success: true, retried_count: n, message: `Retrying ${n} failed file(s).` });
+    }
     if (url.pathname === "/vault/unlock") {
         return send(res, 429, { detail: "Too many wrong attempts. Try again in 1 minute." }, "application/json");
     }
@@ -399,6 +460,12 @@ http.createServer((req, res) => {
         if (url.pathname === "/user/notifications") return send(res, 200, notificationsJson());
         if (url.pathname === "/system/settings") return send(res, 200, SERVER);
         if (url.pathname === "/user/features") return send(res, 200, { archives: SERVER.archives_enabled, is_owner: true });
+        const groupPage = /^\/transfers\/remote\/groups\/([^/]+)\/tasks$/.exec(url.pathname);
+        if (groupPage) {
+            requests.push({ method: req.method, path: url.pathname, body: url.search });
+            const page = groupTasks(decodeURIComponent(groupPage[1]), url);
+            return page ? send(res, 200, page) : send(res, 404, { detail: "Folder transfer not found." });
+        }
         const photoInfo = /^\/files\/([^/]+)\/photo-info$/.exec(url.pathname);
         if (photoInfo) return PHOTO_INFO[photoInfo[1]] ? send(res, 200, PHOTO_INFO[photoInfo[1]]) : send(res, 422, { detail: "Not an image" });
         if (url.pathname === "/auth/devices") return send(res, 200, { devices: DEVICES });

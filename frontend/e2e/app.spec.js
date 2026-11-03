@@ -177,8 +177,83 @@ test.describe("trash, starter folders and new transfers", () => {
         await page.goto("/transfers");
         const folder = page.getByRole("row").filter({ hasText: "Goa trip" });
         await expect(folder.getByText(/2 of 3 files failed: Google Drive refused the download/)).toBeVisible();
+        // Only the failed files go again
         await folder.getByRole("button", { name: /Retry failed/ }).click();
-        await expect.poll(async () => (await mutations(request)).find((r) => r.path === "/transfers/remote/resume-group")?.body).toContain("drive1");
+        await expect.poll(async () => (await mutations(request)).find((r) => r.path === "/transfers/remote/retry-failed")?.body).toBe('{"group_id":"drive1"}');
+        expect((await mutations(request)).some((r) => r.path === "/transfers/remote/resume-group")).toBe(false);
+    });
+
+    test("live ↓/↑ totals, the machine, and Google's limit as a note on a running folder", async ({ page, request }) => {
+        await page.goto("/transfers");
+        await expect(page.getByRole("banner").getByText(/↓ .*MB\/s ↑ .*KB\/s/)).toBeVisible();
+        const iso = page.getByRole("row").filter({ hasText: "ubuntu-24.04.1-desktop-amd64.iso" });
+        await expect(iso.getByText("vm2")).toBeVisible();
+        const tools = page.getByRole("row").filter({ hasText: "Other Tools" });
+        await expect(tools.getByText("Downloading")).toBeVisible();
+        await expect(tools.getByText(/^3 files wait for Google's limit · next resumes at /)).toBeVisible();
+        await tools.getByRole("button", { name: /Resume now/ }).click();
+        await expect.poll(async () => (await mutations(request)).find((r) => r.path === "/transfers/remote/resume-group")?.body).toBe('{"group_id":"tools1"}');
+    });
+
+    test("a transfer's details: source link, destination, machine and what can be done", async ({ page }) => {
+        await page.goto("/transfers");
+        await page.getByRole("button", { name: "ubuntu-24.04.1-desktop-amd64.iso", exact: true }).click();
+        const details = page.getByRole("dialog", { name: "ubuntu-24.04.1-desktop-amd64.iso" });
+        await expect(details.getByText("magnet:?xt=urn:btih:ubuntu2404")).toBeVisible();
+        await expect(details.getByText("/Home/ISO")).toBeVisible();
+        await expect(details.getByText("vm2")).toBeVisible();
+        await expect(details.getByRole("button", { name: "Copy link" })).toBeVisible();
+        await expect(details.getByRole("button", { name: "Cancel" })).toBeVisible();
+        await expect(details.getByRole("button", { name: "Retry" })).toHaveCount(0);
+    });
+
+    test("cancelling everything asks first", async ({ page, request }) => {
+        await page.goto("/transfers");
+        await page.getByRole("button", { name: "Bulk actions" }).click();
+        await page.getByRole("menuitem", { name: "Cancel all…" }).click();
+        const ask = page.getByRole("alertdialog", { name: "Cancel all transfers?" });
+        await ask.getByRole("button", { name: "Keep them" }).click();
+        await expect(ask).toBeHidden();
+        expect((await mutations(request)).filter((r) => r.path.startsWith("/transfers/remote/cancel"))).toEqual([]);
+    });
+
+    test("a folder transfer has its own page: pages of 50, search, filter, per-file retry, retry failed, cancel asks", async ({ page, request }) => {
+        await page.goto("/transfers");
+        await page.getByRole("button", { name: "Other Tools", exact: true }).click();
+        const folder = page.getByRole("region", { name: "Folder transfer Other Tools" });
+        await expect(folder.getByText(/40 of 120 files/)).toBeVisible();
+        await expect(folder.getByRole("link", { name: "https://drive.google.com/drive/folders/tools" })).toBeVisible();
+        await expect(folder.getByText(/^3 files wait for Google's limit/)).toBeVisible();
+        await expect(page.getByText("50 of 120 files")).toBeVisible();
+        // Running first, then failed, waiting and done
+        const files = page.getByRole("table", { name: "Files in Other Tools" }).getByRole("row");
+        await expect(files.first()).toContainText("file-041.bin");
+        await expect(files.nth(1)).toContainText("file-042.bin");
+        await page.getByRole("button", { name: "Load more" }).click();
+        await expect(page.getByText("100 of 120 files")).toBeVisible();
+
+        await page.getByRole("textbox", { name: "Search files" }).fill("file-007");
+        await expect(page.getByText("1 of 1 files")).toBeVisible();
+        await expect(files).toHaveCount(1);
+        await page.getByRole("textbox", { name: "Search files" }).fill("");
+
+        await page.getByRole("group", { name: "Filter files" }).getByRole("button", { name: "Failed" }).click();
+        await expect(page.getByText("2 of 2 files")).toBeVisible();
+        await expect.poll(async () => (await mutations(request)).some((r) => r.path === "/transfers/remote/groups/tools1/tasks" && r.body.includes("filter=failed"))).toBe(true);
+        await page.getByRole("button", { name: "Retry file-043.bin" }).click();
+        await expect.poll(async () => (await mutations(request)).find((r) => r.path === "/transfers/remote/retry")?.body).toBe('{"task_id":"tool-43"}');
+
+        await folder.getByRole("button", { name: "Retry 2 failed" }).click();
+        await expect.poll(async () => (await mutations(request)).find((r) => r.path === "/transfers/remote/retry-failed")?.body).toBe('{"group_id":"tools1"}');
+
+        await folder.getByRole("button", { name: "Cancel folder…" }).click();
+        const ask = page.getByRole("alertdialog", { name: "Cancel Other Tools?" });
+        await expect(ask.getByText(/The 80 files not copied yet won't be/)).toBeVisible();
+        await ask.getByRole("button", { name: "Cancel folder" }).click();
+        await expect.poll(async () => (await mutations(request)).find((r) => r.path === "/transfers/remote/cancel-group")?.body).toBe('{"group_id":"tools1"}');
+
+        await page.getByRole("button", { name: "All transfers" }).click();
+        await expect(page.getByRole("table", { name: "Transfers" })).toBeVisible();
     });
 
     test("New transfer offers leech, video and Instagram", async ({ page }) => {

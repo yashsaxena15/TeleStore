@@ -15,7 +15,7 @@ const formatSpeed = (bytesPerSec) => (bytesPerSec > 0 ? `${formatBytes(bytesPerS
 
 // One transfer in the dock drawer: name, status badge, actions, progress and stats.
 const TransferItem = ({ item, actions }) => {
-    const { pauseUpload, resumeUpload, cancelUpload, pauseDownload, resumeDownload, cancelDownload, cancelRemoteTransfer, cancelRemoteGroup, resumeRemoteGroup } = actions;
+    const { pauseUpload, resumeUpload, cancelUpload, pauseDownload, resumeDownload, cancelDownload, cancelRemoteTransfer, cancelRemoteGroup, resumeRemoteGroup, retryRemoteTransfer } = actions;
     const isGroup = Boolean(item.isGroup);
     const isRemote = item.type === "remote";
     const isUpload = item.type === "upload";
@@ -50,7 +50,7 @@ const TransferItem = ({ item, actions }) => {
           {isRemote && item.phase && <div className={cn("text-[10.5px] truncate", tone === "warning" ? "text-warning font-medium" : tone === "info" ? "text-info font-medium" : "text-muted-foreground")}>{item.phase}</div>}
         </div>
         <div className="flex items-center shrink-0">
-          {canResumeRemaining && (<Button variant="ghost" size="icon" className="h-7 w-7 text-warning" onClick={() => resumeRemoteGroup(isGroup ? item.group_id : item.id)} title="Resume remaining" aria-label={`Resume remaining files of ${name}`}>
+          {canResumeRemaining && (<Button variant="ghost" size="icon" className="h-7 w-7 text-warning" onClick={() => (isGroup ? resumeRemoteGroup(item.group_id) : retryRemoteTransfer(item.id))} title="Resume remaining" aria-label={`Resume remaining files of ${name}`}>
               <Play className="w-3.5 h-3.5 fill-current"/>
             </Button>)}
           {!isRemote && isTransferring && (<Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={() => (isUpload ? pauseUpload(item.id) : pauseDownload(item.id))} title="Pause" aria-label={`Pause ${name}`}>
@@ -76,9 +76,9 @@ const TransferItem = ({ item, actions }) => {
 export const DockTransfers = ({ alone = false }) => {
     const navigate = useNavigate();
     const manager = useTransferManager();
-    const { uploads, downloads, remoteTransfers, activeUploads, activeDownloads, activeRemote, totalActiveCount, busyCount, stats, pauseAll, resumeAll } = manager;
+    const { uploads, downloads, remoteTransfers, remoteGroups, activeUploads, activeDownloads, activeRemote, totalActiveCount, busyCount, stats, pauseAll, resumeAll } = manager;
     const [open, setOpen] = useState(false);
-    const { groupedRemoteItems, singleRemoteItems } = groupRemoteTransfers(remoteTransfers);
+    const { groupedRemoteItems, singleRemoteItems } = groupRemoteTransfers(remoteTransfers, remoteGroups);
     const items = [
         ...groupedRemoteItems,
         ...singleRemoteItems,

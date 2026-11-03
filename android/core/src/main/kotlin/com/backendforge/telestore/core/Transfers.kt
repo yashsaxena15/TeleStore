@@ -78,6 +78,18 @@ data class RemoteTask(
     @SerialName("group_name") val groupName: String? = null,
     /** What the server is doing right now, in words ("Google Drive limit reached, resumes at 14:00"). */
     val phase: String? = null,
+    /** Download and upload speed, smoothed over a few seconds (newer servers; older ones only send [speed]). */
+    @SerialName("download_bps") val downloadBps: Double? = null,
+    @SerialName("upload_bps") val uploadBps: Double? = null,
+    /** The machine working on it: "main" or a worker's id like "vm2". */
+    val worker: String? = null,
+    /** When a file paused by Google's download limit tries again (UTC, ISO). */
+    @SerialName("cooldown_until") val cooldownUntil: String? = null,
+    @SerialName("source_url") val sourceUrl: String? = null,
+    @SerialName("destination_path") val destinationPath: String? = null,
+    @SerialName("eta_seconds") val etaSeconds: Double? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null,
 ) {
     val isActive: Boolean get() = status in ACTIVE
     val isFailed: Boolean get() = status == "failed"
@@ -125,6 +137,13 @@ data class GroupSummary(
     val error: String? = null,
     /** When files paused by Google Drive's download limit resume by themselves (UTC, ISO), when some are. */
     @SerialName("resumes_at") val resumesAt: String? = null,
+    /** The folder's name, its link and where it goes (newer servers). */
+    val name: String? = null,
+    @SerialName("source_url") val sourceUrl: String? = null,
+    @SerialName("destination_path") val destinationPath: String? = null,
+    @SerialName("download_bps") val downloadBps: Double? = null,
+    @SerialName("upload_bps") val uploadBps: Double? = null,
+    @SerialName("created_at") val createdAt: String? = null,
 ) {
     val done: Int get() = counts["completed"] ?: 0
     val failed: Int get() = counts["failed"] ?: 0
@@ -139,6 +158,24 @@ data class GroupSummary(
 data class RemoteTaskList(
     val tasks: List<RemoteTask> = emptyList(),
     val groups: Map<String, GroupSummary> = emptyMap(),
+)
+
+/** One page of a folder transfer's files (search and filter applied by the server). */
+@Serializable
+data class GroupTaskPage(
+    val tasks: List<RemoteTask> = emptyList(),
+    /** How many files match, across every page. */
+    val total: Int = 0,
+    val offset: Int = 0,
+    val limit: Int = 50,
+    val summary: GroupSummary? = null,
+)
+
+@Serializable
+data class RetryFailedReply(
+    val success: Boolean = true,
+    @SerialName("retried_count") val retried: Int = 0,
+    val message: String? = null,
 )
 
 // ── Uploading ──────────────────────────────────────────────────────────────────

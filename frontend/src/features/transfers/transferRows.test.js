@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { buildTransferItems, countByFilter, matchesFilter, formatEta, statusInfo, rowActions, kindLabel, activitySummary } from "./transferRows";
-import { countRemoteTasks } from "./transferGrouping";
+import { buildTransferItems, countByFilter, matchesFilter, formatEta, statusInfo, rowActions, kindLabel, activitySummary, itemSpeeds, totalSpeeds, speedText, headerLine, googleNote, workerLabel, fileActions, detailFacts, FOLDER_FILTERS } from "./transferRows";
+import { countRemoteTasks, groupRemoteTransfers } from "./transferGrouping";
+import { smoothSpeed } from "./speed";
 
 const uploads = [
     { id: "u1", filename: "a.mkv", status: "completed", startTime: "2026-10-19T08:00:00Z" },
@@ -39,7 +40,7 @@ describe("row helpers", () => {
         expect(formatEta(3720)).toBe("1h 2m");
     });
     it("labels status and kind", () => {
-        expect(statusInfo({ status: "paused_quota" })).toEqual({ label: "Quota pause", tone: "warning" });
+        expect(statusInfo({ status: "paused_quota" })).toEqual({ label: "Google limit", tone: "warning" });
         expect(statusInfo({ status: "uploading_tg" }).label).toBe("To Telegram");
         expect(kindLabel({ type: "remote", source_type: "magnet" })).toBe("Magnet");
         expect(kindLabel({ isGroup: true, group_type: "folder" })).toBe("Folder leech");
@@ -48,14 +49,14 @@ describe("row helpers", () => {
         expect(kindLabel({ type: "remote", source_type: "media" })).toBe("Video download");
         expect(kindLabel({ isGroup: true, group_type: "media" })).toBe("Playlist");
         expect(statusInfo({ status: "paused_quota", source_type: "media" }).label).toBe("Waiting");
-        expect(statusInfo({ status: "paused_quota", source_type: "gdrive_file" }).label).toBe("Quota pause");
+        expect(statusInfo({ status: "paused_quota", source_type: "gdrive_file" }).label).toBe("Google limit");
     });
     it("offers the right buttons", () => {
         expect(rowActions({ type: "upload", status: "uploading" })).toMatchObject({ pause: true, cancel: true, retry: false });
         expect(rowActions({ type: "remote", status: "downloading" })).toMatchObject({ pause: false, cancel: true });
-        expect(rowActions({ type: "remote", status: "paused_quota" })).toMatchObject({ resumeRemaining: true, cancel: true });
+        expect(rowActions({ type: "remote", status: "paused_quota" })).toMatchObject({ resumeNow: true, cancel: true });
         expect(rowActions({ type: "download", status: "completed", savePath: "/x" }).showInFolder).toBe(true);
-        expect(rowActions({ type: "remote", isGroup: true, status: "completed", items: [{ status: "failed" }] }).resumeRemaining).toBe(true);
+        expect(rowActions({ type: "remote", isGroup: true, status: "failed", items: [{ status: "failed" }] })).toMatchObject({ retryFailed: true, retry: false, resumeNow: false });
     });
 });
 
@@ -102,5 +103,95 @@ describe("a folder leech sent as a summary", () => {
         expect(group.status).toBe("paused_quota");
         expect(group.cooldown_until).toBe("2026-10-30T10:38:00Z");
         expect(group.phase).toMatch(/^Google Drive quota limit reached\. Auto-resumes at /);
+    });
+});
+
+describe("the server pausing only files that hit Google's limit", () => {
+    const at = () => "4:08 PM";
+    const summary = { name: "Other Tools", total: 2967, counts: { completed: 326, downloading: 2, paused_quota: 3 }, filesize: 26_628_797_235, transferred_bytes: 0, speed_bps: 9, download_bps: 7, upload_bps: 2, resumes_at: "2026-11-02T10:38:00Z", source_url: "https://drive.google.com/x", destination_path: "/Home/Tools", created_at: "2026-11-02T08:00:00Z" };
+    it("keeps a folder running while some of its files wait, with an amber note", () => {
+        const [group] = groupRemoteTransfers([], { g: summary }).groupedRemoteItems;
+        expect(group.status).toBe("downloading");
+        expect(group.filename).toBe("Other Tools");
+        expect(group.source_url).toBe("https://drive.google.com/x");
+        expect(group.destination_path).toBe("/Home/Tools");
+        expect(group.pausedCount).toBe(3);
+        expect(googleNote(group, at)).toBe("3 files wait for Google's limit · next resumes at 4:08 PM");
+        expect(rowActions(group)).toMatchObject({ resumeNow: true, retryFailed: false, cancel: true });
+        expect(itemSpeeds(group)).toEqual({ down: 7, up: 2 });
+    });
+    it("shows the limit as the folder's status only when every file left waits", () => {
+        const [group] = groupRemoteTransfers([], { g: { ...summary, counts: { completed: 10, paused_quota: 1 } } }).groupedRemoteItems;
+        expect(group.status).toBe("paused_quota");
+        expect(statusInfo(group).label).toBe("Google limit");
+        expect(googleNote(group, at)).toBe("1 file waits for Google's limit · resumes at 4:08 PM");
+    });
+    it("a folder waiting its turn isn't shown as paused", () => {
+        const [group] = groupRemoteTransfers([], { g: { ...summary, counts: { queued: 5, paused_quota: 2 } } }).groupedRemoteItems;
+        expect(group.status).toBe("queued");
+    });
+    it("lists folders the server sends only as a summary, and counts them once", () => {
+        const items = buildTransferItems([], [], [{ task_id: "x", id: "x", status: "queued", group_id: "g", group_summary: summary }], { g: summary, h: { total: 1, counts: { failed: 1 } } });
+        expect(items.filter((i) => i.isGroup).map((i) => i.id).sort()).toEqual(["g", "h"]);
+        expect(countRemoteTasks([], { g: summary, h: { total: 1, counts: { failed: 1 } } })).toMatchObject({ running: 2, pausedQuota: 3, failed: 1, completed: 326 });
+    });
+    it("a single paused file says when it tries again", () => {
+        expect(googleNote({ type: "remote", status: "paused_quota", cooldown_until: "2026-11-02T10:38:00Z" }, at)).toBe("Waits for Google's download limit · resumes at 4:08 PM");
+        expect(googleNote({ type: "remote", status: "paused_quota" })).toBe("Waits for Google's download limit · resumes by itself");
+        expect(googleNote({ type: "remote", status: "paused_quota", source_type: "media" })).toBe("");
+        expect(googleNote({ type: "remote", status: "downloading" })).toBe("");
+    });
+});
+
+describe("speeds", () => {
+    it("splits server speeds into down and up; older servers count their one speed as the download", () => {
+        expect(itemSpeeds({ type: "remote", status: "downloading", download_bps: 5, upload_bps: 3, speed_bps: 8 })).toEqual({ down: 5, up: 3 });
+        expect(itemSpeeds({ type: "remote", status: "downloading", speed_bps: 8 })).toEqual({ down: 8, up: 0 });
+        expect(itemSpeeds({ type: "remote", status: "completed", speed_bps: 8 })).toEqual({ down: 0, up: 0 });
+        expect(itemSpeeds({ type: "upload", status: "uploading", speed: 4 })).toEqual({ down: 0, up: 4 });
+        expect(itemSpeeds({ type: "download", status: "downloading", speed: 6 })).toEqual({ down: 6, up: 0 });
+    });
+    it("adds them up for the header", () => {
+        const speeds = totalSpeeds([{ type: "upload", status: "uploading", speed: 4 }, { type: "remote", status: "downloading", download_bps: 11_744_051, upload_bps: 6_396_309 }]);
+        expect(speeds).toEqual({ down: 11_744_051, up: 6_396_313 });
+        expect(speedText(speeds)).toBe("↓ 11.2 MB/s ↑ 6.1 MB/s");
+        expect(headerLine("3 running", speeds)).toBe("3 running · ↓ 11.2 MB/s ↑ 6.1 MB/s");
+        expect(headerLine("", { down: 0, up: 0 })).toBe("");
+    });
+    it("smooths a speed over about five seconds", () => {
+        expect(smoothSpeed(0, 1000, 1)).toBe(1000);
+        const burst = smoothSpeed(1000, 10_000, 1);
+        expect(burst).toBeGreaterThan(2000);
+        expect(burst).toBeLessThan(3500);
+        expect(smoothSpeed(burst, 0, 1)).toBeLessThan(burst);
+        expect(smoothSpeed(burst, 0, 1)).toBeGreaterThan(1000);
+        expect(smoothSpeed(500, 100, 0)).toBe(500);
+    });
+});
+
+describe("a folder's files and details", () => {
+    it("names the machines", () => {
+        expect(workerLabel("main")).toBe("Main server");
+        expect(workerLabel("vm2")).toBe("vm2");
+        expect(workerLabel(undefined)).toBe("");
+    });
+    it("offers retry for failed files and cancel for unfinished ones", () => {
+        expect(fileActions({ status: "failed" })).toMatchObject({ retry: true, cancel: false });
+        expect(fileActions({ status: "paused_quota" })).toMatchObject({ retry: false, cancel: true, resumeNow: true });
+        expect(fileActions({ status: "completed", source_url: "x" })).toMatchObject({ retry: false, cancel: false, copyLink: true });
+        expect(FOLDER_FILTERS.map((f) => f.id)).toEqual(["all", "active", "waiting", "failed", "done"]);
+    });
+    it("lists a transfer's facts in order, with the full error", () => {
+        const facts = detailFacts({ type: "remote", source_url: "https://x/y", destination_path: "/Home", filesize: 2048, transferred_bytes: 1024, bytesUploaded: 1024, created_at: "2026-11-02T08:00:00Z", worker: "main", error_message: "HTTP 403 from source" }, { formatDate: () => "today" });
+        expect(facts.map((f) => [f.label, f.value])).toEqual([
+            ["Source link", "https://x/y"],
+            ["Destination folder", "/Home"],
+            ["Size", "1.0 KB of 2.0 KB"],
+            ["Started", "today"],
+            ["Machine", "Main server"],
+            ["Error", "HTTP 403 from source"],
+        ]);
+        expect(facts[0].kind).toBe("link");
+        expect(facts[5].kind).toBe("error");
     });
 });

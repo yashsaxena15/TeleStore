@@ -407,6 +407,19 @@ class TeleStoreApi(
     suspend fun cancelRemoteGroup(groupId: String): MessageReply = post(url("transfers/remote/cancel-group"), buildJsonObject { put("group_id", groupId) })
     suspend fun resumeRemoteGroup(groupId: String): MessageReply = post(url("transfers/remote/resume-group"), buildJsonObject { put("group_id", groupId) })
     suspend fun clearFinishedRemote(): MessageReply = post(url("transfers/remote/clear-completed"), buildJsonObject { })
+    /** Re-queues only the files of a folder transfer that failed. */
+    suspend fun retryFailedRemote(groupId: String): RetryFailedReply = post(url("transfers/remote/retry-failed"), buildJsonObject { put("group_id", groupId) })
+
+    /** One page of a folder transfer's files; [filter] is all, active, waiting, failed or done; [query] matches names. */
+    suspend fun remoteGroupTasks(groupId: String, filter: String = "all", query: String = "", offset: Int = 0, limit: Int = 50): GroupTaskPage =
+        get(
+            url("transfers/remote/groups").newBuilder().addPathSegment(groupId).addPathSegment("tasks")
+                .addQueryParameter("filter", filter)
+                .apply { if (query.isNotBlank()) addQueryParameter("q", query.trim()) }
+                .addQueryParameter("offset", offset.coerceAtLeast(0).toString())
+                .addQueryParameter("limit", limit.coerceIn(1, 200).toString())
+                .build(),
+        )
 
     // ── Add from a link (the server fetches it) ────────────────────────────────
     /** A Google Drive file or folder, a magnet, or a direct link, saved into [folder]. */
