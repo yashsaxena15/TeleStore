@@ -59,6 +59,11 @@ import com.backendforge.telestore.data.AppContainer
 import com.backendforge.telestore.data.Session
 import com.backendforge.telestore.ui.components.ConfirmDialog
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.ui.text.style.TextOverflow
+import com.backendforge.telestore.ui.components.AppTopBar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -86,153 +91,100 @@ fun MoreScreen(
     var isOwner by remember { mutableStateOf(false) }
     LaunchedEffect(session.token) { isOwner = runCatching { container.api().isOwner() }.getOrDefault(false) }
 
+    val unread by container.unreadNotifications.collectAsStateWithLifecycle()
+
     Scaffold(
         modifier = modifier,
-        topBar = {
-            TopAppBar(
-                title = { Text("More") },
-            )
-        },
+        topBar = { AppTopBar(title = "More") },
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
         ) {
-            // User & Server Card
+            // Who's signed in, and to which server (opens Account)
             Card(
                 onClick = onNavigateAccount,
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.AccountCircle,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(40.dp),
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.AccountCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(36.dp),
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = session.username,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = session.username,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Dns,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(14.dp),
                             )
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Signed in · Account, password, Telegram",
+                                text = session.server,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
-
-                    HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 12.dp),
-                        color = DividerDefaults.color.copy(alpha = 0.5f),
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(14.dp),
                     )
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Dns,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp),
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = session.server,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
                 }
             }
 
             StorageSection(container)
 
-            Spacer(modifier = Modifier.height(20.dp))
-
-            Text(
-                text = "Places",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
-            )
-
-            // Places Card
-            Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column {
-                    MoreNavRow(icon = Icons.Default.Lock, label = "Private Vault", onClick = onNavigateVault)
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
-                    MoreNavRow(icon = Icons.Default.Cloud, label = "Google Drive", onClick = onNavigateDrive)
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
-                    MoreNavRow(icon = Icons.Default.Lan, label = "WebDAV (use in other apps)", onClick = onNavigateWebDav)
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
-                    val unread by container.unreadNotifications.collectAsStateWithLifecycle()
-                    MoreNavRow(icon = Icons.Default.Notifications, label = if (unread > 0) "Notifications · $unread new" else "Notifications", onClick = onNavigateNotifications)
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
-                    MoreNavRow(icon = Icons.Default.CloudDone, label = "Offline files", onClick = onNavigateOffline)
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
-                    MoreNavRow(icon = Icons.AutoMirrored.Filled.QueueMusic, label = "Playlists", onClick = onNavigatePlaylists)
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
-                    MoreNavRow(icon = Icons.Default.Star, label = "Starred", onClick = onNavigateStarred)
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
-                    MoreNavRow(icon = Icons.Default.Schedule, label = "Recent", onClick = onNavigateRecent)
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
-                    MoreNavRow(
-                        icon = Icons.Default.Delete,
-                        label = "Trash",
-                        onClick = onNavigateTrash,
-                    )
-                    HorizontalDivider(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        color = DividerDefaults.color.copy(alpha = 0.5f),
-                    )
-                    MoreNavRow(
-                        icon = Icons.Default.Inbox,
-                        label = "Telegram Inbox",
-                        onClick = onNavigateInbox,
-                    )
-                }
+            SectionLabel("Your files")
+            NavGroup {
+                MoreNavRow(icon = Icons.Default.Star, label = "Starred", onClick = onNavigateStarred)
+                MoreNavRow(icon = Icons.Default.Schedule, label = "Recent", onClick = onNavigateRecent)
+                MoreNavRow(icon = Icons.Default.CloudDone, label = "Offline files", onClick = onNavigateOffline)
+                MoreNavRow(icon = Icons.AutoMirrored.Filled.QueueMusic, label = "Playlists", onClick = onNavigatePlaylists)
+                MoreNavRow(icon = Icons.Default.Inbox, label = "Telegram Inbox", onClick = onNavigateInbox)
+                MoreNavRow(icon = Icons.Default.Delete, label = "Trash", onClick = onNavigateTrash)
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
-            Text(
-                text = "Settings",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
-            )
-            Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column {
-                    MoreNavRow(icon = Icons.Default.Person, label = "Account and Telegram", onClick = onNavigateAccount)
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
-                    MoreNavRow(icon = Icons.Default.Movie, label = "Video downloads", onClick = onNavigateDownloads)
-                    if (isOwner) {
-                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = DividerDefaults.color.copy(alpha = 0.5f))
-                        MoreNavRow(icon = Icons.Default.Group, label = "Users", onClick = onNavigateUsers)
-                    }
+            SectionLabel("Private and connected")
+            NavGroup {
+                MoreNavRow(icon = Icons.Default.Lock, label = "Private Vault", onClick = onNavigateVault)
+                MoreNavRow(icon = Icons.Default.Cloud, label = "Google Drive", onClick = onNavigateDrive)
+                MoreNavRow(icon = Icons.Default.Lan, label = "WebDAV (use in other apps)", onClick = onNavigateWebDav)
+            }
+
+            SectionLabel("Settings")
+            NavGroup {
+                MoreNavRow(icon = Icons.Default.Person, label = "Account and Telegram", onClick = onNavigateAccount)
+                MoreNavRow(icon = Icons.Default.Notifications, label = if (unread > 0) "Notifications · $unread new" else "Notifications", onClick = onNavigateNotifications)
+                MoreNavRow(icon = Icons.Default.Movie, label = "Video downloads", onClick = onNavigateDownloads)
+                if (isOwner) {
+                    MoreNavRow(icon = Icons.Default.Group, label = "Users", onClick = onNavigateUsers)
                 }
             }
 
             AppearanceSection(container)
             SecuritySection(container)
             AboutSection(container)
-
-            Spacer(modifier = Modifier.height(8.dp))
 
             OutlinedButton(
                 onClick = { showSignOutConfirm = true },
@@ -241,7 +193,7 @@ fun MoreScreen(
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 16.dp),
+                    .padding(top = 20.dp, bottom = 8.dp),
             ) {
                 Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
@@ -273,6 +225,23 @@ fun MoreScreen(
     }
 }
 
+/** A card of navigation rows with a thin line between each (the rows come from [content]). */
+@Composable
+private fun NavGroup(content: @Composable ColumnScope.() -> Unit) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(
+                space = 1.dp,
+            ),
+            modifier = Modifier.background(DividerDefaults.color.copy(alpha = 0.35f)),
+        ) { content() }
+    }
+}
+
 @Composable
 private fun MoreNavRow(
     icon: ImageVector,
@@ -283,13 +252,14 @@ private fun MoreNavRow(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainer)
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurface,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(22.dp),
         )
         Spacer(modifier = Modifier.width(16.dp))
@@ -303,7 +273,7 @@ private fun MoreNavRow(
             imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(14.dp),
         )
     }
 }

@@ -9,7 +9,8 @@ enum class Place(
     val defaultSortBy: SortBy,
     val defaultAscending: Boolean,
 ) {
-    HOME(TeleStoreApi.HOME, "Home", SortBy.NAME, true),
+    // The Files tab's top folder: called "Files" so it isn't mixed up with the Home tab
+    HOME(TeleStoreApi.HOME, "Files", SortBy.NAME, true),
     STARRED("starred", "Starred", SortBy.NAME, true),
     RECENT("all", "Recent", SortBy.DATE, false),
     TRASH("trash", "Trash", SortBy.NAME, true),
@@ -33,4 +34,15 @@ object Places {
     }
 
     fun isSpecial(path: String): Boolean = fromPath(path)?.let { it != Place.HOME } ?: false
+}
+
+/** How folders show their contents: a compact list (the default) or a grid of cards. */
+enum class FilesView(val wire: String) {
+    LIST("list"),
+    GRID("grid");
+
+    companion object {
+        /** The saved choice; anything unknown or missing is the list. */
+        fun parse(raw: String?): FilesView = entries.firstOrNull { it.wire == raw } ?: LIST
+    }
 }

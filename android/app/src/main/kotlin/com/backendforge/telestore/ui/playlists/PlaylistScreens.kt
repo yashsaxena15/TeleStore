@@ -1,5 +1,6 @@
 package com.backendforge.telestore.ui.playlists
 
+import com.backendforge.telestore.ui.components.AppTopBar
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -160,10 +161,7 @@ fun PlaylistsScreen(container: AppContainer, onBack: (() -> Unit)?, onOpen: (Pla
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Playlists") },
-                navigationIcon = { if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
-            )
+            AppTopBar(title = "Playlists", onBack = onBack)
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(onClick = { creating = true }, icon = { Icon(Icons.Filled.Add, contentDescription = null) }, text = { Text("New playlist") })

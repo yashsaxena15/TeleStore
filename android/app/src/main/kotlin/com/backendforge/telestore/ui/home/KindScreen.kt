@@ -121,12 +121,7 @@ fun KindScreen(
     val offline = remember(state.items.size) { container.transfers.store.offlineIds() }
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(vm.kind.title()) },
-                navigationIcon = {
-                    if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-                },
-            )
+            com.backendforge.telestore.ui.components.AppTopBar(title = vm.kind.title(), onBack = onBack)
         },
     ) { padding ->
         PullToRefreshBox(isRefreshing = state.loading && state.items.isEmpty(), onRefresh = { haptics.confirm(); vm.refresh() }, modifier = Modifier.fillMaxSize().padding(padding)) {

@@ -1,5 +1,6 @@
 package com.backendforge.telestore.ui.notify
 
+import com.backendforge.telestore.ui.components.AppTopBar
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.background
@@ -132,9 +133,9 @@ fun NotificationsScreen(container: AppContainer, onBack: () -> Unit, onOpen: (No
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Notifications") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
+            AppTopBar(
+                title = "Notifications",
+                onBack = onBack,
                 actions = {
                     if (items.any { !it.read }) IconButton(onClick = { haptics.confirm(); markRead(emptyList(), all = true) }) {
                         Icon(Icons.Default.DoneAll, contentDescription = "Mark all as read")
@@ -223,9 +224,9 @@ fun OfflineScreen(container: AppContainer, onBack: () -> Unit, onOpenFile: (File
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Offline files") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
+            AppTopBar(
+                title = "Offline files",
+                onBack = onBack,
                 actions = {
                     if (saved.isNotEmpty() || folders.isNotEmpty()) TextButton(onClick = { confirmAll = true }) { Text("Remove all") }
                 },

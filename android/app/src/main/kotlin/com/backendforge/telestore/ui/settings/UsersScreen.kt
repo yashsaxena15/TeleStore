@@ -1,5 +1,6 @@
 package com.backendforge.telestore.ui.settings
 
+import com.backendforge.telestore.ui.components.AppTopBar
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -108,10 +109,7 @@ fun UsersScreen(container: AppContainer, myUsername: String, onBack: () -> Unit)
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Users") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
-            )
+            AppTopBar(title = "Users", onBack = onBack)
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(onClick = { adding = true }, icon = { Icon(Icons.Filled.PersonAdd, contentDescription = null) }, text = { Text("Add user") })

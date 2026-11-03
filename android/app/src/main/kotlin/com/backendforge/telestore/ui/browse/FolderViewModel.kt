@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 
 data class FolderState(
     val path: String = "/Home",
-    val title: String = "Home",
+    val title: String = "Files",
     val items: List<FileItem> = emptyList(),
     val loading: Boolean = false,
     val refreshing: Boolean = false,

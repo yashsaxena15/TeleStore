@@ -74,7 +74,8 @@ fun FileKindBox(
 ) {
     val tint: Color? = if (kind == FileKind.FOLDER) folderTint(folderColor) else null
     val (iconColor, bgColor) = when (kind) {
-        FileKind.FOLDER -> if (tint != null) tint to tint.copy(alpha = 0.18f) else MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.secondaryContainer
+        // A plain folder sits on a neutral tile: colour is kept for chosen folder colours and selection
+        FileKind.FOLDER -> if (tint != null) tint to tint.copy(alpha = 0.18f) else MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.surfaceContainerHighest
         FileKind.VIDEO -> FileKindColors.VideoAccent to FileKindColors.VideoBg
         FileKind.AUDIO -> FileKindColors.AudioAccent to FileKindColors.AudioBg
         FileKind.PHOTO -> FileKindColors.PhotoAccent to FileKindColors.PhotoBg
