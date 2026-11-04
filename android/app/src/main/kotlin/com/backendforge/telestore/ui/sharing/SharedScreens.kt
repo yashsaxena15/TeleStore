@@ -21,6 +21,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
@@ -254,6 +256,10 @@ fun ShareBrowseScreen(
     onDownloadFolder: (path: String, name: String) -> Unit,
     /** Picks files on the phone and uploads them into [path] of the share. */
     onUpload: (path: String) -> Unit,
+    /** Keeps a shared file on this phone for offline use, or removes its copy. */
+    onToggleOffline: (FileItem) -> Unit = {},
+    /** Files with an offline copy on this phone. */
+    offlineIds: Set<String> = emptySet(),
 ) {
     val api = container.api()
     val context = LocalContext.current
@@ -394,6 +400,8 @@ fun ShareBrowseScreen(
                 } else {
                     SheetRow(Icons.AutoMirrored.Filled.OpenInNew, "Open") { close(); onOpenFile(file, files) }
                     SheetRow(Icons.Default.Download, "Download to phone") { close(); onDownload(file) }
+                    if (file.id in offlineIds) SheetRow(Icons.Default.CloudOff, "Remove offline copy") { close(); onToggleOffline(file) }
+                    else SheetRow(Icons.Default.CloudDownload, "Make available offline") { close(); onToggleOffline(file) }
                 }
                 if (ShareAction.RENAME in allowed) SheetRow(Icons.Default.Edit, "Rename") { close(); renaming = shared }
                 if (ShareAction.MOVE in allowed) SheetRow(Icons.Default.DriveFileMove, "Move...") { close(); moving = shared }

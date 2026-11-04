@@ -398,11 +398,17 @@ private fun LinkControls(
 
         Text("Link expires", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 12.dp))
         Text(ShareRules.expiryText(link.expiresAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // The server keeps only the date, so the preset picked is remembered while the sheet is
+        // open (reopened later, the text above still says when the link ends)
+        var picked by remember(link.token) { mutableStateOf<ExpiryPreset?>(null) }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp).horizontalScroll(rememberScrollState())) {
             ExpiryPreset.entries.forEach { preset ->
                 FilterChip(
-                    selected = preset == ExpiryPreset.NEVER && link.expiresAt == null,
-                    onClick = { onExpiry(preset) },
+                    selected = if (link.expiresAt == null) preset == ExpiryPreset.NEVER else preset == picked && preset != ExpiryPreset.NEVER,
+                    onClick = {
+                        picked = preset
+                        onExpiry(preset)
+                    },
                     label = { Text(preset.label) },
                     enabled = enabled,
                 )
