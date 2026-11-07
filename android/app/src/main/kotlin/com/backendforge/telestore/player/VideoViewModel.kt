@@ -105,6 +105,7 @@ class VideoViewModel(private val container: AppContainer) : ViewModel() {
             /* handleAudioFocus = */ true, // pauses the music player while a video plays
         )
         .setHandleAudioBecomingNoisy(true)
+        .setLoadControl(PlayerMemory.video())
         .build()
 
     private val _state = MutableStateFlow(VideoState(queue = container.playback.videos, index = container.playback.videoIndex))

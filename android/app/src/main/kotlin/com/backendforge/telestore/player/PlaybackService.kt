@@ -37,6 +37,7 @@ class PlaybackService : MediaSessionService() {
                 /* handleAudioFocus = */ true,
             )
             .setHandleAudioBecomingNoisy(true) // pause when headphones are unplugged
+            .setLoadControl(PlayerMemory.music())
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
 

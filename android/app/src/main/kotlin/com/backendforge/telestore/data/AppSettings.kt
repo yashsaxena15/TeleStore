@@ -65,6 +65,11 @@ class AppSettings(context: Context) {
         get() = prefs.getString(KEY_STORAGE_LINE, null)
         set(value) = prefs.edit().putString(KEY_STORAGE_LINE, value).apply()
 
+    /** Which releases the update check follows: Stable (the default) or Beta. */
+    var updateChannel: com.backendforge.telestore.core.UpdateChannel
+        get() = com.backendforge.telestore.core.UpdateChannel.of(prefs.getString(KEY_UPDATE_CHANNEL, null))
+        set(value) = prefs.edit().putString(KEY_UPDATE_CHANNEL, value.wire).apply()
+
     /** When the app last looked for an update (it checks at most once a day by itself). */
     var lastUpdateCheck: Long
         get() = prefs.getLong(KEY_UPDATE_CHECK, 0)
@@ -98,6 +103,7 @@ class AppSettings(context: Context) {
         const val KEY_THEME = "theme"
         const val KEY_PHOTOS_VIEW = "photos_view"
         const val KEY_UPDATE_CHECK = "last_update_check"
+        const val KEY_UPDATE_CHANNEL = "update_channel"
         const val KEY_BG_PLAY = "video_background_play"
         const val KEY_ONLINE_LYRICS = "online_lyrics"
         const val KEY_HAPTICS = "haptics"

@@ -111,7 +111,9 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.print.PrintHelper
+import coil3.compose.AsyncImage
 import coil3.compose.SubcomposeAsyncImage
+import com.backendforge.telestore.player.PlayerMemory
 import com.backendforge.telestore.core.ApiException
 import com.backendforge.telestore.core.FileItem
 import com.backendforge.telestore.core.FolderPaths
@@ -259,7 +261,11 @@ fun PhotoViewerScreen(
         ) { page ->
             val source = list[page]
             val onTap = { if (slideshow) slideshow = false else chrome = !chrome }
-            if (source.video) {
+            if (source.video && page != pager.currentPage) {
+                // Only the video on screen has a player (each one reads ahead into memory); the
+                // pages beside it show a still frame until swiped to
+                VideoPoster(source, api)
+            } else if (source.video) {
                 VideoPage(
                     url = remember(source) { mediaUrl(source, api, offlineCopy) },
                     api = api,
@@ -513,6 +519,18 @@ private fun mediaUrl(source: PhotoSource, api: TeleStoreApi, offlineCopy: (FileI
         ?: source.item?.let { offlineCopy(it)?.toString() ?: api.media.file(it).toString() }
         ?: ""
 
+/** A video's still frame (its thumbnail, or a frame of the phone's copy) with a play mark. */
+@Composable
+private fun VideoPoster(source: PhotoSource, api: TeleStoreApi) {
+    val model: Any? = remember(source) {
+        source.localUri ?: source.item?.let { api.media.thumbnail(it) ?: api.media.preview(it) }?.toString()
+    }
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        if (model != null) AsyncImage(model = model, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+        Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(56.dp))
+    }
+}
+
 /** "0:38", "12:05", "1:02:03". */
 private fun clock(ms: Long): String {
     val s = (ms / 1000).coerceAtLeast(0)
@@ -530,6 +548,7 @@ private fun VideoPage(url: String, api: TeleStoreApi, active: Boolean, showContr
     val player = remember(url) {
         ExoPlayer.Builder(context)
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(context, OkHttpDataSource.Factory(api.http))))
+            .setLoadControl(PlayerMemory.video())
             .build()
             .apply {
                 setMediaItem(MediaItem.fromUri(url))

@@ -467,7 +467,7 @@ fun MainScreen(
         val settings = container.settings
         if (System.currentTimeMillis() - settings.lastUpdateCheck < 24 * 60 * 60 * 1000L) return@LaunchedEffect
         try {
-            update = container.updates.newerThan(AppVersion.of(context).build)
+            update = container.updates.newerThan(AppVersion.of(context).build, settings.updateChannel)
             settings.lastUpdateCheck = System.currentTimeMillis()
         } catch (e: CancellationException) {
             throw e

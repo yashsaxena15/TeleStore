@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.backendforge.telestore.core.ApiException
 import com.backendforge.telestore.core.AppRelease
+import com.backendforge.telestore.core.UpdateChannel
 import com.backendforge.telestore.core.StorageStats
 import com.backendforge.telestore.data.AppContainer
 import com.backendforge.telestore.data.AppVersion
@@ -185,11 +186,29 @@ fun AboutSection(container: AppContainer) {
     var checking by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
     var available by remember { mutableStateOf<AppRelease?>(null) }
+    var channel by remember { mutableStateOf(container.settings.updateChannel) }
 
     SectionLabel("About")
     SectionCard {
         Text("TeleStore ${version.name}", style = MaterialTheme.typography.bodyLarge)
         Text("Build ${version.build}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Updates", style = MaterialTheme.typography.bodyLarge)
+        Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+            UpdateChannel.entries.forEach { option ->
+                FilterChip(
+                    selected = channel == option,
+                    onClick = {
+                        channel = option
+                        container.settings.updateChannel = option
+                        // A different channel may have a different newest version
+                        available = null
+                        status = null
+                    },
+                    label = { Text(option.label) },
+                )
+            }
+        }
+        Text(channel.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         status?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         val update = available
         if (update != null) {
@@ -201,7 +220,7 @@ fun AboutSection(container: AppContainer) {
                     checking = true
                     scope.launch {
                         status = try {
-                            val newer = container.updates.newerThan(version.build)
+                            val newer = container.updates.newerThan(version.build, channel)
                             container.settings.lastUpdateCheck = System.currentTimeMillis()
                             available = newer
                             if (newer != null) "TeleStore ${newer.version} is available." else "You have the newest version."
