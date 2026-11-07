@@ -338,7 +338,7 @@ private fun CropFrame(crop: CropRect, width: Float, height: Float, ratio: Float?
 private fun VideoTrimmer(source: PhotoSource, input: Uri, container: AppContainer, onDone: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val player = remember(input) { ExoPlayer.Builder(context).build().apply { setMediaItem(MediaItem.fromUri(input)); prepare() } }
+    val player = remember(input) { ExoPlayer.Builder(context).setLoadControl(com.backendforge.telestore.player.PlayerMemory.video()).build().apply { setMediaItem(MediaItem.fromUri(input)); prepare() } }
     DisposableEffect(player) { onDispose { player.release() } }
     var duration by remember { mutableLongStateOf(0L) }
     var range by remember { mutableStateOf(0f..1f) }

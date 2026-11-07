@@ -34,26 +34,47 @@ data class StorageStats(
 /** The newest app build on GitHub Releases. */
 data class AppRelease(val build: Int, val version: String, val apkUrl: String, val pageUrl: String)
 
+/** Which app releases the update check follows. */
+enum class UpdateChannel(val wire: String, val label: String, val description: String) {
+    STABLE("stable", "Stable", "Tested releases (TeleStore 1.1.0 and later)"),
+    BETA("beta", "Beta", "Every new build, as soon as it's made");
+
+    companion object {
+        fun of(wire: String?): UpdateChannel = entries.firstOrNull { it.wire == wire } ?: STABLE
+    }
+}
+
 /**
- * Looks for a newer APK on the repo's rolling "android-latest" release. CI writes "Build N" (the
- * app's versionCode) into the release notes; a higher N than the installed one is an update.
+ * Looks for a newer APK on GitHub Releases. Stable follows the newest release that isn't a
+ * pre-release (a tag like android-v1.1.0); Beta also follows the rolling "android-latest"
+ * pre-release that every merge to main replaces. CI writes "Build N" (the app's versionCode) into
+ * the release notes; a higher N than the installed one is an update.
  */
 class UpdateChecker(
     private val http: OkHttpClient,
-    private val releaseUrl: String = "https://api.github.com/repos/yashsaxena15/TeleStore/releases/tags/android-latest",
+    private val stableUrl: String = "https://api.github.com/repos/yashsaxena15/TeleStore/releases/latest",
+    private val betaUrl: String = "https://api.github.com/repos/yashsaxena15/TeleStore/releases/tags/android-latest",
 ) {
-    suspend fun latest(): AppRelease? = withContext(Dispatchers.IO) {
-        val request = Request.Builder().url(releaseUrl).header("Accept", "application/vnd.github+json").build()
+    /** The newest release on [channel] (Beta: the newer of the beta and the stable release). */
+    suspend fun latest(channel: UpdateChannel = UpdateChannel.STABLE): AppRelease? = withContext(Dispatchers.IO) {
+        val urls = if (channel == UpdateChannel.BETA) listOf(betaUrl, stableUrl) else listOf(stableUrl)
+        urls.mapNotNull { fetch(it) }.maxByOrNull { it.build }
+    }
+
+    private fun fetch(url: String): AppRelease? {
+        val request = Request.Builder().url(url).header("Accept", "application/vnd.github+json").build()
         val text = try {
+            // No stable release yet (or no beta) is a 404: nothing newer there
             http.newCall(request).execute().use { if (it.isSuccessful) it.body?.string() else null }
         } catch (e: IOException) {
             throw NetworkException("Couldn't reach GitHub to look for updates.", e)
-        } ?: return@withContext null
-        parse(text)
+        } ?: return null
+        return parse(text)
     }
 
-    /** The newer release, or null when [installedBuild] is already the newest. */
-    suspend fun newerThan(installedBuild: Long): AppRelease? = latest()?.takeIf { it.build > installedBuild }
+    /** The newer release, or null when [installedBuild] is already the newest on [channel]. */
+    suspend fun newerThan(installedBuild: Long, channel: UpdateChannel = UpdateChannel.STABLE): AppRelease? =
+        latest(channel)?.takeIf { it.build > installedBuild }
 
     companion object {
         private val BUILD = Regex("""Build (\d+)""")

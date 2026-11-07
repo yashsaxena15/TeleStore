@@ -33,10 +33,43 @@ class AccountTest {
     fun `only a higher build is an update`() = runBlocking {
         val server = MockWebServer().apply { start() }
         repeat(2) { server.enqueue(MockResponse().setBody(release)) }
-        val checker = UpdateChecker(OkHttpClient(), server.url("/rel").toString())
+        val checker = UpdateChecker(OkHttpClient(), stableUrl = server.url("/rel").toString())
         assertEquals(31, checker.newerThan(30)!!.build)
         assertNull(checker.newerThan(31))
         server.shutdown()
+    }
+
+    @Test
+    fun `stable follows only the stable release, beta the newer of both`() = runBlocking {
+        val server = MockWebServer().apply { start() }
+        fun rel(build: Int) = """{"body":"TeleStore (Build $build).","html_url":"p","assets":[{"name":"TeleStore-1.0.$build.apk","browser_download_url":"https://x/$build.apk"}]}"""
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest) = when (request.path) {
+                "/stable" -> MockResponse().setBody(rel(40))
+                "/beta" -> MockResponse().setBody(rel(45))
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
+        val checker = UpdateChecker(OkHttpClient(), stableUrl = server.url("/stable").toString(), betaUrl = server.url("/beta").toString())
+        assertEquals(40, checker.newerThan(30, UpdateChannel.STABLE)!!.build)
+        assertEquals(45, checker.newerThan(30, UpdateChannel.BETA)!!.build)
+        assertNull(checker.newerThan(42, UpdateChannel.STABLE))
+        server.shutdown()
+    }
+
+    @Test
+    fun `no stable release yet means no update`() = runBlocking {
+        val server = MockWebServer().apply { start() }
+        server.enqueue(MockResponse().setResponseCode(404))
+        assertNull(UpdateChecker(OkHttpClient(), stableUrl = server.url("/none").toString()).newerThan(1, UpdateChannel.STABLE))
+        server.shutdown()
+    }
+
+    @Test
+    fun `channel from settings`() {
+        assertEquals(UpdateChannel.BETA, UpdateChannel.of("beta"))
+        assertEquals(UpdateChannel.STABLE, UpdateChannel.of(null))
+        assertEquals(UpdateChannel.STABLE, UpdateChannel.of("nonsense"))
     }
 
     @Test
