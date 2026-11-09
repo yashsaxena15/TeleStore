@@ -20,7 +20,7 @@ from telestore.db import database
 from telestore.services.pipeline_uploader import upload_part_task
 from telestore.services.disk_budget import AsyncPartSlots, ThreadPartSlots
 from telestore.services import download_check
-from telestore.transfer_core import SpeedMeter, eta_seconds
+from telestore.transfer_core import SpeedMeter, eta_seconds, torrent_file_path as torrent_file_on_disk
 from telestore.services.priority_manager import priority_manager
 from telestore.services.torrent_manager import torrent_manager, parse_torrent_bytes
 
@@ -46,6 +46,16 @@ GROUP_PREVIEW_SIZE = 20
 
 # A Google Drive folder's file list: Google sometimes answers with a page without it (it limits
 # requests from one server for a while). Seconds to wait before each further try.
+# Torrents split into one transfer per file keep the torrent's details here (any machine reads them)
+TORRENT_DIR = os.path.join(os.getcwd(), "cache", "torrents")
+UNFINISHED = ["queued", "downloading", "uploading_tg", "paused", "paused_quota"]
+
+
+def torrent_work_dir(group_id: str) -> str:
+    """Where the main server downloads a torrent's files: one folder per torrent, kept on disk, so a
+    file picks up where it was after a restart, and files share the pieces they have in common."""
+    return os.path.join(os.getcwd(), "tg_files", f"torrent_{group_id}")
+
 FOLDER_LIST_WAITS = (10, 30, 90)
 FOLDER_LIST_EMPTY = ("Google didn't return this folder's files. It may be empty, or Google is "
                      "limiting requests right now; try again in a few minutes.")
@@ -67,6 +77,7 @@ class RemoteTransferManager:
         self._sync_task: Optional[asyncio.Task] = None
         self._bot_manager = None
         self._last_media_at = 0.0
+        self._torrent_locks: Dict[str, asyncio.Lock] = {}  # one aria2c per torrent folder at a time
 
     def set_bot_manager(self, bot_manager):
         self._bot_manager = bot_manager
@@ -588,6 +599,109 @@ class RemoteTransferManager:
             event_service.task_finished(disc_task_id)
         finally:
             shutil.rmtree(resolve_output_dir, ignore_errors=True)
+
+    def _torrent_lock(self, group_id: Optional[str]) -> asyncio.Lock:
+        return self._torrent_locks.setdefault(group_id or "", asyncio.Lock())
+
+    def torrent_dirs_in_use(self) -> set:
+        """tg_files/torrent_<group> folders of torrents that still have files to fetch (kept by the janitor)."""
+        groups = get_remote_db()["RemoteTransfers"].distinct(
+            "group_id", {"source_type": "torrent_item", "status": {"$in": UNFINISHED}})
+        return {f"torrent_{g}" for g in groups if g}
+
+    def _split_torrent(self, task_doc: dict, torrent_path: str, meta: dict, partial_dir: Optional[str] = None) -> tuple:
+        """Turns a torrent (magnet or .torrent) into one queued transfer per file, as one group.
+
+        The main server and worker machines each take files from the queue, so a torrent with
+        several files downloads on several machines at once. Each file is fetched on its own
+        (aria2c --select-file) and saved to Telegram as soon as it's done. The torrent's details
+        are kept in cache/torrents/<group>.torrent for every machine that takes one of its files;
+        empty files are saved straight away. Returns (files queued, empty files saved).
+
+        [partial_dir]: what this torrent had already downloaded on the main server (a torrent that
+        was being fetched as one transfer). It becomes the torrent's folder, and the files that have
+        data in it stay on the main server, first in line, so they pick up where they were.
+        """
+        coll = get_remote_db()["RemoteTransfers"]
+        user_id = str(task_doc["user_id"])
+        dest = (task_doc.get("destination_path") or "/Home").rstrip("/") or "/Home"
+        is_vault = bool(task_doc.get("is_vault"))
+        root = meta["name"] or "Torrent"
+        group_id = f"grp_{secrets.token_hex(6)}"
+        os.makedirs(TORRENT_DIR, exist_ok=True)
+        kept_path = os.path.join(TORRENT_DIR, f"{group_id}.torrent")
+        shutil.copyfile(torrent_path, kept_path)
+
+        work_dir = torrent_work_dir(group_id)
+        if partial_dir and os.path.isdir(partial_dir) and os.listdir(partial_dir):
+            shutil.move(partial_dir, work_dir)
+            logger.info(f"[REMOTE_TRANSFER] Kept what '{root}' had downloaded: {work_dir}")
+
+        now = datetime.now(timezone.utc)
+        docs, empty = [], 0
+        for f in meta["files"]:
+            if meta["is_multi_file"]:
+                sub = os.path.dirname(f["rel_path"]).replace("\\", "/").strip("/")
+                folder = f"{dest}/{root}/{sub}" if sub else f"{dest}/{root}"
+            else:
+                folder = dest
+            if not f["size"]:
+                # Nothing to download or send: an empty file is a record of its own
+                database.Files.create_folder_path(folder, owner_id=user_id)
+                database.Files.save_empty(f["name"], folder, user_id, file_type=get_file_type(f["name"]),
+                                          file_caption=f"Uploaded file: {f['name']}", is_vault=is_vault)
+                empty += 1
+                continue
+            docs.append({
+                "task_id": f"rt_{secrets.token_hex(6)}",
+                "user_id": user_id,
+                "chat_id": task_doc.get("chat_id"),
+                "source_url": task_doc.get("source_url"),
+                "source_type": "torrent_item",
+                "torrent_path": kept_path,
+                "torrent_file_index": int(f["index"]),
+                "torrent_rel_path": f["full_rel_path"],
+                "destination_path": folder,
+                "filename": f["name"],
+                "filesize": int(f["size"]),
+                "transferred_bytes": 0,
+                "speed_bps": 0,
+                "progress": 0,
+                "eta_seconds": 0,
+                "status": "queued",
+                "phase": "Queued",
+                "error_message": None,
+                "is_vault": is_vault,
+                "group_id": group_id,
+                "group_name": root,
+                "group_type": "torrent",
+                "group_source_url": task_doc.get("source_url"),
+                "group_destination": dest,
+                "group_total_items": len(meta["files"]),
+                "created_at": now,
+                "updated_at": now,
+            })
+            on_disk = os.path.join(work_dir, f["full_rel_path"])
+            if os.path.isfile(on_disk) and os.path.getsize(on_disk) > 0:
+                # Partly downloaded here already: the main server finishes it, before the others
+                docs[-1]["main_only"] = True
+                docs[-1]["created_at"] = now - timedelta(seconds=1)
+        if docs:
+            coll.insert_many(docs)
+            # The torrent itself is now its files (as a folder link becomes its files)
+            coll.delete_one({"task_id": task_doc["task_id"]})
+            if task_doc.get("source_type") == "torrent_file" and task_doc.get("torrent_path") and task_doc["torrent_path"] != kept_path:
+                try:
+                    os.remove(task_doc["torrent_path"])
+                except OSError:
+                    pass
+        else:
+            os.remove(kept_path)
+            self._update_task(task_doc["task_id"], {
+                "status": "completed", "progress": 100.0, "speed_bps": 0, "filename": root,
+                "phase": f"Completed ({empty} empty file(s) saved)",
+            })
+        return len(docs), empty
 
     async def enqueue_torrent_file(
         self,
@@ -1642,9 +1756,10 @@ class RemoteTransferManager:
         try:
             # --- STEP 1: Stream Data from Source into Writer or BitTorrent Engine ---
             if task_doc.get("source_type") in ["magnet", "torrent_file"]:
-                logger.info(f"[REMOTE_TRANSFER] Task {task_id}: Processing BitTorrent/Magnet leech transfer...")
-
-                # Step 1: Obtain .torrent file
+                # A torrent is read here (a magnet's file list comes from its peers first), then split
+                # into one transfer per file: the main server and worker machines each take files,
+                # so several download at once
+                logger.info(f"[REMOTE_TRANSFER] Task {task_id}: Reading torrent to split it into files...")
                 if task_doc.get("source_type") == "magnet":
                     self._update_task(task_id, {
                         "status": "downloading",
@@ -1670,110 +1785,69 @@ class RemoteTransferManager:
                         raise FileNotFoundError("Torrent file not found on server.")
 
                 with open(torrent_file_path, "rb") as tf:
-                    t_bytes = tf.read()
-                meta = parse_torrent_bytes(t_bytes)
+                    meta = parse_torrent_bytes(tf.read())
+                queued, empty = self._split_torrent(task_doc, torrent_file_path, meta, partial_dir=os.path.join(tg_dir, "dl"))
+                shutil.rmtree(tg_dir, ignore_errors=True)
+                logger.info(f"[REMOTE_TRANSFER] Task {task_id}: torrent '{meta['name']}' split into {queued} file transfer(s) ({empty} empty file(s) saved)")
+                return
 
-                root_name = meta["name"]
-                is_multi_file = meta["is_multi_file"]
-                files = meta["files"]
-                total_torrent_size = meta["total_size"]
-                total_files = len(files)
-
-                self._update_task(task_id, {
-                    "filename": root_name,
-                    "filesize": total_torrent_size,
-                    "phase": f"Found {total_files} file(s) in torrent ({round(total_torrent_size / (1024*1024), 1)} MB)"
-                })
-
-                completed_bytes = 0
-                dl_work_dir = os.path.join(tg_dir, "dl")
+            if task_doc.get("source_type") == "torrent_item":
+                # One file of a torrent (see _split_torrent)
+                torrent_file_path = task_doc.get("torrent_path")
+                if not torrent_file_path or not os.path.exists(torrent_file_path):
+                    raise FileNotFoundError("The torrent's details are gone from the server. Add the torrent again.")
+                f_item = {
+                    "index": int(task_doc["torrent_file_index"]),
+                    "name": task_doc.get("filename") or f"file_{task_doc['torrent_file_index']}",
+                    "full_rel_path": task_doc.get("torrent_rel_path") or task_doc.get("filename") or "",
+                    "size": int(task_doc.get("filesize") or 0),
+                }
+                f_name = f_item["name"]
+                f_size = f_item["size"]
+                f_full_rel_path = f_item["full_rel_path"]
+                target_folder = task_doc.get("destination_path") or "/Home"
+                database.Files.create_folder_path(target_folder, owner_id=str(user_id))
+                group_id = task_doc.get("group_id")
+                dl_work_dir = torrent_work_dir(group_id) if group_id else os.path.join(tg_dir, "dl")
                 os.makedirs(dl_work_dir, exist_ok=True)
 
-                for file_idx, f_item in enumerate(files, start=1):
+                # Callbacks for aria2c download
+                def _aria_progress(p_info: dict):
                     if cancel_event.is_set():
                         raise InterruptedError("Cancelled by user")
+                    pct = p_info["progress"]
+                    speed = p_info["speed_bps"]
+                    peers = p_info["peers"]
+                    done = p_info.get("done") or int((pct / 100.0) * f_size)
+                    self._update_task(task_id, {
+                        "status": "downloading",
+                        "progress": min(99.0, round(pct, 1)),
+                        "speed_bps": speed,
+                        "download_bps": speed,
+                        "upload_bps": 0,
+                        "eta_seconds": eta_seconds(max(0, f_size - done), speed),
+                        "peer_count": peers,
+                        "transferred_bytes": done,
+                        "phase": f"Leeching {f_name} ({pct:.1f}%) | ⚡ {peers} peers"
+                    })
 
-                    f_name = f_item["name"]
-                    f_size = f_item["size"]
-                    f_rel_path = f_item["rel_path"]
-                    f_full_rel_path = f_item["full_rel_path"]
-
-                    # Compute target destination folder preserving nested directory tree
-                    if is_multi_file:
-                        sub_dir = os.path.dirname(f_rel_path).replace("\\", "/").strip("/")
-                        target_folder = f"{destination_path}/{root_name}/{sub_dir}".rstrip("/") if sub_dir else f"{destination_path}/{root_name}"
+                def _aria_pause(is_p: bool):
+                    if is_p:
+                        self._update_task(task_id, {
+                            "status": "paused",
+                            "phase": "Paused: Prioritizing User Upload 👤 (Will auto-resume)",
+                            "speed_bps": 0
+                        })
                     else:
-                        target_folder = destination_path
-
-                    database.Files.create_folder_path(target_folder, owner_id=str(user_id))
-
-                    if f_size == 0:
-                        # Handle 0-byte file without downloading
-                        empty_path = os.path.join(dl_work_dir, f_name)
-                        with open(empty_path, "wb"):
-                            pass
-                        res = await upload_part_task(
-                            part_file_path=empty_path,
-                            part_index=1,
-                            file_name=f_name,
-                            start_byte=0,
-                            part_size=0,
-                            chat_id=chat_id,
-                            bot_manager=bot_manager,
-                            fallback_client=client,
-                            is_single_part=True,
-                            file_type="document"
-                        )
-                        database.Files.claim_upload(
-                            chat_id=chat_id,
-                            message_id=res["message_id"],
-                            thumbnail=res.get("thumbnail"),
-                            file_type="document",
-                            file_unique_id=res["file_unique_id"],
-                            file_size=0,
-                            file_name=f_name,
-                            file_caption=f"Uploaded file: {f_name}",
-                            file_path=target_folder,
-                            owner_id=str(user_id),
-                            is_vault=is_vault
-                        )
-                        continue
-
-                    # Callbacks for aria2c download
-                    def _aria_progress(p_info: dict):
-                        if cancel_event.is_set():
-                            raise InterruptedError("Cancelled by user")
-                        pct = p_info["progress"]
-                        speed = p_info["speed_bps"]
-                        peers = p_info["peers"]
-                        cur_f_dl = int((pct / 100.0) * f_size)
-                        cur_total_transferred = completed_bytes + int(cur_f_dl * 0.5)
-                        total_pct = min(99.0, round((cur_total_transferred / (total_torrent_size or 1)) * 100, 1))
-
                         self._update_task(task_id, {
                             "status": "downloading",
-                            "progress": total_pct,
-                            "speed_bps": speed,
-                            "peer_count": peers,
-                            "transferred_bytes": cur_total_transferred,
-                            "phase": f"Leeching [{file_idx}/{total_files}] {f_name} ({pct:.1f}%) | ⚡ {peers} peers"
+                            "phase": f"Resumed: Leeching {f_name} ▶️",
+                            "speed_bps": 0
                         })
 
-                    def _aria_pause(is_p: bool):
-                        if is_p:
-                            self._update_task(task_id, {
-                                "status": "paused",
-                                "phase": "Paused: Prioritizing User Upload 👤 (Will auto-resume)",
-                                "speed_bps": 0
-                            })
-                        else:
-                            self._update_task(task_id, {
-                                "status": "downloading",
-                                "phase": f"Resumed: Leeching [{file_idx}/{total_files}] {f_name} ▶️",
-                                "speed_bps": 0
-                            })
-
-                    logger.info(f"[REMOTE_TRANSFER] Task {task_id}: Leeching file {file_idx}/{total_files}: {f_name} ({f_size} bytes)")
+                logger.info(f"[REMOTE_TRANSFER] Task {task_id}: Leeching torrent file #{f_item['index']}: {f_name} ({f_size} bytes)")
+                # One aria2c at a time in a torrent's folder (they would share its .aria2 control file)
+                async with self._torrent_lock(group_id):
                     await asyncio.to_thread(
                         torrent_manager.download_file_selective,
                         torrent_file_path,
@@ -1784,185 +1858,178 @@ class RemoteTransferManager:
                         _aria_pause
                     )
 
-                    if cancel_event.is_set():
-                        raise InterruptedError("Cancelled by user")
+                if cancel_event.is_set():
+                    raise InterruptedError("Cancelled by user")
 
-                    # Locate downloaded file
-                    downloaded_file = os.path.join(dl_work_dir, f_full_rel_path)
-                    if not os.path.exists(downloaded_file):
-                        found = False
-                        for root, _, files_in_dir in os.walk(dl_work_dir):
-                            if f_name in files_in_dir:
-                                downloaded_file = os.path.join(root, f_name)
-                                found = True
-                                break
-                        if not found:
-                            raise FileNotFoundError(f"Downloaded file '{f_name}' not found at {downloaded_file}")
+                # Locate downloaded file
+                downloaded_file = torrent_file_on_disk(dl_work_dir, f_full_rel_path, f_name)
+                if not downloaded_file:
+                    raise FileNotFoundError(f"Downloaded file '{f_name}' wasn't found after the download")
 
-                    actual_size = os.path.getsize(downloaded_file)
-                    ftype = get_file_type(f_name)
+                actual_size = os.path.getsize(downloaded_file)
+                ftype = get_file_type(f_name)
 
-                    if actual_size <= PART_MAX_SIZE:
-                        # Single-part upload
+                if actual_size <= PART_MAX_SIZE:
+                    # Single-part upload
+                    self._update_task(task_id, {
+                        "status": "uploading_tg",
+                        "phase": f"Uploading {f_name} to Telegram..."
+                    })
+
+                    def _part_up_prog(cur: int, tot: int):
                         self._update_task(task_id, {
-                            "status": "uploading_tg",
-                            "phase": f"Uploading [{file_idx}/{total_files}] {f_name} to Telegram..."
+                            "progress": min(99.5, round(cur / (tot or 1) * 100, 1)),
+                            "transferred_bytes": cur,
+                            "phase": f"Uploading {f_name} ({round((cur/tot)*100, 1)}%)"
                         })
 
-                        def _part_up_prog(cur: int, tot: int):
-                            cur_up = completed_bytes + int(f_size * 0.5) + int(cur * 0.5)
-                            total_pct = min(99.5, round((cur_up / (total_torrent_size or 1)) * 100, 1))
+                    res = await upload_part_task(
+                        part_file_path=downloaded_file,
+                        part_index=1,
+                        file_name=f_name,
+                        start_byte=0,
+                        part_size=actual_size,
+                        chat_id=chat_id,
+                        bot_manager=bot_manager,
+                        fallback_client=client,
+                        caption=f"Uploaded file: {f_name}",
+                        is_single_part=True,
+                        file_type=ftype,
+                        progress=_part_up_prog
+                    )
+
+                    database.Files.claim_upload(
+                        chat_id=chat_id,
+                        message_id=res["message_id"],
+                        thumbnail=res.get("thumbnail"),
+                        file_type=ftype,
+                        file_unique_id=res["file_unique_id"],
+                        file_size=actual_size,
+                        file_name=f_name,
+                        file_caption=f"Uploaded file: {f_name}",
+                        file_path=target_folder,
+                        owner_id=str(user_id),
+                        is_vault=is_vault
+                    )
+                else:
+                    # Multi-part chunked upload for > 1.95 GB file
+                    logger.info(f"[REMOTE_TRANSFER] Task {task_id}: Chunking large file {f_name} ({actual_size} bytes)")
+                    self._update_task(task_id, {
+                        "status": "uploading_tg",
+                        "phase": f"Chunking & Uploading {f_name}..."
+                    })
+
+                    mp_upload_tasks = []
+                    mp_bytes_map = {}
+                    mp_disk_sem = ThreadPartSlots(expected_total=int(actual_size or 0))
+                    budget_slots.append(mp_disk_sem)
+
+                    def _on_mp_part_ready(part_path, p_idx, s_byte, p_sz, is_fin, is_single):
+                        caption = f"{f_name} (Part {p_idx})"
+                        def _mp_prog(cur, tot):
+                            mp_bytes_map[p_idx] = cur
+                            tot_up = sum(mp_bytes_map.values())
                             self._update_task(task_id, {
-                                "progress": total_pct,
-                                "transferred_bytes": cur_up,
-                                "phase": f"Uploading [{file_idx}/{total_files}] {f_name} ({round((cur/tot)*100, 1)}%)"
+                                "progress": min(99.5, round(tot_up / (actual_size or 1) * 100, 1)),
+                                "transferred_bytes": tot_up,
+                                "phase": f"Uploading {f_name} Part {p_idx} ({round((tot_up/actual_size)*100, 1)}%)"
                             })
 
-                        res = await upload_part_task(
-                            part_file_path=downloaded_file,
-                            part_index=1,
+                        coro = upload_part_task(
+                            part_file_path=part_path,
+                            part_index=p_idx,
                             file_name=f_name,
-                            start_byte=0,
-                            part_size=actual_size,
+                            start_byte=s_byte,
+                            part_size=p_sz,
                             chat_id=chat_id,
                             bot_manager=bot_manager,
                             fallback_client=client,
-                            caption=f"Uploaded file: {f_name}",
-                            is_single_part=True,
-                            file_type=ftype,
-                            progress=_part_up_prog
-                        )
-
-                        database.Files.claim_upload(
-                            chat_id=chat_id,
-                            message_id=res["message_id"],
-                            thumbnail=res.get("thumbnail"),
-                            file_type=ftype,
-                            file_unique_id=res["file_unique_id"],
-                            file_size=actual_size,
-                            file_name=f_name,
-                            file_caption=f"Uploaded file: {f_name}",
-                            file_path=target_folder,
-                            owner_id=str(user_id),
-                            is_vault=is_vault
-                        )
-                    else:
-                        # Multi-part chunked upload for > 1.95 GB file
-                        logger.info(f"[REMOTE_TRANSFER] Task {task_id}: Chunking large file {f_name} ({actual_size} bytes)")
-                        self._update_task(task_id, {
-                            "status": "uploading_tg",
-                            "phase": f"Chunking & Uploading [{file_idx}/{total_files}] {f_name}..."
-                        })
-
-                        mp_upload_tasks = []
-                        mp_bytes_map = {}
-                        mp_disk_sem = ThreadPartSlots(expected_total=int(actual_size or 0))
-                        budget_slots.append(mp_disk_sem)
-
-                        def _on_mp_part_ready(part_path, p_idx, s_byte, p_sz, is_fin, is_single):
-                            caption = f"{f_name} (Part {p_idx})"
-                            def _mp_prog(cur, tot):
-                                mp_bytes_map[p_idx] = cur
-                                tot_up = sum(mp_bytes_map.values())
-                                cur_up = completed_bytes + int(f_size * 0.5) + int(tot_up * 0.5)
-                                total_pct = min(99.5, round((cur_up / (total_torrent_size or 1)) * 100, 1))
-                                self._update_task(task_id, {
-                                    "progress": total_pct,
-                                    "transferred_bytes": cur_up,
-                                    "phase": f"Uploading [{file_idx}/{total_files}] {f_name} Part {p_idx} ({round((tot_up/actual_size)*100, 1)}%)"
-                                })
-
-                            coro = upload_part_task(
-                                part_file_path=part_path,
-                                part_index=p_idx,
-                                file_name=f_name,
-                                start_byte=s_byte,
-                                part_size=p_sz,
-                                chat_id=chat_id,
-                                bot_manager=bot_manager,
-                                fallback_client=client,
-                                caption=caption,
-                                semaphore=mp_disk_sem,
-                                is_single_part=False,
-                                file_type=ftype,
-                                progress=_mp_prog
-                            )
-                            t = loop.create_task(coro)
-                            mp_upload_tasks.append(t)
-
-                        mp_writer = PipelinedStreamWriter(
-                            tg_dir=tg_dir,
+                            caption=caption,
                             semaphore=mp_disk_sem,
-                            cancel_event=cancel_event,
-                            on_part_ready=_on_mp_part_ready,
-                            on_pause_state_changed=on_pause_state_changed
-                        )
-
-                        with open(downloaded_file, "rb") as rf:
-                            while True:
-                                if cancel_event.is_set():
-                                    raise InterruptedError("Cancelled by user")
-                                chunk = rf.read(2 * 1024 * 1024)
-                                if not chunk:
-                                    break
-                                mp_writer.write(chunk)
-                        mp_writer.finish()
-
-                        mp_results = await asyncio.gather(*mp_upload_tasks)
-                        mp_results.sort(key=lambda x: x["part_index"])
-
-                        parts = [
-                            {
-                                "part_index": r["part_index"],
-                                "chat_id": r["chat_id"],
-                                "message_id": r["message_id"],
-                                "file_unique_id": r["file_unique_id"],
-                                "part_size": r["part_size"],
-                                "start_byte": r["start_byte"],
-                                "end_byte": r["end_byte"]
-                            }
-                            for r in mp_results
-                        ]
-
-                        database.Files.add_multipart_file(
-                            chat_id=chat_id,
-                            thumbnail=mp_results[0].get("thumbnail"),
+                            is_single_part=False,
                             file_type=ftype,
-                            file_unique_id=mp_results[0]["file_unique_id"],
-                            file_size=actual_size,
-                            file_name=f_name,
-                            file_caption=f"Uploaded multi-part file: {f_name}",
-                            parts=parts,
-                            file_path=target_folder,
-                            owner_id=str(user_id),
-                            part_size=PART_MAX_SIZE,
-                            is_vault=is_vault
+                            progress=_mp_prog
                         )
+                        t = loop.create_task(coro)
+                        mp_upload_tasks.append(t)
 
-                    # Immediately clean up downloaded file
-                    if os.path.exists(downloaded_file):
-                        try:
-                            os.remove(downloaded_file)
-                        except Exception as e:
-                            logger.warning(f"Could not remove {downloaded_file}: {e}")
+                    mp_writer = PipelinedStreamWriter(
+                        tg_dir=tg_dir,
+                        semaphore=mp_disk_sem,
+                        cancel_event=cancel_event,
+                        on_part_ready=_on_mp_part_ready,
+                        on_pause_state_changed=on_pause_state_changed
+                    )
 
-                    # Remove any .aria2 files and empty dirs in dl_work_dir
-                    for root, dirs, d_files in os.walk(dl_work_dir, topdown=False):
-                        for df in d_files:
-                            if df.endswith(".aria2"):
-                                try:
-                                    os.remove(os.path.join(root, df))
-                                except Exception:
-                                    pass
-                        for d in dirs:
-                            dir_to_check = os.path.join(root, d)
+                    with open(downloaded_file, "rb") as rf:
+                        while True:
+                            if cancel_event.is_set():
+                                raise InterruptedError("Cancelled by user")
+                            chunk = rf.read(2 * 1024 * 1024)
+                            if not chunk:
+                                break
+                            mp_writer.write(chunk)
+                    mp_writer.finish()
+
+                    mp_results = await asyncio.gather(*mp_upload_tasks)
+                    mp_results.sort(key=lambda x: x["part_index"])
+
+                    parts = [
+                        {
+                            "part_index": r["part_index"],
+                            "chat_id": r["chat_id"],
+                            "message_id": r["message_id"],
+                            "file_unique_id": r["file_unique_id"],
+                            "part_size": r["part_size"],
+                            "start_byte": r["start_byte"],
+                            "end_byte": r["end_byte"]
+                        }
+                        for r in mp_results
+                    ]
+
+                    database.Files.add_multipart_file(
+                        chat_id=chat_id,
+                        thumbnail=mp_results[0].get("thumbnail"),
+                        file_type=ftype,
+                        file_unique_id=mp_results[0]["file_unique_id"],
+                        file_size=actual_size,
+                        file_name=f_name,
+                        file_caption=f"Uploaded multi-part file: {f_name}",
+                        parts=parts,
+                        file_path=target_folder,
+                        owner_id=str(user_id),
+                        part_size=PART_MAX_SIZE,
+                        is_vault=is_vault
+                    )
+
+                # Immediately clean up downloaded file
+                if os.path.exists(downloaded_file):
+                    try:
+                        os.remove(downloaded_file)
+                    except Exception as e:
+                        logger.warning(f"Could not remove {downloaded_file}: {e}")
+
+                # The torrent's folder goes once none of its files is left to fetch (its .aria2
+                # control file is shared by them)
+                if group_id:
+                    still = get_remote_db()["RemoteTransfers"].find_one(
+                        {"group_id": group_id, "task_id": {"$ne": task_id}, "status": {"$in": UNFINISHED}})
+                    if not still:
+                        shutil.rmtree(dl_work_dir, ignore_errors=True)
+                for root, dirs, d_files in ([] if group_id else os.walk(dl_work_dir, topdown=False)):
+                    for df in d_files:
+                        if df.endswith(".aria2"):
                             try:
-                                if not os.listdir(dir_to_check):
-                                    os.rmdir(dir_to_check)
+                                os.remove(os.path.join(root, df))
                             except Exception:
                                 pass
-
-                    completed_bytes += f_size
+                    for d in dirs:
+                        dir_to_check = os.path.join(root, d)
+                        try:
+                            if not os.listdir(dir_to_check):
+                                os.rmdir(dir_to_check)
+                        except Exception:
+                            pass
 
                 # Clean temp directory
                 shutil.rmtree(tg_dir, ignore_errors=True)
@@ -1972,11 +2039,11 @@ class RemoteTransferManager:
                     "progress": 100.0,
                     "speed_bps": 0,
                     "eta_seconds": 0,
-                    "filesize": total_torrent_size,
-                    "transferred_bytes": total_torrent_size,
-                    "phase": f"Completed ({total_files} file(s) saved to Telegram) ☁️"
+                    "filesize": f_size,
+                    "transferred_bytes": f_size,
+                    "phase": "Completed & Saved to Telegram ☁️"
                 })
-                logger.info(f"[REMOTE_TRANSFER] Task {task_id}: BitTorrent transfer finished successfully!")
+                logger.info(f"[REMOTE_TRANSFER] Task {task_id}: torrent file '{f_name}' finished")
                 return
 
             elif task_doc.get("source_type") == "gdrive_file":
@@ -2391,10 +2458,23 @@ class RemoteTransferManager:
                 except Exception:
                     pass
 
+        shared = {t.get("torrent_path") for t in coll.find({
+            "user_id": str(user_id),
+            "status": {"$in": ["completed", "cancelled", "failed"]},
+            "source_type": "torrent_item",
+        }) if t.get("torrent_path")}
+
         res = coll.delete_many({
             "user_id": str(user_id),
             "status": {"$in": ["completed", "cancelled", "failed"]}
         })
+        # A torrent's details (shared by its files) go once none of its files is left
+        for t_path in shared:
+            if not coll.find_one({"torrent_path": t_path}) and os.path.exists(t_path):
+                try:
+                    os.remove(t_path)
+                except OSError:
+                    pass
         return res.deleted_count
 
     def _start_discovery(self, disc: dict) -> None:

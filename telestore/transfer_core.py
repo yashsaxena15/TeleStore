@@ -13,10 +13,13 @@ limit and for Telegram's rate limit in exactly the same way.
 3. Google's download limit is per file: only that file waits, a few hours at first, longer if
    it hits the limit again.
 4. Telegram's "sending too fast" (FLOOD_WAIT): wait as long as Telegram says, then try again.
+5. Torrents: the same aria2c settings on every machine (uploads to others kept to a trickle, no
+   seeding after a download), and reading its progress lines.
 """
 
 import asyncio
 import math
+import os
 import re
 import time
 from typing import Awaitable, Callable, Optional, TypeVar
@@ -147,3 +150,96 @@ async def retry_after_flood(send: Callable[[], Awaitable[T]], retries: int = FLO
                 on_wait(wait)
             await sleep(wait + 1)
     raise RuntimeError("unreachable")
+
+
+# ── Torrents (aria2c) ─────────────────────────────────────────────────────────
+
+TORRENT_TRACKERS = (
+    "udp://tracker.opentrackr.org:1337/announce",
+    "udp://open.stealth.si:80/announce",
+    "udp://tracker.torrent.eu.org:451/announce",
+    "udp://tracker.bittor.pw:1337/announce",
+    "udp://public.popcorn-tracker.org:6969/announce",
+    "udp://tracker.dler.org:6969/announce",
+    "udp://exodus.desync.com:6969/announce",
+    "udp://open.demonii.com:1337/announce",
+    "udp://tracker.moeking.me:6969/announce",
+    "http://tracker.openbittorrent.com:80/announce",
+    "udp://explodie.org:6969/announce",
+    "udp://opentracker.i2p.rocks:6969/announce",
+    "udp://tracker.tiny-vps.com:6969/announce",
+    "udp://open.tracker.cl:1337/announce",
+)
+
+# Sharing with other peers is kept to a trickle (BitTorrent stalls a peer that shares nothing; 0
+# would mean "no limit" to aria2c), and nothing is shared once a download has finished
+TORRENT_UPLOAD_LIMIT = "1K"
+
+
+def aria2_args(dht_dir: str) -> list:
+    """aria2c's command line before the download's own options (the same on every machine)."""
+    return [
+        "aria2c",
+        "--enable-dht=true",
+        "--enable-peer-exchange=true",
+        "--bt-enable-lpd=true",
+        "--bt-max-peers=60",
+        "--max-connection-per-server=16",
+        "--split=16",
+        "--seed-time=0",
+        "--file-allocation=none",
+        f"--max-overall-upload-limit={TORRENT_UPLOAD_LIMIT}",
+        f"--bt-tracker={','.join(TORRENT_TRACKERS)}",
+        f"--dht-file-path={dht_dir.rstrip('/')}/dht.dat",
+        f"--dht-file-path6={dht_dir.rstrip('/')}/dht6.dat",
+    ]
+
+
+def aria2_file_args(dht_dir: str, torrent_path: str, file_index: int, work_dir: str) -> list:
+    """One file of a torrent (its 1-based index), into work_dir; a second run picks up where it was."""
+    return aria2_args(dht_dir) + [
+        f"--select-file={file_index}",
+        f"--dir={work_dir}",
+        "--summary-interval=1",
+        "--continue=true",
+        torrent_path,
+    ]
+
+
+_ARIA2_UNITS = {"B": 1, "KIB": 1024, "KB": 1024, "MIB": 1024 ** 2, "MB": 1024 ** 2,
+                "GIB": 1024 ** 3, "GB": 1024 ** 3, "TIB": 1024 ** 4, "TB": 1024 ** 4}
+
+
+def _aria2_bytes(number: str, unit: str) -> int:
+    return int(float(number) * _ARIA2_UNITS.get(unit.upper(), 1))
+
+
+def parse_aria2_line(line: str) -> Optional[dict]:
+    """aria2c's progress line, e.g. "[#2089b0 400.0KiB/33.2MiB(1%) CN:18 SD:6 DL:4.2MiB ETA:4m20s]",
+    as {"done", "total", "progress", "speed_bps", "peers", "seeders"}; None for other lines."""
+    if "CN:" not in line and "DL:" not in line:
+        return None
+    sizes = re.search(r"([0-9.]+)([KMGT]?i?B)/([0-9.]+)([KMGT]?i?B)", line)
+    pct = re.search(r"\((\d+(?:\.\d+)?)%\)", line)
+    speed = re.search(r"DL:([0-9.]+)([KMGT]?i?B)", line)
+    peers = re.search(r"CN:(\d+)", line)
+    seeders = re.search(r"SD:(\d+)", line)
+    return {
+        "done": _aria2_bytes(sizes.group(1), sizes.group(2)) if sizes else 0,
+        "total": _aria2_bytes(sizes.group(3), sizes.group(4)) if sizes else 0,
+        "progress": float(pct.group(1)) if pct else 0.0,
+        "speed_bps": _aria2_bytes(speed.group(1), speed.group(2)) if speed else 0,
+        "peers": int(peers.group(1)) if peers else 0,
+        "seeders": int(seeders.group(1)) if seeders else 0,
+    }
+
+
+def torrent_file_path(work_dir: str, full_rel_path: str, name: str) -> Optional[str]:
+    """Where aria2c put one file of a torrent: at its path inside the torrent, else found by name."""
+    exact = os.path.join(work_dir, full_rel_path)
+    if os.path.isfile(exact):
+        return exact
+    for root, _, names in os.walk(work_dir):
+        if name in names:
+            return os.path.join(root, name)
+    return None

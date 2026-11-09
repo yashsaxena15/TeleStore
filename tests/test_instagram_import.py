@@ -256,8 +256,9 @@ def test_workers_never_claim_instagram_tasks(client, test_secrets):
     with patch("telestore.api.routes.worker.get_remote_db", return_value={"RemoteTransfers": coll}):
         res = client.post("/api/worker/claim-task", json={"worker_id": "w1"}, headers={"X-Worker-Key": test_secrets["worker_secret"]})
     assert res.status_code == 200
-    # Torrents too: a worker machine has no torrent downloader
-    assert coll.find_one_and_update.call_args.args[0]["source_type"] == {"$nin": ["instagram", "media", "magnet", "torrent_file"]}
+    # Torrents and magnets are read and split by the main server; a worker without aria2c
+    # (it says nothing about torrents) never gets a torrent's file either
+    assert coll.find_one_and_update.call_args.args[0]["source_type"] == {"$nin": ["instagram", "media", "magnet", "torrent_file", "torrent_item"]}
 
 
 class TestErrorMessages:

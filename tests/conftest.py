@@ -97,8 +97,10 @@ def reset_db_mocks():
         coll.find_one.return_value = None
         return coll
 
-    with patch("telestore.services.remote_transfer_manager.helpers.get_remote_db",
-               return_value=defaultdict(empty_collection)):
+    stand_in = defaultdict(empty_collection)
+    # The transfer manager keeps its own reference to get_remote_db (its startup reads it)
+    with patch("telestore.services.remote_transfer_manager.helpers.get_remote_db", return_value=stand_in), \
+            patch("telestore.services.remote_transfer_manager.manager.get_remote_db", return_value=stand_in):
         yield
 
 

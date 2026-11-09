@@ -30,6 +30,8 @@ logger = logging.getLogger("worker_routes")
 # Only the main server runs these: Instagram and video downloads need its sign-in sessions, and
 # torrents need its torrent downloader (a worker machine has none, so it would only fail them)
 LOCAL_ONLY_SOURCES = ("instagram", "media", "magnet", "torrent_file")
+# One file of a torrent (the main server splits torrents): only for workers that have aria2c
+TORRENT_SOURCES = ("torrent_item",)
 
 router = APIRouter(prefix="/api/worker", tags=["Distributed Workers"])
 
@@ -51,6 +53,9 @@ class HeartbeatModel(BaseModel):
 
 class ClaimTaskModel(BaseModel):
     worker_id: str
+    # What this worker can do beyond plain downloads: "torrent" when it has aria2c (older workers
+    # send nothing, and are never given a torrent's file)
+    skills: List[str] = []
 
 
 class ProgressUpdateModel(BaseModel):
@@ -123,6 +128,19 @@ async def worker_heartbeat(
     return {"status": "ok", "timestamp": now.isoformat()}
 
 
+@router.get("/torrent/{task_id}")
+async def torrent_details(task_id: str, worker_id: str, auth: None = Depends(verify_worker_auth)):
+    """The .torrent of a torrent file transfer, for the worker that claimed it."""
+    from fastapi.responses import FileResponse
+    doc = get_remote_db()["RemoteTransfers"].find_one({"task_id": task_id})
+    if not doc or doc.get("source_type") not in TORRENT_SOURCES or doc.get("claimed_by") != worker_id:
+        raise HTTPException(status_code=404, detail="Not a torrent transfer of this worker")
+    path = doc.get("torrent_path")
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=410, detail="The torrent's details are gone from the server")
+    return FileResponse(path, media_type="application/x-bittorrent", filename=f"{task_id}.torrent")
+
+
 @router.get("/nodes")
 async def list_worker_nodes(admin: bool = Depends(require_admin)):
     """Admin view of the distributed workers and their health (their names and addresses aren't public)."""
@@ -162,9 +180,11 @@ async def claim_task(
             "status": "queued",
             "claimed_by": {"$exists": False},
             # Instagram and video downloads need the server's sign-in sessions, so only the main server runs them
-            "source_type": {"$nin": list(LOCAL_ONLY_SOURCES)},
+            "source_type": {"$nin": list(LOCAL_ONLY_SOURCES) + ([] if "torrent" in body.skills else list(TORRENT_SOURCES))},
             # Copies from a connected Google Drive need that account's sign-in, which stays on the main server
             "cloud_account_id": {"$exists": False},
+            # A torrent's file the main server has partly downloaded already: it finishes it
+            "main_only": {"$ne": True},
         },
         {
             "$set": {
@@ -209,7 +229,10 @@ async def claim_task(
             "part_index": doc.get("part_index", 1),
             "total_parts": doc.get("total_parts", 1),
             "part_size": doc.get("part_size", doc.get("filesize", 0)),
-            "total_filesize": doc.get("total_filesize")
+            "total_filesize": doc.get("total_filesize"),
+            # One file of a torrent: which file, and where it sits inside the torrent
+            "torrent_file_index": doc.get("torrent_file_index"),
+            "torrent_rel_path": doc.get("torrent_rel_path"),
         },
         "telegram_config": {
             "api_id": API_ID,

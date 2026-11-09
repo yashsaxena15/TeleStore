@@ -13,8 +13,9 @@ from pyrogram import Client
 # transfer_core.py (shared with the main server) sits next to this file on worker machines;
 # run from the repo, it is telestore/transfer_core.py
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "telestore"))
-from transfer_core import (HEAD_BYTES, HTML_NAMES, SpeedMeter, check_download, eta_seconds,  # noqa: E402,F401
-                           is_google_limit, looks_like_html, retry_after_flood)
+from transfer_core import (HEAD_BYTES, HTML_NAMES, SpeedMeter, aria2_file_args, check_download,  # noqa: E402,F401
+                           eta_seconds, is_google_limit, looks_like_html, parse_aria2_line, retry_after_flood,
+                           size_text, torrent_file_path)
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
@@ -41,6 +42,11 @@ PART_MAX_SIZE = 1950 * 1024 * 1024  # 1.95 GB Part standard
 # No limit on how long a whole download takes (big files need many minutes), only on a quiet connection
 READ_TIMEOUT = int(os.getenv("READ_TIMEOUT", "120"))
 UPLOAD_REPORT_SECONDS = 5
+# Torrents: with aria2c installed (apt install aria2), this worker also takes files of torrents.
+# It uses the same settings as the main server (transfer_core.aria2_args): no seeding.
+ARIA2C = shutil.which("aria2c")
+SKILLS = ["torrent"] if ARIA2C else []
+TORRENT_REPORT_SECONDS = 2
 
 HEADERS = {
     "X-Worker-Key": WORKER_KEY,
@@ -213,6 +219,148 @@ class DistributedWorker:
         except Exception as e:
             logger.error(f"Failed to report failure: {e}")
 
+    async def upload_part(self, bot, task_id: str, chat_id: int, filename: str, p_path: str, p_idx: int, s_byte: int,
+                          p_size: int, is_single: bool) -> dict:
+        """Sends one file (or one part of a big one) to Telegram; the local copy is removed after."""
+        try:
+            logger.info(f"Uploading part {p_idx} ({p_size} bytes) to Telegram...")
+            target_name = filename if is_single else f"{filename}.part{p_idx}"
+            # "Uploaded file:" marks it as TeleStore's own upload (not a file for Telegram Inbox)
+            caption = f"Uploaded file: {filename}" if is_single else f"{filename} (Part {p_idx})"
+            ext = os.path.splitext(filename)[1].lower()
+            progress = self.upload_progress(task_id, "Uploading to Telegram ☁️" if is_single else f"Uploading Part {p_idx} to Telegram ☁️")
+
+            if is_single:
+                try:
+                    if ext in ['.mp4', '.mkv', '.avi', '.mov', '.webm']:
+                        msg = await self.send(lambda: bot.send_video(chat_id=chat_id, video=p_path, caption=caption, file_name=target_name, progress=progress), task_id)
+                    elif ext in ['.mp3', '.wav', '.ogg', '.flac', '.m4a']:
+                        msg = await self.send(lambda: bot.send_audio(chat_id=chat_id, audio=p_path, caption=caption, file_name=target_name, progress=progress), task_id)
+                    elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+                        msg = await self.send(lambda: bot.send_photo(chat_id=chat_id, photo=p_path, caption=caption, progress=progress), task_id)
+                    else:
+                        msg = await self.send(lambda: bot.send_document(chat_id=chat_id, document=p_path, caption=caption, file_name=target_name, force_document=True, progress=progress), task_id)
+                except Exception as upload_err:
+                    logger.warning(f"[WORKER_UPLOAD] Specialized upload failed ({upload_err}), falling back to document upload...")
+                    msg = await self.send(lambda: bot.send_document(chat_id=chat_id, document=p_path, caption=caption, file_name=target_name, force_document=True, progress=progress), task_id)
+            else:
+                msg = await self.send(lambda: bot.send_document(chat_id=chat_id, document=p_path, caption=caption, file_name=target_name, force_document=True, progress=progress), task_id)
+
+            file_obj = msg.document or msg.video or msg.audio or (msg.photo and msg.photo[-1] if isinstance(msg.photo, list) else msg.photo)
+            uniq_id = getattr(file_obj, "file_unique_id", f"w_{msg.id}")
+            return {
+                "part_index": p_idx,
+                "chat_id": chat_id,
+                "message_id": msg.id,
+                "file_unique_id": uniq_id,
+                "part_size": p_size,
+                "start_byte": s_byte,
+                "end_byte": s_byte + p_size
+            }
+        finally:
+            try:
+                if os.path.exists(p_path):
+                    os.remove(p_path)
+            except Exception:
+                pass
+
+    async def fetch_torrent(self, task_id: str, path: str) -> None:
+        """The .torrent of a torrent file transfer, from the master."""
+        async with self.session.get(f"{MASTER_URL}/api/worker/torrent/{task_id}", headers={"X-Worker-Key": WORKER_KEY},
+                                    params={"worker_id": WORKER_ID}, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"Couldn't get the torrent's details from the server (HTTP {resp.status})")
+            data = await resp.read()
+        with open(path, "wb") as f:
+            f.write(data)
+
+    async def download_torrent_file(self, task_id: str, torrent: str, index: int, size: int, name: str, dl_dir: str) -> None:
+        """Downloads one file of a torrent with aria2c, telling the master its progress every few seconds."""
+        cmd = aria2_file_args(WORK_DIR, torrent, index, dl_dir)
+        cmd[0] = ARIA2C
+        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        info = {"done": 0, "speed_bps": 0, "progress": 0.0, "peers": 0}
+        last = 0.0
+        # One read of aria2c's output waits across rounds; when it's quiet (looking for peers) the
+        # master is still told this worker is busy
+        reading = asyncio.ensure_future(proc.stdout.readline())
+        try:
+            while True:
+                finished, _ = await asyncio.wait({reading}, timeout=max(TORRENT_REPORT_SECONDS, 0.1))
+                if reading in finished:
+                    line = reading.result()
+                    if line == b"":
+                        break  # aria2c finished
+                    parsed = parse_aria2_line(line.decode("utf-8", "replace"))
+                    if parsed:
+                        info = parsed
+                    reading = asyncio.ensure_future(proc.stdout.readline())
+                now = time.time()
+                if now - last >= TORRENT_REPORT_SECONDS:
+                    last = now
+                    done = info.get("done") or int(info["progress"] / 100 * size)
+                    speed = info["speed_bps"]
+                    phase = f"Leeching {name} @ {round(speed / 1024 / 1024, 1)} MB/s ({info['progress']:.1f}%) | ⚡ {info['peers']} peers"
+                    await self.report_progress(task_id, done, size, speed, min(99.0, info["progress"]), eta_seconds(max(0, size - done), speed), phase)
+            code = await proc.wait()
+        except BaseException:
+            reading.cancel()
+            if proc.returncode is None:
+                proc.kill()
+                await proc.wait()
+            raise
+        if code != 0:
+            raise RuntimeError(f"The torrent download stopped (aria2c exit code {code}). It may have too few peers right now.")
+
+    async def process_torrent_item(self, task_data: dict, bot, task_dir: str) -> None:
+        """One file of a torrent: download it with aria2c, send it to Telegram, tell the master."""
+        task_id = task_data["task_id"]
+        name = task_data.get("filename") or "file"
+        size = int(task_data.get("filesize") or 0)
+        chat_id = task_data["chat_id"]
+        torrent = os.path.join(task_dir, "details.torrent")
+        dl_dir = os.path.join(task_dir, "dl")
+        os.makedirs(dl_dir, exist_ok=True)
+
+        await self.fetch_torrent(task_id, torrent)
+        logger.info(f"Task {task_id}: torrent file #{task_data['torrent_file_index']} '{name}' ({size_text(size)})")
+        await self.download_torrent_file(task_id, torrent, int(task_data["torrent_file_index"]), size, name, dl_dir)
+
+        path = torrent_file_path(dl_dir, task_data.get("torrent_rel_path") or name, name)
+        if not path:
+            raise RuntimeError(f"'{name}' wasn't found after the torrent download")
+        actual = os.path.getsize(path)
+        await self.report_progress(task_id, 0, actual, 0, 0, 0, "Uploading to Telegram ☁️", "upload")
+
+        base = {"task_id": task_id, "user_id": task_data["user_id"], "chat_id": chat_id,
+                "destination_path": task_data.get("destination_path", "/Home"), "file_name": name,
+                "file_size": actual, "is_vault": bool(task_data.get("is_vault", False))}
+        if actual <= PART_MAX_SIZE:
+            res = await self.upload_part(bot, task_id, chat_id, name, path, 1, 0, actual, True)
+            await self.report_complete({**base, "is_multipart": False, "message_id": res["message_id"],
+                                        "file_unique_id": res["file_unique_id"]})
+            return
+
+        # Bigger than one Telegram file: parts of 1.95 GB, one at a time (little extra disk)
+        results, start, index = [], 0, 1
+        with open(path, "rb") as src:
+            while start < actual:
+                part_path = os.path.join(task_dir, f"{name}.part{index}")
+                length = min(PART_MAX_SIZE, actual - start)
+                with open(part_path, "wb") as dst:
+                    left = length
+                    while left:
+                        chunk = src.read(min(8 * 1024 * 1024, left))
+                        if not chunk:
+                            break
+                        dst.write(chunk)
+                        left -= len(chunk)
+                results.append(await self.upload_part(bot, task_id, chat_id, name, part_path, index, start, length, False))
+                start += length
+                index += 1
+        os.remove(path)
+        await self.report_complete({**base, "is_multipart": True, "parts": results, "part_size": PART_MAX_SIZE})
+
     async def process_task(self, task_data: dict, tg_config: dict):
         task_id = task_data["task_id"]
         source_url = task_data["source_url"]
@@ -247,6 +395,11 @@ class DistributedWorker:
         upload_tasks = []
 
         try:
+            if task_data.get("source_type") == "torrent_item":
+                step = "downloading the torrent file"
+                await self.process_torrent_item(task_data, bot, task_dir)
+                return
+
             download_url = source_url
             if gdrive_id or "drive.google.com" in source_url:
                 gid = gdrive_id
@@ -387,47 +540,7 @@ class DistributedWorker:
                 part_bytes_written = 0
 
                 async def upload_part_fn(p_path, p_idx, s_byte, p_size, is_single):
-                    try:
-                        logger.info(f"Uploading part {p_idx} ({p_size} bytes) to Telegram...")
-                        target_name = filename if is_single else f"{filename}.part{p_idx}"
-                        # "Uploaded file:" marks it as TeleStore's own upload (not a file for Telegram Inbox)
-                        caption = f"Uploaded file: {filename}" if is_single else f"{filename} (Part {p_idx})"
-                        ext = os.path.splitext(filename)[1].lower()
-                        progress = self.upload_progress(task_id, "Uploading to Telegram ☁️" if is_single else f"Uploading Part {p_idx} to Telegram ☁️")
-
-                        if is_single:
-                            try:
-                                if ext in ['.mp4', '.mkv', '.avi', '.mov', '.webm']:
-                                    msg = await self.send(lambda: bot.send_video(chat_id=chat_id, video=p_path, caption=caption, file_name=target_name, progress=progress), task_id)
-                                elif ext in ['.mp3', '.wav', '.ogg', '.flac', '.m4a']:
-                                    msg = await self.send(lambda: bot.send_audio(chat_id=chat_id, audio=p_path, caption=caption, file_name=target_name, progress=progress), task_id)
-                                elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
-                                    msg = await self.send(lambda: bot.send_photo(chat_id=chat_id, photo=p_path, caption=caption, progress=progress), task_id)
-                                else:
-                                    msg = await self.send(lambda: bot.send_document(chat_id=chat_id, document=p_path, caption=caption, file_name=target_name, force_document=True, progress=progress), task_id)
-                            except Exception as upload_err:
-                                logger.warning(f"[WORKER_UPLOAD] Specialized upload failed ({upload_err}), falling back to document upload...")
-                                msg = await self.send(lambda: bot.send_document(chat_id=chat_id, document=p_path, caption=caption, file_name=target_name, force_document=True, progress=progress), task_id)
-                        else:
-                            msg = await self.send(lambda: bot.send_document(chat_id=chat_id, document=p_path, caption=caption, file_name=target_name, force_document=True, progress=progress), task_id)
-
-                        file_obj = msg.document or msg.video or msg.audio or (msg.photo and msg.photo[-1] if isinstance(msg.photo, list) else msg.photo)
-                        uniq_id = getattr(file_obj, "file_unique_id", f"w_{msg.id}")
-                        return {
-                            "part_index": p_idx,
-                            "chat_id": chat_id,
-                            "message_id": msg.id,
-                            "file_unique_id": uniq_id,
-                            "part_size": p_size,
-                            "start_byte": s_byte,
-                            "end_byte": s_byte + p_size
-                        }
-                    finally:
-                        try:
-                            if os.path.exists(p_path):
-                                os.remove(p_path)
-                        except Exception:
-                            pass
+                    return await self.upload_part(bot, task_id, chat_id, filename, p_path, p_idx, s_byte, p_size, is_single)
 
                 # Stream and buffer in chunks of 512 KB
                 chunk_size = 512 * 1024
@@ -544,13 +657,14 @@ class DistributedWorker:
         )
         asyncio.create_task(self.heartbeat_loop())
         logger.info(f"Distributed Worker '{WORKER_ID}' started. Polling Master at {MASTER_URL}...")
+        logger.info(f"Torrent files: {'yes (aria2c at ' + ARIA2C + ')' if ARIA2C else 'no (aria2c is not installed)'}")
 
         while self.running:
             try:
                 async with self.session.post(
                     f"{MASTER_URL}/api/worker/claim-task",
                     headers=HEADERS,
-                    json={"worker_id": WORKER_ID},
+                    json={"worker_id": WORKER_ID, "skills": SKILLS},
                     timeout=aiohttp.ClientTimeout(total=10)
                 ) as resp:
                     if resp.status == 200:
