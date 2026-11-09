@@ -10,25 +10,12 @@ import threading
 from typing import Optional, Dict, Any, List, Callable
 
 from telestore.services.priority_manager import priority_manager
+from telestore.transfer_core import TORRENT_TRACKERS, aria2_args, aria2_file_args, parse_aria2_line
 
 logger = logging.getLogger("torrent_manager")
 
-PUBLIC_TRACKERS = [
-    "udp://tracker.opentrackr.org:1337/announce",
-    "udp://open.stealth.si:80/announce",
-    "udp://tracker.torrent.eu.org:451/announce",
-    "udp://tracker.bittor.pw:1337/announce",
-    "udp://public.popcorn-tracker.org:6969/announce",
-    "udp://tracker.dler.org:6969/announce",
-    "udp://exodus.desync.com:6969/announce",
-    "udp://open.demonii.com:1337/announce",
-    "udp://tracker.moeking.me:6969/announce",
-    "http://tracker.openbittorrent.com:80/announce",
-    "udp://explodie.org:6969/announce",
-    "udp://opentracker.i2p.rocks:6969/announce",
-    "udp://tracker.tiny-vps.com:6969/announce",
-    "udp://open.tracker.cl:1337/announce",
-]
+# Shared with worker machines (transfer_core): the trackers, the no-seeding settings, progress lines
+PUBLIC_TRACKERS = list(TORRENT_TRACKERS)
 
 def bdecode(data: bytes) -> Any:
     """Fast pure-Python bencode decoder."""
@@ -117,25 +104,10 @@ class TorrentManager:
     Provides metadata resolution for magnet links, selective single-file downloads,
     real-time progress monitoring, QoS priority pausing, and cancellation.
     """
-    def __init__(self):
-        self.tracker_arg = ",".join(PUBLIC_TRACKERS)
+    DHT_DIR = "/app/cache"
 
     def _get_base_aria_args(self) -> List[str]:
-        return [
-            "aria2c",
-            "--enable-dht=true",
-            "--enable-peer-exchange=true",
-            "--bt-enable-lpd=true",
-            "--bt-max-peers=60",
-            "--max-connection-per-server=16",
-            "--split=16",
-            "--seed-time=0",
-            "--file-allocation=none",
-            "--max-overall-upload-limit=1K",
-            f"--bt-tracker={self.tracker_arg}",
-            "--dht-file-path=/app/cache/dht.dat",
-            "--dht-file-path6=/app/cache/dht6.dat",
-        ]
+        return aria2_args(self.DHT_DIR)
 
     def resolve_magnet_metadata(
         self,
@@ -227,12 +199,7 @@ class TorrentManager:
         Monitors progress, handles priority auto-pausing via SIGSTOP/SIGCONT, and checks cancel_event.
         """
         os.makedirs(work_dir, exist_ok=True)
-        cmd = self._get_base_aria_args() + [
-            f"--select-file={file_index}",
-            f"--dir={work_dir}",
-            "--summary-interval=1",
-            torrent_file_path
-        ]
+        cmd = aria2_file_args(self.DHT_DIR, torrent_file_path, file_index, work_dir)
 
         logger.info(f"Starting selective download for file #{file_index} into {work_dir}")
 
@@ -245,15 +212,6 @@ class TorrentManager:
         )
 
         is_currently_paused = False
-        multipliers = {
-            'B': 1,
-            'KB': 1024,
-            'KIB': 1024,
-            'MB': 1024**2,
-            'MIB': 1024**2,
-            'GB': 1024**3,
-            'GIB': 1024**3
-        }
 
         try:
             while proc.poll() is None:
@@ -292,35 +250,9 @@ class TorrentManager:
                 line = proc.stdout.readline() if proc.stdout else ""
                 if line:
                     line = line.strip()
-                    # Example line: "[#2089b0 400.0KiB/33.2MiB(1%) CN:18 SD:6 DL:4.2MiB ETA:4m20s]"
-                    if "CN:" in line or "DL:" in line:
-                        pct_m = re.search(r'\((\d+(?:\.\d+)?)%\)', line)
-                        pct = float(pct_m.group(1)) if pct_m else 0.0
-
-                        dl_m = re.search(r'DL:([0-9.]+)([KMGTP]?i?B)', line)
-                        speed_bps = 0
-                        if dl_m:
-                            val = float(dl_m.group(1))
-                            unit = dl_m.group(2).upper()
-                            speed_bps = int(val * multipliers.get(unit, 1024**2))
-
-                        cn_m = re.search(r'CN:(\d+)', line)
-                        peers = int(cn_m.group(1)) if cn_m else 0
-
-                        sd_m = re.search(r'SD:(\d+)', line)
-                        seeders = int(sd_m.group(1)) if sd_m else 0
-
-                        eta_m = re.search(r'ETA:([0-9a-zA-Z]+)', line)
-                        eta_str = eta_m.group(1) if eta_m else ""
-
-                        if progress_cb:
-                            progress_cb({
-                                "progress": pct,
-                                "speed_bps": speed_bps,
-                                "peers": peers,
-                                "seeders": seeders,
-                                "eta_str": eta_str,
-                            })
+                    info = parse_aria2_line(line)
+                    if info and progress_cb:
+                        progress_cb(info)
 
                 time.sleep(0.05)
 
