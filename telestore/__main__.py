@@ -1,5 +1,7 @@
 #__main__.py
 import asyncio
+import logging
+import os
 import signal
 import sys
 from d4rk.Logs import setup_logger
@@ -64,6 +66,13 @@ def main():
     
     try:
         start_bot()
+        # The bots and the web server have stopped (a stop signal, e.g. from Docker or the
+        # server's out-of-memory guard). Leave now: background threads (downloads, torrents)
+        # would otherwise keep the process alive and hung, with no website, so Docker would
+        # never restart it.
+        logger.info("Stopped; exiting so Docker can start TeleStore again")
+        logging.shutdown()
+        os._exit(0)
     except KeyboardInterrupt:
         logger.info("Received KeyboardInterrupt, shutting down...")
         signal_handler(signal.SIGINT, None)

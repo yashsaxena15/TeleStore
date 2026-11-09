@@ -2,6 +2,8 @@
 Bot Manager for d4rk package - Handles single or multiple bot instances using TGBase
 """
 
+import logging
+import os
 import sys
 import time
 import signal
@@ -25,6 +27,25 @@ flood_waited_bots = {}
 startup_message_id = None
 startup_message_chat_id = None
 
+
+
+SHUTDOWN_GRACE_S = 30
+_exit_timer = None
+
+
+def _force_exit_after(seconds: float) -> None:
+    """Ends the process [seconds] from now unless it has ended by then (started once)."""
+    global _exit_timer
+    if _exit_timer is not None:
+        return
+
+    def _leave():
+        logger.warning(f"Shutdown didn't finish within {seconds:.0f} s; exiting anyway")
+        logging.shutdown()
+        os._exit(1)
+    _exit_timer = threading.Timer(seconds, _leave)
+    _exit_timer.daemon = True
+    _exit_timer.start()
 
 class D4RK_BotManager:
     def __init__(self, 
@@ -172,6 +193,8 @@ class D4RK_BotManager:
         self._running = False
         self._stop_event.set()
         logger.info("Shutdown process initiated")
+        # If the shutdown itself gets stuck, leave anyway after a while (Docker starts us again)
+        _force_exit_after(SHUTDOWN_GRACE_S)
         
         # If we're in the main thread, don't exit immediately
         # Let the main loop handle the shutdown
