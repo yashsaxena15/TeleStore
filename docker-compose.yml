@@ -16,6 +16,9 @@ services:
       - "127.0.0.1:9000:8000"
     volumes:
       - ./cache:/app/cache
+      # Downloads and uploads in progress (torrents, leeches, phone upload parts) stay on the
+      # server's disk, so a deploy (a new container) doesn't throw them away and start them over
+      - ./tg_files:/app/tg_files
     depends_on:
       - mongo
       - pot
