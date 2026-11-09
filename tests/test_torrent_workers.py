@@ -27,6 +27,16 @@ from test_transfer_server import Coll as _Coll
 
 
 class Coll(_Coll):
+    def update_one(self, flt, update, upsert=False):
+        res = super().update_one(flt, update, upsert)
+        hit = self.find_one(flt) if update.get("$push") else None
+        if hit:
+            for d in self.docs:
+                if d["_id"] == hit["_id"]:
+                    for key, value in update["$push"].items():
+                        d.setdefault(key, []).append(value)
+        return res
+
     def delete_one(self, flt):
         hit = self.find_one(flt)
         if hit:
@@ -243,7 +253,9 @@ def _run_item(worker, aria2c, tmp_path, part_max=None):
             "destination_path": "/Home/Game", "torrent_file_index": 2, "torrent_rel_path": "Game/a.bin", "source_type": "torrent_item"}
     task_dir = tmp_path / "task"
     task_dir.mkdir()
-    with patch.object(worker, "ARIA2C", aria2c), patch.object(worker, "TORRENT_REPORT_SECONDS", 0):
+    # The aria2c fallback (a machine without libtorrent)
+    with patch.object(worker, "ARIA2C", aria2c), patch.object(worker, "TORRENT_REPORT_SECONDS", 0), \
+            patch.object(worker.torrent_engine, "AVAILABLE", False):
         if part_max:
             with patch.object(worker, "PART_MAX_SIZE", part_max):
                 asyncio.run(w.process_torrent_item(task, bot, str(task_dir)))
@@ -253,8 +265,8 @@ def _run_item(worker, aria2c, tmp_path, part_max=None):
 
 
 class TestWorkerProgram:
-    def test_says_it_can_do_torrents_only_with_aria2c(self, worker):
-        assert worker.SKILLS == (["torrent"] if worker.ARIA2C else [])
+    def test_says_it_can_do_torrents_with_libtorrent_or_aria2c(self, worker):
+        assert worker.SKILLS == (["torrent"] if (worker.torrent_engine.AVAILABLE or worker.ARIA2C) else [])
 
     def test_downloads_its_file_and_sends_it(self, worker, aria2c, tmp_path):
         w, sent = _run_item(worker, aria2c, tmp_path)
@@ -301,6 +313,7 @@ class TestMainServer:
         mgr._bot_manager = MagicMock()
         files = MagicMock()
         with patch.object(manager_module.torrent_manager, "download_file_selective", download), \
+                patch.object(manager_module.torrent_engine, "AVAILABLE", False), \
                 patch.object(manager_module, "upload_part_task", upload), \
                 patch.object(database, "Files", files), \
                 patch.object(mgr, "_update_task") as update:
@@ -321,6 +334,7 @@ class TestMainServer:
         task = {"task_id": "rt_m", "user_id": "7", "chat_id": -100, "source_type": "magnet",
                 "source_url": "magnet:?xt=urn:btih:abc", "destination_path": "/Home"}
         with patch.object(manager_module.torrent_manager, "resolve_magnet_metadata", return_value=str(meta_file)), \
+                patch.object(manager_module.torrent_engine, "AVAILABLE", False), \
                 patch.object(manager_module, "parse_torrent_bytes", return_value=GAME), \
                 patch.object(mgr, "_split_torrent", return_value=(2, 1)) as split, \
                 patch.object(mgr, "_update_task"):
@@ -400,6 +414,7 @@ class TestKeptProgress:
         mgr._bot_manager = MagicMock()
         item = {**TestMainServer()._item(str(torrent)), "group_id": "grp_t"}
         with patch.object(manager_module.torrent_manager, "download_file_selective", download), \
+                patch.object(manager_module.torrent_engine, "AVAILABLE", False), \
                 patch.object(manager_module, "upload_part_task", AsyncMock(return_value={"message_id": 1, "file_unique_id": "u"})), \
                 patch.object(database, "Files", MagicMock()), \
                 patch("telestore.services.remote_transfer_manager.manager.get_remote_db", return_value={"RemoteTransfers": coll}), \
@@ -412,3 +427,183 @@ class TestKeptProgress:
             coll.docs.clear()
             asyncio.run(mgr._run_download_and_upload(item, MagicMock(is_set=lambda: False)))
             assert not folder.exists()  # the last file: the folder goes
+
+
+# ── libtorrent, part by part ────────────────────────────────────────────────
+
+class FakeEngine:
+    """Stands in for torrent_engine.get_engine(): hands over the file's parts like the real one,
+    taking a slot for each (the real one is tested against a live seeder in test_torrent_engine)."""
+
+    def __init__(self, content: bytes, part_size: int):
+        self.content, self.part_size, self.calls = content, part_size, []
+
+    def download_file(self, torrent_bytes, file_index, save_dir, parts_dir, *, slots, on_part, cancelled,
+                      on_progress=None, should_pause=lambda: False, done_parts=(), part_size=None, peers=()):
+        from telestore.torrent_engine import PartReady, plan_parts
+        self.calls.append({"index": file_index, "done": set(done_parts), "save_dir": save_dir})
+        os.makedirs(parts_dir, exist_ok=True)
+        plan = plan_parts(len(self.content), self.part_size)
+        for index, start, length in plan:
+            if index in set(done_parts):
+                continue
+            while not slots.acquire(timeout=0.5):
+                pass
+            if on_progress:
+                on_progress({"done": start, "total": len(self.content), "progress": 10.0, "speed_bps": 5,
+                             "peers": 2, "part": index, "parts": len(plan), "paused": False})
+            path = os.path.join(parts_dir, f"part{index}")
+            open(path, "wb").write(self.content[start:start + length])
+            on_part(PartReady(index, start, length, path, len(plan) == 1, len(plan)))
+        return len(self.content)
+
+
+def _sent_part(**kw):
+    async def upload(part_file_path, part_index, file_name, start_byte, part_size, **rest):
+        data = open(part_file_path, "rb").read()
+        os.remove(part_file_path)
+        kw.setdefault("sent", []).append((part_index, data, rest["is_single_part"]))
+        rest["semaphore"].release()
+        return {"part_index": part_index, "chat_id": -100, "message_id": 100 + part_index, "file_unique_id": f"u{part_index}",
+                "part_size": part_size, "start_byte": start_byte, "end_byte": start_byte + part_size - 1, "thumbnail": None}
+    return upload, kw
+
+
+class TestMainServerByParts:
+    def _item(self, torrent, size, **extra):
+        return {"task_id": "rt_p", "user_id": "7", "chat_id": -100, "source_type": "torrent_item", "source_url": "magnet:?x",
+                "torrent_path": torrent, "torrent_file_index": 1, "torrent_rel_path": "G/big.bin", "filename": "big.bin",
+                "filesize": size, "destination_path": "/Home/G", "group_id": "grp_p", **extra}
+
+    def _run(self, tmp_path, content, part_size, item_extra=None):
+        torrent = tmp_path / "g.torrent"
+        torrent.write_bytes(b"d4:infoe")
+        engine = FakeEngine(content, part_size)
+        upload, sent = _sent_part()
+        coll = Coll([self._item(str(torrent), len(content), **(item_extra or {}))])
+        files = MagicMock()
+        mgr = manager_module.RemoteTransferManager()
+        mgr._bot_manager = MagicMock()
+        with patch.object(manager_module.torrent_engine, "AVAILABLE", True), \
+                patch.object(manager_module.torrent_engine, "get_engine", return_value=engine), \
+                patch.object(manager_module.torrent_engine, "PART_SIZE", part_size), \
+                patch.object(manager_module, "upload_part_task", upload), \
+                patch.object(database, "Files", files), \
+                patch("telestore.services.remote_transfer_manager.manager.get_remote_db", return_value={"RemoteTransfers": coll}), \
+                patch.object(mgr, "_update_task") as update:
+            asyncio.run(mgr._run_download_and_upload(coll.find_one({"task_id": "rt_p"}), MagicMock(is_set=lambda: False)))
+        return engine, sent.get("sent", []), files, coll, update
+
+    def test_a_big_file_goes_part_by_part(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        content = os.urandom(10_000)
+        engine, sent, files, coll, update = self._run(tmp_path, content, 4_000)
+        assert [s[0] for s in sent] == [1, 2, 3] and b"".join(s[1] for s in sent) == content
+        assert not any(s[2] for s in sent)  # parts, sent as documents
+        kwargs = files.add_multipart_file.call_args.kwargs
+        assert kwargs["file_size"] == 10_000 and [p["start_byte"] for p in kwargs["parts"]] == [0, 4000, 8000]
+        assert kwargs["file_path"] == "/Home/G"
+        # Each part sent is remembered, so a restart skips it
+        assert [p["part_index"] for p in coll.find_one({"task_id": "rt_p"})["torrent_parts"]] == [1, 2, 3]
+        assert engine.calls[0]["save_dir"].endswith("tg_files/torrent_grp_p")
+        assert update.call_args.args[1]["status"] == "completed"
+
+    def test_a_small_file_is_one_ordinary_file(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _, sent, files, _, _ = self._run(tmp_path, b"hello", 4_000)
+        assert sent == [(1, b"hello", True)]
+        assert files.claim_upload.call_args.kwargs["file_size"] == 5
+        files.add_multipart_file.assert_not_called()
+
+    def test_after_a_restart_only_the_missing_parts(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        content = os.urandom(10_000)
+        before = [{"part_index": 1, "chat_id": -100, "message_id": 1, "file_unique_id": "old", "part_size": 4000,
+                   "start_byte": 0, "end_byte": 3999, "thumbnail": None}]
+        engine, sent, files, _, _ = self._run(tmp_path, content, 4_000, {"torrent_parts": before})
+        assert engine.calls[0]["done"] == {1}
+        assert [s[0] for s in sent] == [2, 3]
+        parts = files.add_multipart_file.call_args.kwargs["parts"]
+        assert [p["file_unique_id"] for p in parts] == ["old", "u2", "u3"]
+
+    def test_a_file_aria2c_had_started_stays_with_aria2c(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        torrent = tmp_path / "g.torrent"
+        torrent.write_bytes(b"d4:infoe")
+        mgr = manager_module.RemoteTransferManager()
+        mgr._bot_manager = MagicMock()
+        item = TestMainServerByParts()._item(str(torrent), 10, main_only=True)
+        with patch.object(manager_module.torrent_engine, "AVAILABLE", True), \
+                patch.object(manager_module.torrent_engine, "get_engine") as engine, \
+                patch.object(manager_module.torrent_manager, "download_file_selective", side_effect=RuntimeError("aria2c")), \
+                patch.object(mgr, "_update_task"), pytest.raises(RuntimeError, match="aria2c"):
+            asyncio.run(mgr._run_download_and_upload(item, MagicMock(is_set=lambda: False)))
+        engine.assert_not_called()
+
+    def test_a_magnet_is_read_with_libtorrent(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        engine = MagicMock()
+        engine.fetch_metadata.return_value = b"d4:infod4:name1:xee"
+        mgr = manager_module.RemoteTransferManager()
+        mgr._bot_manager = MagicMock()
+        task = {"task_id": "rt_m", "user_id": "7", "chat_id": -100, "source_type": "magnet",
+                "source_url": "magnet:?xt=urn:btih:abc", "destination_path": "/Home"}
+        read = []
+        with patch.object(manager_module.torrent_engine, "AVAILABLE", True), \
+                patch.object(manager_module.torrent_engine, "get_engine", return_value=engine), \
+                patch.object(manager_module, "parse_torrent_bytes", return_value=GAME), \
+                patch.object(mgr, "_split_torrent", side_effect=lambda doc, path, meta, partial_dir=None: read.append(open(path, "rb").read()) or (2, 1)), \
+                patch.object(mgr, "_update_task"):
+            asyncio.run(mgr._run_download_and_upload(task, MagicMock(is_set=lambda: False)))
+        assert engine.fetch_metadata.call_args.args[0] == "magnet:?xt=urn:btih:abc"
+        assert read == [b"d4:infod4:name1:xee"]
+
+
+class TestWorkerByParts:
+    def test_parts_go_to_telegram_one_by_one(self, worker, tmp_path):
+        content = os.urandom(10_000)
+        engine = FakeEngine(content, 4_000)
+        w = worker.DistributedWorker()
+        w.fetch_torrent = AsyncMock(side_effect=lambda task_id, path: open(path, "wb").write(b"d4:infoe"))
+        w.report_progress = AsyncMock()
+        w.report_complete = AsyncMock()
+        sent = []
+
+        async def upload_part(bot, task_id, chat_id, filename, p_path, p_idx, s_byte, p_size, is_single):
+            sent.append((p_idx, open(p_path, "rb").read(), is_single))
+            os.remove(p_path)
+            return {"part_index": p_idx, "chat_id": chat_id, "message_id": p_idx, "file_unique_id": f"u{p_idx}",
+                    "part_size": p_size, "start_byte": s_byte, "end_byte": s_byte + p_size}
+        w.upload_part = upload_part
+        task = {"task_id": "rt_1", "filename": "big.bin", "filesize": len(content), "chat_id": -1, "user_id": "7",
+                "destination_path": "/Home/G", "torrent_file_index": 1, "torrent_rel_path": "G/big.bin", "source_type": "torrent_item"}
+        task_dir = tmp_path / "task"
+        task_dir.mkdir()
+        with patch.object(worker.torrent_engine, "AVAILABLE", True), \
+                patch.object(worker.torrent_engine, "get_engine", return_value=engine), \
+                patch.object(worker, "TORRENT_REPORT_SECONDS", 0):
+            asyncio.run(w.process_torrent_item(task, SimpleNamespace(), str(task_dir)))
+        assert b"".join(s[1] for s in sent) == content and not any(s[2] for s in sent)
+        done = w.report_complete.call_args.args[0]
+        assert done["is_multipart"] is True and [p["start_byte"] for p in done["parts"]] == [0, 4000, 8000]
+        assert any("part 2 of 3" in c.args[6] for c in w.report_progress.call_args_list)
+
+
+def test_padding_files_are_not_files_to_fetch():
+    from telestore.services.torrent_manager import parse_torrent_bytes
+
+    def bencode(v):
+        if isinstance(v, int):
+            return b"i%de" % v
+        if isinstance(v, bytes):
+            return b"%d:%s" % (len(v), v)
+        if isinstance(v, list):
+            return b"l" + b"".join(bencode(x) for x in v) + b"e"
+        return b"d" + b"".join(bencode(k) + bencode(v[k]) for k in sorted(v)) + b"e"
+    data = bencode({b"info": {b"name": b"G", b"piece length": 16, b"files": [
+        {b"length": 10, b"path": [b"a.bin"]},
+        {b"attr": b"p", b"length": 6, b"path": [b".pad", b"6"]},
+        {b"length": 4, b"path": [b"b.bin"]},
+    ]}})
+    meta = parse_torrent_bytes(data)
+    assert [(f["index"], f["name"]) for f in meta["files"]] == [(1, "a.bin"), (3, "b.bin")]

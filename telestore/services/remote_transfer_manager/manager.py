@@ -23,6 +23,7 @@ from telestore.services import download_check
 from telestore.transfer_core import SpeedMeter, eta_seconds, torrent_file_path as torrent_file_on_disk
 from telestore.services.priority_manager import priority_manager
 from telestore.services.torrent_manager import torrent_manager, parse_torrent_bytes
+from telestore import torrent_engine
 
 from telestore.services.remote_transfer_manager.common import logger
 from telestore.services.remote_transfer_manager.helpers import GoogleDriveQuotaExceededError, MODERN_USER_AGENT, google_limit_pause, finalize_multipart_group_if_ready, get_file_type, get_remote_db, is_gdrive_quota_error, probe_resource_for_range
@@ -599,6 +600,128 @@ class RemoteTransferManager:
             event_service.task_finished(disc_task_id)
         finally:
             shutil.rmtree(resolve_output_dir, ignore_errors=True)
+
+    async def _torrent_by_parts(self, task_doc: dict, torrent_path: str, cancel_event: threading.Event,
+                                client, bot_manager, budget_slots: list) -> None:
+        """One file of a torrent with libtorrent: each 1.95 GB part goes to Telegram while the next
+        one downloads, so at most two parts are on disk (from the server's disk budget), whatever
+        the file's size. Parts already in Telegram (before a restart) are remembered and skipped."""
+        task_id = task_doc["task_id"]
+        user_id = str(task_doc["user_id"])
+        chat_id = task_doc["chat_id"]
+        is_vault = bool(task_doc.get("is_vault"))
+        f_name = task_doc.get("filename") or f"file_{task_doc['torrent_file_index']}"
+        f_size = int(task_doc.get("filesize") or 0)
+        folder = task_doc.get("destination_path") or "/Home"
+        group_id = task_doc.get("group_id") or task_id
+        ftype = get_file_type(f_name)
+        loop = asyncio.get_running_loop()
+        coll = get_remote_db()["RemoteTransfers"]
+        database.Files.create_folder_path(folder, owner_id=user_id)
+        with open(torrent_path, "rb") as f:
+            torrent_bytes = f.read()
+
+        done = {int(p["part_index"]): p for p in task_doc.get("torrent_parts") or []}
+        slots = ThreadPartSlots(expected_total=max(0, f_size - sum(int(p.get("part_size") or 0) for p in done.values())))
+        budget_slots.append(slots)
+        futures = []
+        uploaded = {}
+        up_meter = SpeedMeter()
+        last = [0.0]
+
+        def report(updates: dict) -> None:
+            now = time.time()
+            if now - last[0] >= 1.5 or updates.get("status") == "uploading_tg":
+                last[0] = now
+                self._update_task(task_id, updates)
+
+        def on_progress(info: dict) -> None:
+            if cancel_event.is_set():
+                raise InterruptedError("Cancelled by user")
+            sending = sum(uploaded.values())
+            report({
+                "status": "paused" if info["paused"] else "downloading",
+                "progress": min(99.0, info["progress"]),
+                "transferred_bytes": info["done"],
+                "filesize": f_size,
+                "speed_bps": info["speed_bps"],
+                "download_bps": info["speed_bps"],
+                "upload_bps": up_meter.update(sending) if sending else 0,
+                "eta_seconds": eta_seconds(max(0, f_size - info["done"]), info["speed_bps"]),
+                "peer_count": info["peers"],
+                "phase": ("Paused: Prioritizing User Upload 👤 (Will auto-resume)" if info["paused"] else
+                          f"Leeching {f_name} · part {info['part']} of {info['parts']} ({info['progress']:.1f}%) | ⚡ {info['peers']} peers"),
+            })
+
+        def on_part(part: torrent_engine.PartReady) -> None:
+            # Runs in the download's thread: an upload that failed stops the download too
+            for fut in futures:
+                if fut.done() and fut.exception():
+                    raise fut.exception()
+
+            def progress(current: int, total: int) -> None:
+                uploaded[part.index] = current
+
+            coro = upload_part_task(
+                part_file_path=part.path, part_index=part.index, file_name=f_name, start_byte=part.start,
+                part_size=part.length, chat_id=chat_id, bot_manager=bot_manager, fallback_client=client,
+                caption=f"Uploaded file: {f_name}" if part.is_single else f"{f_name} (Part {part.index})",
+                semaphore=slots, is_single_part=part.is_single,
+                file_type=ftype if part.is_single else "document", progress=progress,
+            )
+            fut = asyncio.run_coroutine_threadsafe(coro, loop)
+            if not part.is_single:
+                def remember(f):
+                    if not f.cancelled() and f.exception() is None:
+                        coll.update_one({"task_id": task_id}, {"$push": {"torrent_parts": f.result()}})
+                fut.add_done_callback(remember)
+            futures.append(fut)
+
+        logger.info(f"[REMOTE_TRANSFER] Task {task_id}: torrent file #{task_doc['torrent_file_index']} '{f_name}' "
+                    f"({f_size} bytes) with libtorrent, part by part ({len(done)} part(s) already sent)")
+        work_dir = torrent_work_dir(group_id)
+        parts_dir = os.path.join(os.getcwd(), "tg_files", f"remote_{task_id}", "parts")
+        # One download of a torrent at a time in this process (libtorrent holds a torrent once)
+        async with self._torrent_lock(group_id):
+            try:
+                await asyncio.to_thread(
+                    torrent_engine.get_engine().download_file,
+                    torrent_bytes, int(task_doc["torrent_file_index"]), work_dir, parts_dir,
+                    slots=slots, on_part=on_part, cancelled=cancel_event.is_set, on_progress=on_progress,
+                    should_pause=priority_manager.is_user_upload_active, done_parts=set(done),
+                )
+            except BaseException:
+                for fut in futures:
+                    fut.cancel()
+                raise
+        self._update_task(task_id, {"status": "uploading_tg", "download_bps": 0, "phase": f"Sending the last part of {f_name} to Telegram..."})
+        results = list(done.values()) + [await asyncio.wrap_future(f) for f in futures]
+        results.sort(key=lambda r: int(r["part_index"]))
+
+        if len(results) == 1 and not done and f_size <= torrent_engine.PART_SIZE:
+            res = results[0]
+            database.Files.claim_upload(
+                chat_id=chat_id, message_id=res["message_id"], thumbnail=res.get("thumbnail"), file_type=ftype,
+                file_unique_id=res["file_unique_id"], file_size=f_size, file_name=f_name,
+                file_caption=f"Uploaded file: {f_name}", file_path=folder, owner_id=user_id, is_vault=is_vault)
+        else:
+            parts = [{k: r[k] for k in ("part_index", "chat_id", "message_id", "file_unique_id", "part_size", "start_byte", "end_byte")}
+                     for r in results]
+            database.Files.add_multipart_file(
+                chat_id=chat_id, thumbnail=results[0].get("thumbnail"), file_type=ftype,
+                file_unique_id=results[0]["file_unique_id"], file_size=f_size, file_name=f_name,
+                file_caption=f"Uploaded multi-part file: {f_name}", parts=parts, file_path=folder,
+                owner_id=user_id, part_size=torrent_engine.PART_SIZE, is_vault=is_vault)
+
+        # The torrent's folder goes once none of its files is left to fetch
+        if not coll.find_one({"group_id": task_doc.get("group_id"), "task_id": {"$ne": task_id}, "status": {"$in": UNFINISHED}}):
+            shutil.rmtree(work_dir, ignore_errors=True)
+        self._update_task(task_id, {
+            "status": "completed", "progress": 100.0, "speed_bps": 0, "download_bps": 0, "upload_bps": 0,
+            "eta_seconds": 0, "filesize": f_size, "transferred_bytes": f_size,
+            "phase": "Completed & Saved to Telegram ☁️",
+        })
+        logger.info(f"[REMOTE_TRANSFER] Task {task_id}: torrent file '{f_name}' finished ({len(results)} part(s))")
 
     def _torrent_lock(self, group_id: Optional[str]) -> asyncio.Lock:
         return self._torrent_locks.setdefault(group_id or "", asyncio.Lock())
@@ -1771,14 +1894,23 @@ class RemoteTransferManager:
                     def _on_meta_prog(msg: str):
                         self._update_task(task_id, {"phase": msg})
 
-                    torrent_file_path = await asyncio.to_thread(
-                        torrent_manager.resolve_magnet_metadata,
-                        source_url,
-                        meta_dir,
-                        cancel_event,
-                        _on_meta_prog,
-                        180
-                    )
+                    if torrent_engine.AVAILABLE:
+                        meta_bytes = await asyncio.to_thread(
+                            torrent_engine.get_engine().fetch_metadata,
+                            source_url, meta_dir, cancel_event.is_set, _on_meta_prog, 180)
+                        os.makedirs(meta_dir, exist_ok=True)
+                        torrent_file_path = os.path.join(meta_dir, f"{task_id}.torrent")
+                        with open(torrent_file_path, "wb") as tf:
+                            tf.write(meta_bytes)
+                    else:
+                        torrent_file_path = await asyncio.to_thread(
+                            torrent_manager.resolve_magnet_metadata,
+                            source_url,
+                            meta_dir,
+                            cancel_event,
+                            _on_meta_prog,
+                            180
+                        )
                 else:
                     torrent_file_path = task_doc.get("torrent_path")
                     if not torrent_file_path or not os.path.exists(torrent_file_path):
@@ -1796,6 +1928,12 @@ class RemoteTransferManager:
                 torrent_file_path = task_doc.get("torrent_path")
                 if not torrent_file_path or not os.path.exists(torrent_file_path):
                     raise FileNotFoundError("The torrent's details are gone from the server. Add the torrent again.")
+                if torrent_engine.AVAILABLE and not task_doc.get("main_only"):
+                    # libtorrent, part by part (at most two parts on disk). A file aria2c had
+                    # already started (main_only) finishes with aria2c below.
+                    await self._torrent_by_parts(task_doc, torrent_file_path, cancel_event, client, bot_manager, budget_slots)
+                    shutil.rmtree(tg_dir, ignore_errors=True)
+                    return
                 f_item = {
                     "index": int(task_doc["torrent_file_index"]),
                     "name": task_doc.get("filename") or f"file_{task_doc['torrent_file_index']}",
