@@ -99,6 +99,11 @@ class WebServerManager:
                         )
                         self._server = uvicorn.Server(config)
                         await self._server.serve()
+                        # A stop signal makes uvicorn finish on its own (should_exit): that's a
+                        # shutdown, not a crash, so it isn't started again
+                        if self._server.should_exit:
+                            self._stopping = True
+                            break
                     except asyncio.CancelledError:
                         break
                     except Exception as e:
