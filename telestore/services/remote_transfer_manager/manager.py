@@ -43,6 +43,15 @@ STILL_STATUSES = ("queued", "paused", "paused_quota", "completed", "failed", "ca
 GROUP_PREVIEW_SIZE = 20
 
 
+
+# A Google Drive folder's file list: Google sometimes answers with a page without it (it limits
+# requests from one server for a while). Seconds to wait before each further try.
+FOLDER_LIST_WAITS = (10, 30, 90)
+FOLDER_LIST_EMPTY = ("Google didn't return this folder's files. It may be empty, or Google is "
+                     "limiting requests right now; try again in a few minutes.")
+DISCOVERY_PHASE = "🔍 Analyzing folder & discovering files in background..."
+_sleep = asyncio.sleep  # tests replace it
+
 class RemoteTransferManager:
     """
     Manages background cloud-to-cloud server transfers (Google Drive, direct URLs).
@@ -94,6 +103,12 @@ class RemoteTransferManager:
             self._running = True
             self.init_db()
             self._queue_worker_task = asyncio.create_task(self._process_queue_loop())
+            # Folder listings cut short by a restart would otherwise stay "discovering" for ever
+            try:
+                for disc in get_remote_db()["RemoteTransfers"].find({"source_type": "gdrive_folder", "status": "discovering"}):
+                    self._start_discovery(disc)
+            except Exception as e:
+                logger.warning(f"Couldn't restart folder listings: {e}")
             from telestore.services.media_sync import run_forever as run_media_syncs
             self._sync_task = asyncio.create_task(run_media_syncs())
             logger.info("Remote Transfer Manager background worker loop started.")
@@ -271,7 +286,7 @@ class RemoteTransferManager:
                 "progress": 0,
                 "eta_seconds": 0,
                 "status": "discovering",
-                "phase": "🔍 Analyzing folder & discovering files in background...",
+                "phase": DISCOVERY_PHASE,
                 "error_message": None,
                 "is_vault": is_vault,
                 "group_id": group_id,
@@ -454,9 +469,27 @@ class RemoteTransferManager:
 
         try:
             logger.info(f"[ASYNC_DISCOVERY] Starting background discovery for folder {folder_id} (group {group_id})...")
-            folder_files = await asyncio.to_thread(_resolve_folder)
+            folder_files, last_error = None, None
+            tries = len(FOLDER_LIST_WAITS) + 1
+            for attempt in range(tries):
+                if attempt:
+                    wait = FOLDER_LIST_WAITS[attempt - 1]
+                    coll.update_one({"task_id": disc_task_id}, {"$set": {
+                        "phase": f"Google didn't return the folder's files; trying again in {wait} s (try {attempt + 1} of {tries})",
+                        "updated_at": datetime.now(timezone.utc)}})
+                    await _sleep(wait)
+                try:
+                    folder_files, last_error = await asyncio.to_thread(_resolve_folder), None
+                except Exception as e:
+                    folder_files, last_error = None, e
+                    logger.warning(f"[ASYNC_DISCOVERY] Folder {folder_id} list try {attempt + 1} of {tries} failed: {e}")
+                if folder_files:
+                    break
+                logger.warning(f"[ASYNC_DISCOVERY] Folder {folder_id}: no files on try {attempt + 1} of {tries}")
             if not folder_files:
-                raise ValueError("Google Drive folder is empty or not accessible.")
+                if last_error:
+                    raise last_error
+                raise ValueError(FOLDER_LIST_EMPTY)
 
             # Deduplication: Find any existing tasks for this user & destination
             existing_gdrive_ids = set(
@@ -541,7 +574,7 @@ class RemoteTransferManager:
         except Exception as e:
             logger.error(f"[ASYNC_DISCOVERY] Failed to resolve GDrive folder: {e}", exc_info=True)
             err_msg = str(e)
-            if "Cannot retrieve the public link" in err_msg or "Check FAQ" in err_msg:
+            if "Cannot retrieve the public link" in err_msg or "Check FAQ" in err_msg or "Failed to retrieve" in err_msg:
                 err_msg = "Google Drive folder is not accessible (make sure 'Anyone with the link can view' is turned on)."
             coll.update_one(
                 {"task_id": disc_task_id},
@@ -2364,13 +2397,44 @@ class RemoteTransferManager:
         })
         return res.deleted_count
 
+    def _start_discovery(self, disc: dict) -> None:
+        """Lists a folder link's files again (in the background) from its placeholder task."""
+        coro = self._async_discover_folder(
+            disc_task_id=disc["task_id"], group_id=disc["group_id"], folder_id=disc["gdrive_id"],
+            url=disc.get("source_url") or "", user_id=str(disc["user_id"]), chat_id=disc.get("chat_id"),
+            clean_dest=disc.get("destination_path") or "/Home", is_vault=bool(disc.get("is_vault")),
+        )
+        try:
+            asyncio.get_running_loop().create_task(coro)
+        except RuntimeError:
+            coro.close()  # no event loop here: the next server start lists it (see start_worker)
+
+    def _rediscover(self, flt: dict) -> int:
+        """Failed folder listings matching [flt] start again; returns how many.
+
+        "Retry" on a folder whose file list failed lists it again. It used to queue the folder link
+        as if it were one file, which then downloaded the folder's web page and failed.
+        """
+        coll = get_remote_db()["RemoteTransfers"]
+        count = 0
+        for disc in coll.find({**flt, "source_type": "gdrive_folder", "status": "failed"}):
+            res = coll.update_one({"task_id": disc["task_id"], "status": "failed"}, {"$set": {
+                "status": "discovering", "phase": DISCOVERY_PHASE, "error_message": None,
+                "updated_at": datetime.now(timezone.utc)}})
+            if getattr(res, "modified_count", 0):
+                self._start_discovery(disc)
+                count += 1
+        return count
+
     def resume_group(self, group_id: str, user_id: str) -> int:
         """Manually resume or retry any tasks in a group that were paused due to quota cooldown, failed, or queued."""
         coll = get_remote_db()["RemoteTransfers"]
+        relisted = self._rediscover({"group_id": group_id, "user_id": str(user_id)})
         res = coll.update_many(
             {
                 "group_id": group_id,
                 "user_id": str(user_id),
+                "source_type": {"$ne": "gdrive_folder"},
                 "status": {"$in": ["paused_quota", "failed", "queued"]}
             },
             {
@@ -2383,15 +2447,18 @@ class RemoteTransferManager:
                 "$unset": {"cooldown_until": "", "claimed_by": "", "claimed_at": ""}
             }
         )
-        return res.modified_count
+        return res.modified_count + relisted
 
     def retry_task(self, task_id: str, user_id: str) -> bool:
         """Retry a single remote transfer task."""
         coll = get_remote_db()["RemoteTransfers"]
+        if self._rediscover({"task_id": task_id, "user_id": str(user_id)}):
+            return True
         res = coll.update_one(
             {
                 "task_id": task_id,
                 "user_id": str(user_id),
+                "source_type": {"$ne": "gdrive_folder"},
                 "status": {"$in": ["failed", "paused_quota", "cancelled"]}
             },
             {
@@ -2470,14 +2537,15 @@ class RemoteTransferManager:
                 "summary": _with_checks(self._group_summaries(coll, uid, [group_id])).get(group_id, {})}
 
     def retry_failed(self, group_id: str, user_id: str) -> int:
-        """Queues a folder copy's failed files again (only those)."""
+        """Queues a folder copy's failed files again (only those); a failed folder listing runs again."""
+        relisted = self._rediscover({"group_id": group_id, "user_id": str(user_id)})
         res = get_remote_db()["RemoteTransfers"].update_many(
-            {"group_id": group_id, "user_id": str(user_id), "status": "failed"},
+            {"group_id": group_id, "user_id": str(user_id), "status": "failed", "source_type": {"$ne": "gdrive_folder"}},
             {"$set": {"status": "queued", "phase": "Queued (retrying)", "progress": 0, "transferred_bytes": 0,
                       "speed_bps": 0, "download_bps": 0, "upload_bps": 0, "error_message": None,
                       "updated_at": datetime.now(timezone.utc)},
              "$unset": {"cooldown_until": "", "claimed_by": "", "claimed_at": "", "error_detail": ""}})
-        return res.modified_count
+        return res.modified_count + relisted
 
     @staticmethod
     def _group_summaries(coll, user_id: str, group_ids: List[str]) -> Dict[str, Dict[str, Any]]:
