@@ -27,7 +27,9 @@ def get_file_type(fname: str) -> str:
 
 logger = logging.getLogger("worker_routes")
 
-LOCAL_ONLY_SOURCES = ("instagram", "media")
+# Only the main server runs these: Instagram and video downloads need its sign-in sessions, and
+# torrents need its torrent downloader (a worker machine has none, so it would only fail them)
+LOCAL_ONLY_SOURCES = ("instagram", "media", "magnet", "torrent_file")
 
 router = APIRouter(prefix="/api/worker", tags=["Distributed Workers"])
 
