@@ -310,3 +310,46 @@ def google_limit_pause(task_doc: dict, now: datetime, machine: Optional[str] = N
         },
         "$unset": {"claimed_by": "", "claimed_at": ""},
     }
+
+
+def finalize_torrent_file_if_ready(file_key: str) -> bool:
+    """When every 1.95 GB part of a big torrent file is in Telegram (on whichever machine took it),
+    saves the file as one multi-part file. Exactly one caller does it (the first part's job is the
+    lock). Returns True when the file is saved (now or before)."""
+    coll = get_remote_db()["RemoteTransfers"]
+    if coll.count_documents({"torrent_file_key": file_key, "status": {"$ne": "completed"}}):
+        return False
+    lock = coll.update_one({"torrent_file_key": file_key, "part_index": 1, "torrent_file_saved": {"$ne": True}},
+                           {"$set": {"torrent_file_saved": True}})
+    if not getattr(lock, "modified_count", 0):
+        return True
+    docs = sorted(coll.find({"torrent_file_key": file_key}), key=lambda d: int(d.get("part_index") or 0))
+    parts = [d.get("completed_part_info") for d in docs]
+    if not docs or any(p is None for p in parts) or len(docs) != int(docs[0].get("total_parts") or 0):
+        logger.error(f"[TORRENT_PARTS] {file_key}: {sum(p is not None for p in parts)} of "
+                     f"{docs[0].get('total_parts') if docs else '?'} parts are known; not saved")
+        coll.update_one({"torrent_file_key": file_key, "part_index": 1}, {"$set": {"torrent_file_saved": False}})
+        return False
+    first = docs[0]
+    name = first.get("torrent_file_name") or "download.bin"
+    folder = first.get("destination_path") or "/Home"
+    database.Files.create_folder_path(folder, owner_id=str(first["user_id"]))
+    keys = ("part_index", "chat_id", "message_id", "file_unique_id", "part_size", "start_byte", "end_byte")
+    database.Files.add_multipart_file(
+        chat_id=first["chat_id"],
+        thumbnail=parts[0].get("thumbnail"),
+        file_type=get_file_type(name),
+        file_unique_id=parts[0].get("file_unique_id") or f"mp_{parts[0]['message_id']}",
+        file_size=int(first.get("torrent_file_size") or sum(int(p.get("part_size") or 0) for p in parts)),
+        file_name=name,
+        file_caption=f"Uploaded multi-part file: {name}",
+        parts=[{k: p.get(k) for k in keys} for p in parts],
+        file_path=folder,
+        owner_id=str(first["user_id"]),
+        part_size=1950 * 1024 * 1024,
+        is_vault=bool(first.get("is_vault")),
+    )
+    coll.update_many({"torrent_file_key": file_key}, {"$set": {
+        "phase": f"Completed & Saved to Telegram ({len(parts)} parts) ☁️", "updated_at": datetime.now(timezone.utc)}})
+    logger.info(f"[TORRENT_PARTS] {file_key}: '{name}' saved ({len(parts)} parts)")
+    return True

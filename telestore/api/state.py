@@ -63,7 +63,7 @@ def _in_use_prefixes() -> set:
     try:
         from telestore.services.remote_transfer_manager import remote_transfer_manager
         prefixes |= {f"remote_{task_id}" for task_id in list(remote_transfer_manager.active_tasks)}
-        # A torrent's folder while any of its files is still to be fetched
+        # Unfinished transfers' folders, and torrents' folders still needed (see torrent_dirs_in_use)
         prefixes |= remote_transfer_manager.torrent_dirs_in_use()
     except Exception:
         pass

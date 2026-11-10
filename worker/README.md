@@ -36,29 +36,35 @@ Logs are kept in `logs/worker.log` next to them (5 files of 10 MB), across resta
 ## Torrents and magnets
 
 - **The master reads every torrent.** For a magnet it first gets the file list from the torrent's
-  peers. It then splits the torrent into **one transfer per file**, shown as one group in
-  Transfers. Empty files and padding files are dealt with at once.
-- **Any machine can take a file.** That's the master, or a worker that can do torrents. Each file
-  comes **part by part** with **libtorrent** (`torrent_engine.py`, shared with the master):
-  1. only the pieces of the file's first 1.95 GB part are fetched;
-  2. that part goes to Telegram while the next one downloads;
-  3. its space in the file is given back to the disk once it's in Telegram.
+  peers. It then splits the torrent into transfers, shown as one group in Transfers:
+  - a file up to 1.95 GB is **one job**;
+  - a bigger file is **one job per 1.95 GB part**.
 
-  At most **two parts (about 3.9 GB)** are on disk at once, whatever the file's size. On the
-  master, parts already in Telegram are remembered, so a restart only fetches the missing ones.
-- **No seeding.** A torrent is removed as soon as its file is done. While downloading, uploads to
-  other peers are capped at `TORRENT_UPLOAD_LIMIT_KB` (default 64). Our own requests for data
-  aren't counted against it: counting them made downloads five times slower. Measured on a real
-  swarm, 64 KB/s downloads as fast as no cap (about 4 MB/s), and only ~190 KB went up per 128 MB
-  down.
+  Any machine takes any job. A torrent with several files, and also **one big file**, therefore
+  downloads on several machines at once. When the last part of a big file is in Telegram, the
+  master saves it as one file (`helpers.finalize_torrent_file_if_ready`). Empty files and padding
+  files are dealt with at once.
+- **libtorrent fetches only the pieces it needs** (`torrent_engine.py`, shared with the master):
+  only the pieces of the job's part. A part is copied out and sent to Telegram, and its space is
+  given back to the disk. A machine never holds more than two parts (about 3.9 GB).
+- **No seeding.** A torrent is removed as soon as its part or file is done. While downloading,
+  uploads to other peers are capped at `TORRENT_UPLOAD_LIMIT_KB`, default **1 KB/s**: as little as
+  possible, because the owner's bandwidth is limited. Our own requests for data aren't counted
+  against the cap; counting them stalls downloads.
+  - **What it costs:** on a real swarm (Ubuntu's ISO), 1 KB/s downloads about 5 times slower than
+    64 KB/s. Peers serve a peer that shares nothing last.
+  - **For full speed,** set `TORRENT_UPLOAD_LIMIT_KB=64`. Then only about 190 KB went up per
+    128 MB down.
 - **Installing.** libtorrent is a Python package: `libtorrent==2.1.1` in `requirements.txt`,
   installed into the worker's virtual environment, with ready-made builds for x86_64 and ARM.
-  **aria2c** (`sudo apt install aria2`) is the fallback if libtorrent can't load: it fetches a
-  whole file before sending it.
-- **A worker that can't do torrents is never given one.** A worker tells the master what it can do
-  each time it asks for work (`"skills": ["torrent"]`).
-- **Speed.** Two machines download two files of the same torrent at once. One very large file
-  still downloads on one machine.
+  **aria2c** (`sudo apt install aria2`) is the fallback for whole files only, if libtorrent can't
+  load.
+- **What a worker is given.** A worker tells the master what it can do each time it asks for
+  work:
+  - `"torrent"`: whole files, with libtorrent or aria2c;
+  - `"torrent_parts"`: parts of big files, with libtorrent only.
+
+  A worker is never given a torrent job it can't do.
 
 ---
 

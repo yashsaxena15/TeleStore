@@ -62,6 +62,14 @@ from telestore.api.app import app
 
 
 @pytest.fixture(autouse=True)
+def _own_folder(tmp_path, monkeypatch):
+    """Every test runs in a folder of its own. Code that writes or cleans tg_files/ and cache/ next
+    to where it runs never reaches the repo's folders (in Nov 2026 a test run's cleanup job deleted
+    a live server's download through the repo's tg_files)."""
+    monkeypatch.chdir(tmp_path)
+
+
+@pytest.fixture(autouse=True)
 def reset_db_mocks():
     """Reset database mock states between tests."""
     mock_users.reset_mock()

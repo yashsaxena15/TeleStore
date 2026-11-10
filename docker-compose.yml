@@ -17,8 +17,10 @@ services:
     volumes:
       - ./cache:/app/cache
       # Downloads and uploads in progress (torrents, leeches, phone upload parts) stay on the
-      # server's disk, so a deploy (a new container) doesn't throw them away and start them over
-      - ./tg_files:/app/tg_files
+      # server's disk, so a deploy (a new container) doesn't throw them away and start them over.
+      # Outside the repo (../telestore-data by default), so nothing run from the repo (tests,
+      # scripts) can touch a live transfer's files
+      - ${TELESTORE_DATA:-../telestore-data}/tg_files:/app/tg_files
     depends_on:
       - mongo
       - pot

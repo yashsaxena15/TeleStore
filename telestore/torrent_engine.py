@@ -14,11 +14,12 @@ The caller's slots (two parts at a time, from the server's disk budget) say when
 start, so at most two parts (about 3.9 GB) are on disk whatever the file's size.
 
 No seeding: a torrent is removed as soon as its file is done. While it downloads, uploads to other
-peers are capped at TORRENT_UPLOAD_LIMIT_KB (64 KB/s by default), with libtorrent's own protocol
-messages not counted. Measured on a real swarm (Ubuntu's ISO, November 2026): with that cap a
-download is as fast as with none (about 4 MB/s) and only ~190 KB went up per 128 MB down; with
-1 KB/s it was five times slower, because the cap then also held back the requests asking peers
-for data, and peers serve a peer that shares nothing last.
+peers are capped at TORRENT_UPLOAD_LIMIT_KB: 1 KB/s by default, as little as possible (the owner's
+bandwidth is limited). libtorrent's own protocol messages aren't counted against the cap, or it
+would also hold back our requests for data. The cost, measured on a real swarm (Ubuntu's ISO,
+November 2026): about five times slower than with a 64 KB/s cap (28 MB vs 128 MB a minute), since
+peers serve a peer that shares nothing last. Set TORRENT_UPLOAD_LIMIT_KB=64 for full speed (only
+~190 KB went up per 128 MB down).
 
 libtorrent is a Python package (pip install libtorrent): inside the Docker image on the main server,
 inside the worker's virtual environment on worker machines.
@@ -43,7 +44,7 @@ except ImportError:  # on a worker machine the two files sit side by side
 
 AVAILABLE = lt is not None
 PART_SIZE = 1950 * 1024 * 1024  # Telegram's limit for a bot upload
-UPLOAD_LIMIT = int(os.getenv("TORRENT_UPLOAD_LIMIT_KB", "64")) * 1024  # bytes per second while downloading
+UPLOAD_LIMIT = max(1, int(os.getenv("TORRENT_UPLOAD_LIMIT_KB", "1"))) * 1024  # bytes per second while downloading
 POLL_SECONDS = 0.5
 COPY_CHUNK = 8 * 1024 * 1024
 
@@ -300,6 +301,8 @@ class TorrentEngine:
                     "peers": int(status.num_peers),
                     "part": index,
                     "parts": total,
+                    "part_done": here,
+                    "part_total": length,
                     "paused": paused,
                 })
             time.sleep(POLL_SECONDS)

@@ -158,7 +158,7 @@ class TestDownload:
 
     def test_uploads_to_others_are_capped(self, engine):
         settings = engine.session.get_settings()
-        assert settings["upload_rate_limit"] == te.UPLOAD_LIMIT == 64 * 1024
+        assert settings["upload_rate_limit"] == te.UPLOAD_LIMIT == 1024  # as little as possible
         # Our own requests for data don't count against the cap (that would slow downloads)
         assert settings["rate_limit_ip_overhead"] is False
 

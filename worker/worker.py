@@ -48,7 +48,7 @@ UPLOAD_REPORT_SECONDS = 5
 # comes part by part, at most two parts of 1.95 GB on disk; aria2c (apt install aria2) is the
 # fallback, a whole file at a time. Either way the same no-seeding rules as the main server.
 ARIA2C = shutil.which("aria2c")
-SKILLS = ["torrent"] if (torrent_engine.AVAILABLE or ARIA2C) else []
+SKILLS = (["torrent"] if (torrent_engine.AVAILABLE or ARIA2C) else []) + (["torrent_parts"] if torrent_engine.AVAILABLE else [])
 TORRENT_REPORT_SECONDS = 2
 
 HEADERS = {
@@ -393,6 +393,61 @@ class DistributedWorker:
         else:
             await self.report_complete({**base, "is_multipart": True, "parts": results, "part_size": PART_MAX_SIZE})
 
+    async def torrent_part(self, task_data: dict, bot, task_dir: str) -> None:
+        """One 1.95 GB part of a big torrent file: only its pieces, sent to Telegram; the master
+        saves the file once every part is in (from this machine or another)."""
+        if not torrent_engine.AVAILABLE:
+            raise RuntimeError("libtorrent isn't installed on this worker")
+        task_id = task_data["task_id"]
+        name = task_data.get("torrent_file_name") or task_data.get("filename") or "file"
+        index, total = int(task_data["part_index"]), int(task_data["total_parts"])
+        length = int(task_data.get("part_size") or 0)
+        chat_id = task_data["chat_id"]
+        loop = asyncio.get_running_loop()
+        slots = _PartSlots(1)
+        holder = []
+        last = [0.0]
+
+        def on_progress(info: dict) -> None:
+            now = time.time()
+            if now - last[0] < TORRENT_REPORT_SECONDS:
+                return
+            last[0] = now
+            done = int(info.get("part_done") or 0)
+            pct = round(done / (length or 1) * 100, 1)
+            phase = (f"Leeching {name} part {index} of {total} @ {round(info['speed_bps'] / 1024 / 1024, 1)} MB/s "
+                     f"({pct:.1f}%) | ⚡ {info['peers']} peers")
+            fut = asyncio.run_coroutine_threadsafe(self.report_progress(
+                task_id, done, length, info["speed_bps"], min(99.0, pct), eta_seconds(max(0, length - done), info["speed_bps"]), phase), loop)
+            try:
+                fut.result(timeout=15)
+            except TaskCancelled:
+                raise
+            except Exception:
+                pass
+
+        torrent = os.path.join(task_dir, "details.torrent")
+        await self.fetch_torrent(task_id, torrent)
+        with open(torrent, "rb") as f:
+            torrent_bytes = f.read()
+        logger.info(f"Task {task_id}: '{name}' part {index} of {total} ({size_text(length)})")
+        await asyncio.to_thread(
+            torrent_engine.get_engine().download_file, torrent_bytes, int(task_data["torrent_file_index"]),
+            os.path.join(task_dir, "dl"), os.path.join(task_dir, "parts"),
+            slots=slots, on_part=holder.append, cancelled=lambda: not self.running, on_progress=on_progress,
+            done_parts=set(range(1, total + 1)) - {index})
+        part = holder[0]
+        try:
+            result = await self.upload_part(bot, task_id, chat_id, name, part.path, index, part.start, part.length, False)
+        finally:
+            slots.release()
+        await self.report_complete({
+            "task_id": task_id, "user_id": task_data["user_id"], "chat_id": chat_id,
+            "destination_path": task_data.get("destination_path", "/Home"), "file_name": name,
+            "file_size": int(task_data.get("torrent_file_size") or length), "is_vault": bool(task_data.get("is_vault", False)),
+            "is_torrent_part": True, "part_info": result,
+        })
+
     async def process_torrent_item(self, task_data: dict, bot, task_dir: str) -> None:
         """One file of a torrent: download it, send it to Telegram, tell the master."""
         if torrent_engine.AVAILABLE:
@@ -482,6 +537,10 @@ class DistributedWorker:
             if task_data.get("source_type") == "torrent_item":
                 step = "downloading the torrent file"
                 await self.process_torrent_item(task_data, bot, task_dir)
+                return
+            if task_data.get("source_type") == "torrent_part":
+                step = "downloading the torrent part"
+                await self.torrent_part(task_data, bot, task_dir)
                 return
 
             download_url = source_url
@@ -741,7 +800,7 @@ class DistributedWorker:
         )
         asyncio.create_task(self.heartbeat_loop())
         logger.info(f"Distributed Worker '{WORKER_ID}' started. Polling Master at {MASTER_URL}...")
-        how = ("libtorrent, part by part" if torrent_engine.AVAILABLE else
+        how = ("libtorrent, part by part, and single parts of big files" if torrent_engine.AVAILABLE else
                f"aria2c at {ARIA2C}, a whole file at a time" if ARIA2C else "")
         logger.info(f"Torrent files: {'yes (' + how + ')' if how else 'no (neither libtorrent nor aria2c is installed)'}")
 
