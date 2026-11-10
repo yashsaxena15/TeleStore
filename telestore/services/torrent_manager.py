@@ -62,12 +62,18 @@ def parse_torrent_bytes(data: bytes) -> Dict[str, Any]:
 
     files = []
     if "files" in info and isinstance(info["files"], list):
-        # Multi-file torrent
+        # Multi-file torrent. [index] stays each file's place in the list (what aria2c's
+        # --select-file and libtorrent count), padding files included; those are skipped
+        # (newer clients add them between files so each file starts on a piece)
         for idx, f in enumerate(info["files"], start=1):
             path_parts = []
             for p in f.get("path", []):
                 part_str = p.decode("utf-8", "replace") if isinstance(p, bytes) else str(p)
                 path_parts.append(part_str)
+            attr = f.get("attr", b"")
+            attr = attr.decode("ascii", "replace") if isinstance(attr, bytes) else str(attr or "")
+            if "p" in attr or (path_parts and path_parts[0] == ".pad"):
+                continue
 
             rel_path = os.path.join(*path_parts) if path_parts else f"file_{idx}"
             full_rel_path = os.path.join(name, rel_path) if name else rel_path

@@ -3,4 +3,4 @@ tgcrypto>=1.2.5
 aiohttp>=3.9.0
 requests>=2.31.0
 aiofiles>=23.2.1
-
+libtorrent==2.1.1  # torrents part by part, at most two 1.95 GB parts on disk (torrent_engine.py)

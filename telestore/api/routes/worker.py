@@ -30,8 +30,9 @@ logger = logging.getLogger("worker_routes")
 # Only the main server runs these: Instagram and video downloads need its sign-in sessions, and
 # torrents need its torrent downloader (a worker machine has none, so it would only fail them)
 LOCAL_ONLY_SOURCES = ("instagram", "media", "magnet", "torrent_file")
-# One file of a torrent (the main server splits torrents): only for workers that have aria2c
-TORRENT_SOURCES = ("torrent_item",)
+# One file of a torrent (the main server splits torrents): for workers that can do torrents
+# (libtorrent or aria2c). One 1.95 GB part of a big torrent file: only with libtorrent.
+TORRENT_SOURCES = ("torrent_item", "torrent_part")
 
 router = APIRouter(prefix="/api/worker", tags=["Distributed Workers"])
 
@@ -53,8 +54,9 @@ class HeartbeatModel(BaseModel):
 
 class ClaimTaskModel(BaseModel):
     worker_id: str
-    # What this worker can do beyond plain downloads: "torrent" when it has aria2c (older workers
-    # send nothing, and are never given a torrent's file)
+    # What this worker can do beyond plain downloads: "torrent" (a torrent's file, with libtorrent or
+    # aria2c) and "torrent_parts" (one part of a big torrent file, libtorrent only). Older workers
+    # send nothing and are never given either.
     skills: List[str] = []
 
 
@@ -84,6 +86,7 @@ class CompleteTaskModel(BaseModel):
     is_vault: bool = False
     is_multipart: bool = False
     is_range_part: bool = False
+    is_torrent_part: bool = False  # one part of a big torrent file (part_info says which)
     is_empty: bool = False  # a 0-byte file: nothing was sent to Telegram, it is saved as a record
     part_info: Optional[Dict[str, Any]] = None
     # Single part:
@@ -180,7 +183,9 @@ async def claim_task(
             "status": "queued",
             "claimed_by": {"$exists": False},
             # Instagram and video downloads need the server's sign-in sessions, so only the main server runs them
-            "source_type": {"$nin": list(LOCAL_ONLY_SOURCES) + ([] if "torrent" in body.skills else list(TORRENT_SOURCES))},
+            "source_type": {"$nin": list(LOCAL_ONLY_SOURCES)
+                            + ([] if "torrent" in body.skills else ["torrent_item"])
+                            + ([] if "torrent_parts" in body.skills else ["torrent_part"])},
             # Copies from a connected Google Drive need that account's sign-in, which stays on the main server
             "cloud_account_id": {"$exists": False},
             # A torrent's file the main server has partly downloaded already: it finishes it
@@ -233,6 +238,10 @@ async def claim_task(
             # One file of a torrent: which file, and where it sits inside the torrent
             "torrent_file_index": doc.get("torrent_file_index"),
             "torrent_rel_path": doc.get("torrent_rel_path"),
+            # One part of a big torrent file
+            "torrent_file_name": doc.get("torrent_file_name"),
+            "torrent_file_size": doc.get("torrent_file_size"),
+            "part_start": doc.get("part_start"),
         },
         "telegram_config": {
             "api_id": API_ID,
@@ -303,6 +312,24 @@ async def complete_task(
     ):
         logger.warning(f"[WORKER_LATE] Task {body.task_id} finished on {body.worker_id}, but it isn't theirs any more. Ignored.")
         return {"status": "ignored"}
+
+    # One part of a big torrent file: the file is saved once its last part is in
+    if body.is_torrent_part and body.part_info:
+        p_sz = int(body.part_info.get("part_size") or 0)
+        coll.update_one({"task_id": body.task_id}, {"$set": {
+            "status": "completed", "progress": 100.0, "transferred_bytes": p_sz, "filesize": p_sz,
+            "speed_bps": 0, "download_bps": 0, "upload_bps": 0, "eta_seconds": 0,
+            "completed_part_info": body.part_info,
+            "phase": f"Part {body.part_info.get('part_index', 1)} saved via {body.worker_id} ☁️",
+            "updated_at": now,
+        }})
+        task_doc = coll.find_one({"task_id": body.task_id})
+        if task_doc and task_doc.get("torrent_file_key"):
+            from telestore.services.remote_transfer_manager.helpers import finalize_torrent_file_if_ready
+            finalize_torrent_file_if_ready(task_doc["torrent_file_key"])
+        event_service.task_finished(body.task_id)
+        logger.info(f"[WORKER_COMPLETE] Torrent part task {body.task_id} completed via {body.worker_id}")
+        return {"status": "ok"}
 
     # Multi-Range Chunk Part completion:
     if body.is_range_part and body.part_info:

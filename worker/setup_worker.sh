@@ -30,8 +30,8 @@ TARGET_DIR="/home/$TARGET_USER/tele_worker"
 
 echo "[1/4] Installing system dependencies..."
 sudo apt-get update -qq
-# aria2 (aria2c) lets this worker download files of torrents too; it's a standalone program from
-# Ubuntu's own packages, outside the worker's Python virtual environment
+# aria2 (aria2c): the fallback for torrents if libtorrent (installed in the venv below) can't load;
+# a standalone program from Ubuntu's own packages, outside the worker's Python virtual environment
 sudo apt-get install -y -qq python3 python3-pip python3-venv git curl aria2
 
 echo "[2/4] Setting up worker environment at $TARGET_DIR..."
@@ -44,6 +44,8 @@ if [ -f "$SCRIPT_DIR/worker.py" ]; then
     sudo -u "$TARGET_USER" cp "$SCRIPT_DIR/requirements.txt" "$TARGET_DIR/requirements.txt"
     # Shared with the main server: download checks, speeds, Google's limit, Telegram's rate limit
     sudo -u "$TARGET_USER" cp "$SCRIPT_DIR/../telestore/transfer_core.py" "$TARGET_DIR/transfer_core.py"
+    # Shared too: torrents with libtorrent, part by part
+    sudo -u "$TARGET_USER" cp "$SCRIPT_DIR/../telestore/torrent_engine.py" "$TARGET_DIR/torrent_engine.py"
 fi
 
 echo "[3/4] Installing Python dependencies in venv..."

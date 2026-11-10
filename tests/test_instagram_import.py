@@ -258,7 +258,7 @@ def test_workers_never_claim_instagram_tasks(client, test_secrets):
     assert res.status_code == 200
     # Torrents and magnets are read and split by the main server; a worker without aria2c
     # (it says nothing about torrents) never gets a torrent's file either
-    assert coll.find_one_and_update.call_args.args[0]["source_type"] == {"$nin": ["instagram", "media", "magnet", "torrent_file", "torrent_item"]}
+    assert coll.find_one_and_update.call_args.args[0]["source_type"] == {"$nin": ["instagram", "media", "magnet", "torrent_file", "torrent_item", "torrent_part"]}
 
 
 class TestErrorMessages:

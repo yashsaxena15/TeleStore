@@ -36,3 +36,4 @@ bgutil-ytdlp-pot-provider==2.0.2
 curl-cffi==0.16.3
 pillow==13.0.0
 pillow-heif==1.8.1
+libtorrent==2.1.1  # torrents part by part (telestore/torrent_engine.py); aria2c is the fallback
