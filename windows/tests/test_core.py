@@ -117,7 +117,7 @@ class TestSecureStore:
 class TestSettings:
     def test_defaults_and_limits(self):
         s = Settings.load()
-        assert s.parallel == 3 and s.speed_limit_kb == 0
+        assert s.parallel == 2 and s.speed_limit_kb == 0
         s.parallel, s.speed_limit_kb = 50, 2048
         s.save()
         loaded = Settings.load()

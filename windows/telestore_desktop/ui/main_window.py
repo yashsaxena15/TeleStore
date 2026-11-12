@@ -5,7 +5,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QMainWindow, QWidget
 
 from telestore_desktop.parts import size_text
-from telestore_desktop.ui import dialogs, viewers
+from telestore_desktop.ui import actions, dialogs, viewers
 from telestore_desktop.ui.browser import Browser, Location
 from telestore_desktop.ui.sidebar import Sidebar
 from telestore_desktop.ui.thumbloader import ThumbLoader
@@ -29,6 +29,7 @@ class MainWindow(QMainWindow):
         self.browser.open_item.connect(lambda item, around: viewers.open_item(self, self.s.api, self.s.runner, p, item, around))
         self.browser.download_item.connect(lambda item: viewers.save_as(self, self.s.api, self.s.runner, item))
         self.browser.files_dropped.connect(self.upload_here)
+        self.browser.action.connect(self.item_action)
         self.browser.location_changed.connect(self._moved)
         self.browser.grid_btn.clicked.connect(lambda: self._save_view("grid"))
         self.browser.list_btn.clicked.connect(lambda: self._save_view("list"))
@@ -137,6 +138,61 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(note, 10000)
         if self.s.engine.state not in ("ready", "starting"):
             self.statusBar().showMessage(f"Uploads can't run: {self.s.engine.state}")
+
+    # ── Right-click actions (phase 9) ──
+    def _each(self, items, call, done_text: str) -> None:
+        """Runs [call](item) for each item in the background, then refreshes and says how it went."""
+        def work():
+            failed = []
+            for item in items:
+                try:
+                    call(item)
+                except Exception as e:  # e.g. a protected item (the server says why)
+                    failed.append(f"{item.name}: {e}")
+            return failed
+
+        def finished(failed):
+            self.browser.reload()
+            if failed:
+                dialogs.info(self, "TeleStore", "Some items couldn't be changed:\n\n" + "\n".join(failed[:10]))
+            else:
+                self.statusBar().showMessage(done_text, 5000)
+            self.load_storage()
+
+        self.s.runner.run(work, finished, lambda e: dialogs.info(self, "TeleStore", str(e)))
+
+    def item_action(self, name: str, items: list) -> None:
+        api = self.s.api
+        n = len(items)
+        what = f"{n} items" if n != 1 else f"“{items[0].name}”"
+        if name == "rename":
+            item = items[0]
+            new = dialogs.ask_text(self, "Rename", "New name:", item.name)
+            if new and new != item.name:
+                self._each([item], lambda i: api.rename(i.id, new), f"Renamed to {new}")
+        elif name == "move":
+            d = actions.MoveDialog(api, self.s.runner, self.s.palette, n, [i.full_path for i in items if i.is_folder], self)
+            if d.exec():
+                target = d.target()
+                self._each(items, lambda i: api.move(i.id, target), f"Moved {what} to {target}")
+        elif name in ("star", "unstar"):
+            self._each(items, lambda i: api.star(i.id, name == "star"),
+                       f"{'Added' if name == 'star' else 'Removed'} {what} {'to' if name == 'star' else 'from'} Starred")
+        elif name == "share":
+            actions.ShareDialog(api, self.s.runner, items[0], self).exec()
+        elif name == "trash":
+            if dialogs.confirm(self, "Move to Trash", f"Move {what} to Trash?\nYou can restore it from Trash."):
+                self._each(items, lambda i: api.trash(i.id), f"Moved {what} to Trash")
+        elif name == "restore":
+            self._each(items, lambda i: api.restore(i.id), f"Restored {what}")
+        elif name == "delete":
+            if dialogs.confirm(self, "Delete forever", f"Delete {what} forever?\nThis can't be undone."):
+                self._each(items, lambda i: api.delete_forever(i.id), f"Deleted {what}")
+        elif name == "empty-trash":
+            if dialogs.confirm(self, "Empty trash", "Delete everything in Trash forever?\nThis can't be undone."):
+                self.s.runner.run(api.empty_trash, lambda r: (self.browser.reload(), self.load_storage(),
+                                                              self.statusBar().showMessage((r or {}).get("message") or "Trash emptied", 6000)),
+                                  lambda e: dialogs.info(self, "Empty trash", str(e)))
 
     # ── Account ──
     def account_action(self, key: str) -> None:

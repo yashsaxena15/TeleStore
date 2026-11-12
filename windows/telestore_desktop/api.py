@@ -86,6 +86,44 @@ class TeleStoreApi:
     def create_folder(self, name: str, parent: str) -> dict:
         return self._call("POST", "folders/create", json={"folderName": name, "currentPath": parent})
 
+    # ── Changing files (as on the website) ──
+    def rename(self, file_id: str, new_name: str) -> dict:
+        return self._call("POST", "files/rename", json={"file_id": file_id, "new_name": new_name})
+
+    def move(self, file_id: str, target_path: str) -> dict:
+        return self._call("POST", "files/move", json={"file_id": file_id, "target_path": target_path})
+
+    def star(self, file_id: str, starred: bool) -> dict:
+        return self._call("POST", "files/star", json={"file_id": file_id, "starred": starred})
+
+    def trash(self, file_id: str) -> dict:
+        return self._call("POST", "files/trash", json={"file_id": file_id})
+
+    def restore(self, file_id: str) -> dict:
+        return self._call("POST", "files/restore", json={"file_id": file_id})
+
+    def delete_forever(self, file_id: str) -> dict:
+        return self._call("POST", "files/delete", json={"file_id": file_id})
+
+    def empty_trash(self) -> dict:
+        return self._call("POST", "files/trash/empty", timeout=120)
+
+    # ── Sharing (the website's Share dialog) ──
+    def share_view(self, item_id: str) -> dict:
+        return self._call("GET", f"shares/item/{quote(item_id, safe='')}")
+
+    def share_link(self, item_id: str, enabled: bool) -> dict:
+        return self._call("PUT", f"shares/item/{quote(item_id, safe='')}/link", json={"enabled": enabled})
+
+    def share_add(self, item_id: str, who: str, role: str = "viewer") -> dict:
+        return self._call("POST", f"shares/item/{quote(item_id, safe='')}/members", json={"who": who.strip(), "role": role})
+
+    def share_remove(self, item_id: str, user_id) -> dict:
+        return self._call("DELETE", f"shares/item/{quote(item_id, safe='')}/members/{quote(str(user_id), safe='')}")
+
+    def link_address(self, token: str) -> str:
+        return f"{self.server}/s/{quote(token, safe='')}"
+
     def shared_with_me(self) -> List[dict]:
         return self._call("GET", "shares/with-me").get("shares") or []
 

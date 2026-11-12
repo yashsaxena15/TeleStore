@@ -10,7 +10,7 @@ from typing import Awaitable, Callable, Optional
 from pyrogram import Client
 from pyrogram import errors as tg_errors
 
-from telestore_desktop import __version__, secure_store
+from telestore_desktop import __version__, fast_upload, secure_store
 
 log = logging.getLogger("telestore.telegram")
 SESSION_FILE = "telegram.session"
@@ -124,6 +124,7 @@ class TelegramAccount:
         except (tg_errors.AuthKeyUnregistered, tg_errors.SessionRevoked, tg_errors.UserDeactivated) as e:
             forget_session()
             raise TelegramError("Telegram signed this app out. Sign in to Telegram again.") from e
+        fast_upload.install(self.client)  # big files over several connections (about 12 pieces at once)
 
     async def stop(self) -> None:
         if self.client and self.client.is_connected:
