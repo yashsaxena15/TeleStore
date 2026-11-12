@@ -173,3 +173,10 @@ def test_the_api_prefers_the_direct_address():
     assert api.file_url(item) == "http://127.0.0.1:1/s/f/1/a.mkv"
     shared = Item(id="2", name="b.mkv", kind="video", share_id="s9")
     assert api.file_url(shared).startswith("https://ts.example/shares/s9/dl/2")
+
+
+def test_media_types_dont_depend_on_windows(monkeypatch):
+    monkeypatch.setattr(ms.mimetypes, "guess_type", lambda name: (None, None))  # as on a PC that doesn't know them
+    assert ms.content_type("Film.MKV") == "video/x-matroska"
+    assert ms.content_type("song.flac") == "audio/flac"
+    assert ms.content_type("noext") == "application/octet-stream"

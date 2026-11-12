@@ -19,6 +19,18 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 log = logging.getLogger("telestore.media")
 CHUNK = 1024 * 1024  # what Telegram sends at a time
 LOCATE_SECONDS = 600
+# Windows' own list misses some (.mkv, .flac…), so the usual media types are named here first
+TYPES = {".mp4": "video/mp4", ".m4v": "video/mp4", ".mkv": "video/x-matroska", ".webm": "video/webm", ".mov": "video/quicktime",
+         ".avi": "video/x-msvideo", ".ts": "video/mp2t", ".3gp": "video/3gpp", ".wmv": "video/x-ms-wmv", ".flv": "video/x-flv",
+         ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".flac": "audio/flac", ".ogg": "audio/ogg",
+         ".opus": "audio/ogg", ".wav": "audio/wav", ".wma": "audio/x-ms-wma", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+         ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp", ".heic": "image/heic",
+         ".pdf": "application/pdf", ".zip": "application/zip", ".txt": "text/plain"}
+
+
+def content_type(name: str) -> str:
+    ext = ("." + name.rsplit(".", 1)[-1].lower()) if "." in name else ""
+    return TYPES.get(ext) or mimetypes.guess_type(name)[0] or "application/octet-stream"
 
 
 class MediaServer:
@@ -93,7 +105,7 @@ class MediaServer:
                 return await self._reply(writer, 416, {"Content-Range": f"bytes */{size}", "Content-Length": "0"})
             status = 206
         length = end - start + 1 if size else 0
-        out = {"Content-Type": mimetypes.guess_type(name)[0] or "application/octet-stream", "Accept-Ranges": "bytes",
+        out = {"Content-Type": content_type(name), "Accept-Ranges": "bytes",
                "Content-Length": str(length), "Cache-Control": "no-store",
                "Content-Disposition": f"{'attachment' if download else 'inline'}; filename*=UTF-8''{quote(name)}"}
         if status == 206:
