@@ -41,6 +41,9 @@ class TelegramFiles(private val container: AppContainer) {
         return loc
     }
 
+    /** A file was played: Telegram's own copies on the phone are kept under 1 GB. */
+    fun played() = container.telegram.trimCache()
+
     /** This file couldn't come straight from Telegram: it comes through TeleStore from now on. */
     fun markFailed(fileId: String) {
         failed += fileId
@@ -58,10 +61,6 @@ class TelegramFiles(private val container: AppContainer) {
         return out.toByteArray()
     }
 
-    fun prefetch(loc: DirectLocation, from: Long, length: Long) {
-        for (s in loc.spans(from, length)) container.telegram.prefetch(s.place.chatId, s.place.messageId, s.offset, s.length)
-    }
-
     /** Downloads one of your files straight from Telegram into [target], continuing after what it already has. */
     suspend fun download(fileId: String, target: DownloadTarget, onProgress: (Long, Long) -> Unit): Long = withContext(Dispatchers.IO) {
         val loc = locate(fileId)
@@ -69,8 +68,7 @@ class TelegramFiles(private val container: AppContainer) {
         target.open(append = done > 0).use { out ->
             while (done < loc.size) {
                 val n = minOf(DOWNLOAD_WINDOW, loc.size - done)
-                prefetch(loc, done + n, PREFETCH)
-                out.write(read(loc, done, n))
+                out.write(read(loc, done, n)) // Telegram keeps fetching ahead while this is written
                 done += n
                 onProgress(done, loc.size)
             }
@@ -80,8 +78,7 @@ class TelegramFiles(private val container: AppContainer) {
     }
 
     companion object {
-        const val WINDOW = 1L shl 20  // what the player reads at a time
-        const val PREFETCH = 8L shl 20  // fetched ahead in the background
+        const val WINDOW = 1L shl 20  // what the player reads at a time (Telegram fetches 16 MB ahead)
         const val DOWNLOAD_WINDOW = 4L shl 20
     }
 }
@@ -109,7 +106,11 @@ class DirectOrHttpDataSource(private val files: TelegramFiles, private val http:
 
     override fun open(dataSpec: DataSpec): Long {
         val id = files.fileIdIn(dataSpec.uri)
-        val found = id?.let { runCatching { runBlocking { files.locate(it) } }.getOrNull() }
+        val found = id?.let {
+            runCatching { runBlocking { files.locate(it) } }
+                .onFailure { e -> android.util.Log.w("TeleStore", "Playing $it through TeleStore: ${e.message}") }
+                .getOrNull()
+        }
         if (id == null || found == null) return http.open(dataSpec)
         if (dataSpec.position > found.size) throw IOException("Past the end of the file")
         spec = dataSpec
@@ -133,13 +134,13 @@ class DirectOrHttpDataSource(private val files: TelegramFiles, private val http:
             w = try {
                 runBlocking { files.read(location, pos, n) }
             } catch (e: Exception) {
+                android.util.Log.w("TeleStore", "Playing $fileId through TeleStore from now on: Telegram failed at byte $pos", e)
                 fileId?.let(files::markFailed) // the next try comes through TeleStore
                 throw IOException(e.message ?: "Telegram didn't send the file", e)
             }
             if (w.isEmpty()) throw IOException("Telegram sent no data")
             window = w
             windowStart = pos
-            files.prefetch(location, pos + w.size, TelegramFiles.PREFETCH)
         }
         val from = (pos - windowStart).toInt()
         val n = minOf(length, w.size - from, (end - pos).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
@@ -155,6 +156,7 @@ class DirectOrHttpDataSource(private val files: TelegramFiles, private val http:
 
     override fun close() {
         if (loc != null) {
+            files.played()
             spec?.let { s -> listeners.forEach { it.onTransferEnd(this, s, true) } }
             loc = null
             spec = null

@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.withLock
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
 import java.io.File
@@ -146,21 +147,56 @@ class TelegramAccount(private val context: Context) {
             else -> null
         } ?: throw TgException(404, "That message has no file.")
         fileIds[chatId to messageId] = file.id
+        fileSizes[file.id] = maxOf(file.size, file.expectedSize)
         return file.id
     }
+
+    // TDLib downloads one range of a file at a time: a new downloadFile with another offset replaces
+    // the running one. So each file has one request in flight, a window ahead of the reader, and
+    // bytes are read once TDLib says they're there (getFileDownloadedPrefixSize).
+    private val fileSizes = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+    private val wanted = java.util.concurrent.ConcurrentHashMap<Int, LongRange>()
+    private val fileLocks = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.sync.Mutex>()
 
     /** Bytes [offset, offset + length) of one message's file, fetched from Telegram as needed. */
     suspend fun readPart(chatId: Long, messageId: Long, offset: Long, length: Long): ByteArray {
         val fileId = fileIdFor(chatId, messageId)
-        send(TdApi.DownloadFile(fileId, 32, offset, length, true))
-        return send(TdApi.ReadFilePart(fileId, offset, length)).data
+        val lock = fileLocks.getOrPut(fileId) { kotlinx.coroutines.sync.Mutex() }
+        return lock.withLock {
+            val started = System.nanoTime()
+            var lastHave = -1L
+            var lastMove = started
+            while (true) {
+                val have = send(TdApi.GetFileDownloadedPrefixSize(fileId, offset)).size
+                if (have >= length) {
+                    // Enough is here; when little is left ready beyond it, the next window is asked for now
+                    if (have - length < LOW_WATER) want(fileId, offset + have)
+                    break
+                }
+                val now = System.nanoTime()
+                if (have != lastHave) {
+                    lastHave = have
+                    lastMove = now
+                } else if (now - lastMove > STALL_NS) {
+                    wanted.remove(fileId) // nothing arrived for a while (the request was replaced): ask again
+                    lastMove = now
+                }
+                want(fileId, offset + have)
+                if (now - started > TIMEOUT_NS) throw TgException(0, "Telegram is too slow to send this file right now.")
+                kotlinx.coroutines.delay(POLL_MS)
+            }
+            send(TdApi.ReadFilePart(fileId, offset, length)).data
+        }
     }
 
-    /** Asks Telegram to fetch the next bytes of a file in the background, ahead of the player. */
-    fun prefetch(chatId: Long, messageId: Long, offset: Long, length: Long) {
-        scope.launch {
-            runCatching { send(TdApi.DownloadFile(fileIdFor(chatId, messageId), 16, offset, length, false)) }
-        }
+    /** Makes sure Telegram is fetching [fileId] from [from] (a window of [AHEAD] bytes), asking once per window. */
+    private suspend fun want(fileId: Int, from: Long) {
+        val size = fileSizes[fileId] ?: 0L
+        if (size in 1..from) return // the end of the file: nothing more to fetch
+        val running = wanted[fileId]
+        if (running != null && from >= running.first && from < running.last - LOW_WATER) return
+        wanted[fileId] = from until from + AHEAD
+        send(TdApi.DownloadFile(fileId, 32, from, AHEAD, false))
     }
 
     /** Keeps Telegram's own copies of played and downloaded files under [maxBytes] on this phone. */
@@ -254,6 +290,14 @@ class TelegramAccount(private val context: Context) {
     }
 
     companion object {
+        /** How much Telegram fetches ahead of the reader in one request. */
+        const val AHEAD = 16L shl 20
+        /** When less than this is ready ahead, the next window is asked for. */
+        const val LOW_WATER = 4L shl 20
+        const val POLL_MS = 40L
+        const val STALL_NS = 4_000_000_000L
+        const val TIMEOUT_NS = 90_000_000_000L
+
         fun friendly(message: String): String = when {
             message.contains("PHONE_NUMBER_INVALID") -> "That phone number isn't valid. Use the international format, like +91 98765 43210."
             message.contains("PHONE_CODE_INVALID") -> "That code isn't right. Check the code Telegram sent and try again."
