@@ -1,6 +1,7 @@
 package com.backendforge.telestore.ui.more
 
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.foundation.clickable
@@ -84,6 +85,7 @@ fun MoreScreen(
     onNavigateWebDav: () -> Unit = {},
     onNavigateAccount: () -> Unit = {},
     onNavigateDownloads: () -> Unit = {},
+    onNavigateTelegram: () -> Unit = {},
     onNavigateUsers: () -> Unit = {},
     onNavigateSharedWithMe: () -> Unit = {},
     onNavigateSharedByMe: () -> Unit = {},
@@ -183,6 +185,7 @@ fun MoreScreen(
                 MoreNavRow(icon = Icons.Default.Person, label = "Account and Telegram", onClick = onNavigateAccount)
                 MoreNavRow(icon = Icons.Default.Notifications, label = if (unread > 0) "Notifications · $unread new" else "Notifications", onClick = onNavigateNotifications)
                 MoreNavRow(icon = Icons.Default.Movie, label = "Video downloads", onClick = onNavigateDownloads)
+                MoreNavRow(icon = Icons.Default.Bolt, label = "Telegram on this phone", onClick = onNavigateTelegram)
                 if (isOwner) {
                     MoreNavRow(icon = Icons.Default.Group, label = "Users", onClick = onNavigateUsers)
                 }

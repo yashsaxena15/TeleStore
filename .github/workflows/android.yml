@@ -48,6 +48,34 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # TDLib (Telegram's official library, for uploads and playback straight from Telegram) is built
+      # from Telegram's own source once per android/tdlib/VERSION and cached; the first build of a
+      # new version takes 30-60 minutes. Saved right after it's built, so a later failure doesn't lose it.
+      - name: TDLib version
+        id: tdlib
+        run: echo "key=tdlib-$(cat tdlib/VERSION)-arm64-ndk27-v1" >> "$GITHUB_OUTPUT"
+
+      - name: Restore TDLib
+        id: tdlib-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: android/tdlib/out
+          key: ${{ steps.tdlib.outputs.key }}
+
+      - name: Build TDLib (only when its version changed)
+        if: steps.tdlib-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gperf php-cli
+          bash tdlib/build.sh
+
+      - name: Save TDLib
+        if: steps.tdlib-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: android/tdlib/out
+          key: ${{ steps.tdlib.outputs.key }}
+
       - name: Test the API client (:core)
         run: ./gradlew :core:test --console=plain
 

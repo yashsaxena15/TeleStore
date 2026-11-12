@@ -83,7 +83,9 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 notify(done, todo.size, item.name)
                 if ("${item.name}|${item.size}" !in existing) {
                     openWithLocation(item).use { source ->
-                        ChunkedUploader(api, source, item.name, item.size, folder, takenAt = item.takenIso, durationSeconds = item.durationMs.takeIf { it > 0 }?.let { it / 1000.0 }).upload()
+                        if (!backUpStraight(source, item, folder)) {
+                            ChunkedUploader(api, source, item.name, item.size, folder, takenAt = item.takenIso, durationSeconds = item.durationMs.takeIf { it > 0 }?.let { it / 1000.0 }).upload()
+                        }
                     }
                 }
                 store.markBackedUp(item.key)
@@ -105,6 +107,33 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         } catch (e: Exception) {
             problem((e as? ApiException)?.message ?: "Backup stopped: ${e.message}")
             Result.retry()
+        }
+    }
+
+    /**
+     * Backs one photo or video up straight to Telegram with the phone's own account (no server
+     * bandwidth), when that's on; false means it goes the server's way instead.
+     */
+    private suspend fun backUpStraight(source: UriChunkSource, item: PhoneItem, folder: String): Boolean {
+        if (!container.telegramDirect || !com.backendforge.telestore.core.DirectRules.canUploadDirect(folder, true, true, item.size)) return false
+        return try {
+            com.backendforge.telestore.core.DirectUploader(
+                api = container.api(),
+                sender = com.backendforge.telestore.telegram.TdlibSender(container.telegram, applicationContext.cacheDir),
+                source = source,
+                name = item.name,
+                size = item.size,
+                folder = folder,
+                takenAt = item.takenIso,
+            ).upload()
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: UnauthorizedException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("TeleStore", "Backing up straight to Telegram failed; using TeleStore", e)
+            false
         }
     }
 

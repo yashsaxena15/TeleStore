@@ -44,6 +44,18 @@ fun describe(context: Context, uri: Uri): PickedFile {
  * parallel); streams that can only be read front to back (some apps share pipes) go in order.
  */
 class UriChunkSource(context: Context, uri: Uri) : ChunkSource, AutoCloseable {
+    /** The real file behind a photo or video of the phone's gallery (or a file:// address), when readable. */
+    override val localPath: String? = runCatching {
+        val path = when (uri.scheme) {
+            "file" -> uri.path
+            "content" -> context.contentResolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.DATA), null, null, null)?.use {
+                if (it.moveToFirst()) it.getString(0) else null
+            }
+            else -> null
+        }
+        path?.takeIf { java.io.File(it).let { f -> f.isFile && f.canRead() } }
+    }.getOrNull()
+
     private val pfd: ParcelFileDescriptor = context.contentResolver.openFileDescriptor(uri, "r")
         ?: throw IOException("This file can't be opened any more.")
     private val channel = FileInputStream(pfd.fileDescriptor).channel

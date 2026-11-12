@@ -827,6 +827,7 @@ fun MainScreen(
                             onNavigateWebDav = { navController.navigate("webdav") },
                             onNavigateAccount = { navController.navigate("settings_account") },
                             onNavigateDownloads = { navController.navigate("settings_downloads") },
+                            onNavigateTelegram = { navController.navigate("settings_telegram") },
                             onNavigateUsers = { navController.navigate("settings_users") },
                             onNavigateSharedWithMe = { navController.navigate("shared_with_me") },
                             onNavigateSharedByMe = { navController.navigate("shared_by_me") },
@@ -929,6 +930,9 @@ fun MainScreen(
                 }
                 composable("settings_account") { AccountScreen(container, onBack = { navController.popBackStack() }) }
                 composable("settings_downloads") { DownloadsScreen(container, onBack = { navController.popBackStack() }) }
+                composable("settings_telegram") {
+                    com.backendforge.telestore.ui.settings.TelegramScreen(container, onBack = { navController.popBackStack() })
+                }
                 composable("settings_users") { UsersScreen(container, session.username, onBack = { navController.popBackStack() }) }
                 composable("shared_with_me") {
                     SharedWithMeScreen(container, onBack = { navController.popBackStack() }, onOpen = { navController.navigate("shared/${Uri.encode(it.shareId)}") })
