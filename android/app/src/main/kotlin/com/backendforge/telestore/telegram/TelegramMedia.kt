@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -107,9 +108,14 @@ class DirectOrHttpDataSource(private val files: TelegramFiles, private val http:
     override fun open(dataSpec: DataSpec): Long {
         val id = files.fileIdIn(dataSpec.uri)
         val found = id?.let {
-            runCatching { runBlocking { files.locate(it) } }
-                .onFailure { e -> android.util.Log.w("TeleStore", "Playing $it through TeleStore: ${e.message}") }
-                .getOrNull()
+            try {
+                runBlocking { files.locate(it) }
+            } catch (e: Exception) {
+                // The player stopped this read (a seek, or leaving): not a reason to use TeleStore
+                if (cancelled(e)) throw InterruptedIOException("Stopped")
+                android.util.Log.w("TeleStore", "Playing $it through TeleStore: ${e.message}")
+                null
+            }
         }
         if (id == null || found == null) return http.open(dataSpec)
         if (dataSpec.position > found.size) throw IOException("Past the end of the file")
@@ -134,6 +140,8 @@ class DirectOrHttpDataSource(private val files: TelegramFiles, private val http:
             w = try {
                 runBlocking { files.read(location, pos, n) }
             } catch (e: Exception) {
+                // The player stopped this read (a seek, resuming, or leaving): the file stays on Telegram
+                if (cancelled(e)) throw InterruptedIOException("Stopped")
                 android.util.Log.w("TeleStore", "Playing $fileId through TeleStore from now on: Telegram failed at byte $pos", e)
                 fileId?.let(files::markFailed) // the next try comes through TeleStore
                 throw IOException(e.message ?: "Telegram didn't send the file", e)
@@ -149,6 +157,11 @@ class DirectOrHttpDataSource(private val files: TelegramFiles, private val http:
         spec?.let { s -> listeners.forEach { it.onBytesTransferred(this, s, true, n) } }
         return n
     }
+
+    /** The player interrupts its loading thread to stop a read; that isn't Telegram failing. */
+    private fun cancelled(e: Throwable): Boolean =
+        e is InterruptedException || e is InterruptedIOException || e is kotlinx.coroutines.CancellationException ||
+            Thread.currentThread().isInterrupted || e.cause?.let { it is InterruptedException || it is kotlinx.coroutines.CancellationException } == true
 
     override fun getUri(): Uri? = spec?.uri ?: http.uri
 
