@@ -15,18 +15,23 @@ at their own connection's speed; no file data passes through this server. The se
 The captions are the ones the server's own uploads use ("Uploaded file: <name>" and "<name> (Part
 N)"), so the Telegram Inbox listener leaves these messages alone. GET /direct/config gives a signed-in
 uploader the Telegram app ID the desktop app signs in with.
+
+GET /direct/locate/{file_id} (phase 10) says which messages of the person's own channel hold one of
+their own files, so the app can view, play and download it straight from Telegram with their account.
+Never for vault files (the vault's lock stays on the server) or anyone else's.
 """
 
 import math
 import os
 from typing import List, Optional
 
+from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from telestore.config import API_HASH, API_ID
 from telestore.db import database
-from telestore.security.credentials import User, require_upload
+from telestore.security.credentials import User, require_auth, require_upload
 from d4rk.Logs import setup_logger
 
 logger = setup_logger("direct_routes")
@@ -220,3 +225,22 @@ async def direct_complete(req: CompleteRequest, request: Request, user: User = D
     logger.info(f"[DIRECT] '{name}' ({req.filesize} bytes, {len(results)} part(s)) saved to {path} for {owner}")
     return {"message": "File saved", "file": {"id": str(doc["_id"]), "file_name": name, "file_path": path,
                                               "file_type": kind, "file_size": req.filesize, "total_parts": len(results)}}
+
+
+@router.get("/locate/{file_id}")
+async def direct_locate(file_id: str, user: User = Depends(require_auth)):
+    """Where one of the person's own files is in Telegram: its messages, in order, with their sizes."""
+    from telestore.api.routes.files.protection import owner_ids
+    doc = database.Files.find_one({"_id": ObjectId(file_id), "owner_id": {"$in": owner_ids(user)}}) \
+        if ObjectId.is_valid(file_id) else None
+    if not doc or doc.get("file_type") == "folder" or not doc.get("chat_id") and not doc.get("parts"):
+        raise HTTPException(status_code=404, detail="File not found")
+    if doc.get("is_vault") or str(doc.get("file_path") or "").lower().startswith("/vault"):
+        raise HTTPException(status_code=403, detail="Private Vault files open through the server.")
+    size = int(doc.get("file_size") or 0)
+    if doc.get("is_split") and doc.get("parts"):
+        parts = [{"chat_id": int(p["chat_id"]), "message_id": int(p["message_id"]), "size": int(p.get("part_size") or 0),
+                  "start": int(p.get("start_byte") or 0)} for p in sorted(doc["parts"], key=lambda p: p.get("part_index", 0))]
+    else:
+        parts = [{"chat_id": int(doc["chat_id"]), "message_id": int(doc["message_id"]), "size": size, "start": 0}]
+    return {"id": str(doc["_id"]), "name": doc.get("file_name") or "file", "size": size, "parts": parts}

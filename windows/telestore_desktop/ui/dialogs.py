@@ -173,6 +173,8 @@ class SettingsDialog(QDialog):
         for key, text in (("system", "Like Windows"), ("light", "Light"), ("dark", "Dark")):
             self.theme.addItem(text, key)
         self.theme.setCurrentIndex(max(0, self.theme.findData(settings.theme)))
+        self.direct = QCheckBox("Open, play and download my files straight from Telegram")
+        self.direct.setChecked(settings.direct_open)
         speed = QHBoxLayout()
         speed.addWidget(self.limit_on)
         speed.addWidget(self.limit)
@@ -180,6 +182,7 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
         form.addRow("Uploads", speed)
         form.addRow("Theme", self.theme)
+        form.addRow("Viewing", self.direct)
         out_tg = QPushButton("Sign out of Telegram")
         out_tg.clicked.connect(lambda: self._out("telegram"))
         out_ts = QPushButton("Sign out of TeleStore")
@@ -194,7 +197,10 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addWidget(_note("Uploads go straight from this PC to your Telegram storage channel. "
-                               "Without a limit they use as much of your connection as Telegram allows."))
+                               "Without a limit they use as much of your connection as Telegram allows. "
+                               "With straight from Telegram on, your own files open at your home connection's speed "
+                               "without using the TeleStore server; shared and Private Vault files still open "
+                               "through TeleStore."))
         layout.addSpacing(8)
         layout.addWidget(_note("Account"))
         layout.addLayout(outs)

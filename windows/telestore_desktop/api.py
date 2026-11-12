@@ -38,6 +38,8 @@ class TeleStoreApi:
         self.timeout = timeout
         self.http = requests.Session()
         self.http.headers["User-Agent"] = f"TeleStore-Windows/{__version__}"
+        # Phase 10: this PC's address for one of your own files, straight from Telegram (None = through TeleStore)
+        self.direct: Optional[Callable] = None
 
     def _call(self, method: str, path: str, **kw):
         headers = kw.pop("headers", {})
@@ -124,6 +126,10 @@ class TeleStoreApi:
     def link_address(self, token: str) -> str:
         return f"{self.server}/s/{quote(token, safe='')}"
 
+    def locate(self, file_id: str) -> dict:
+        """Which messages of your channel hold one of your own files (for opening it straight from Telegram)."""
+        return self._call("GET", f"direct/locate/{quote(file_id, safe='')}")
+
     def shared_with_me(self) -> List[dict]:
         return self._call("GET", "shares/with-me").get("shares") or []
 
@@ -135,6 +141,17 @@ class TeleStoreApi:
         return f"{self.server}/{path}?{urlencode({k: v for k, v in params.items() if v is not None})}"
 
     def file_url(self, item, inline: bool = True) -> str:
+        """Where to open or download a file: straight from Telegram when it can, else through TeleStore."""
+        if self.direct and not item.share_id:
+            try:
+                url = self.direct(item, inline)
+            except Exception:
+                url = None
+            if url:
+                return url
+        return self.server_file_url(item, inline)
+
+    def server_file_url(self, item, inline: bool = True) -> str:
         if item.share_id:
             return self._url(f"shares/{quote(item.share_id, safe='')}/dl/{quote(item.id, safe='')}",
                              inline=1 if inline else None, token=self.token)
