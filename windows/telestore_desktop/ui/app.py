@@ -103,7 +103,8 @@ class App:
 
         account = tg.TelegramAccount(config["api_id"], config["api_hash"])
         store = JobStore()
-        engine = UploadEngine(api, account, store, self.settings.parallel, self.settings.speed_limit_kb, thumbs.make)
+        engine = UploadEngine(api, account, store, self.settings.parallel, self.settings.speed_limit_kb, thumbs.make,
+                              direct_open=self.settings.direct_open)
         engine.start()
         engine.ready.wait(5)
         state = SimpleNamespace(api=api, engine=engine, store=store, settings=self.settings, runner=self.runner,

@@ -237,3 +237,20 @@ def test_speed_cap_slows_uploads(tmp_path):
         assert time.time() - start >= 1.2
     finally:
         eng.stop()
+
+
+def test_opening_straight_from_telegram_starts_and_stops_with_the_engine(tmp_path):
+    from telestore_desktop.items import Item
+    api, account, store = FakeApi(), FakeAccount(), JobStore()
+    api.direct = None
+    eng = UploadEngine(api, account, store, direct_open=True)
+    eng.start()
+    wait_for(lambda: api.direct is not None)
+    url = api.direct(Item(id="1", name="a.mkv", kind="video"), True)
+    assert url.startswith(f"http://127.0.0.1:{eng.media.port}/")
+    eng.set_direct_open(False)
+    assert api.direct is None
+    eng.set_direct_open(True)
+    assert api.direct is not None
+    eng.stop()
+    assert api.direct is None

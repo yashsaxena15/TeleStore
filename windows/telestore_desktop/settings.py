@@ -16,6 +16,7 @@ class Settings:
     last_folder: str = "/Home"
     theme: str = "system"  # system (like Windows), light or dark
     view: str = "grid"  # grid or list
+    direct_open: bool = True  # open, play and download your own files straight from Telegram
 
     @classmethod
     def load(cls) -> "Settings":

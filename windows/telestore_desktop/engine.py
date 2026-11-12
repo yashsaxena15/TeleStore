@@ -15,6 +15,7 @@ from concurrent.futures import Future
 from typing import Callable, Dict, List, Optional
 
 from telestore_desktop.api import ApiError, TeleStoreApi
+from telestore_desktop.media_server import MediaServer
 from telestore_desktop.jobs import DONE, FAILED, PAUSED, PREPARING, SAVING, UPLOADING, WAITING, Job, JobStore
 from telestore_desktop.parts import PartReader, file_key
 from telestore_desktop.ratelimit import RateLimit
@@ -50,11 +51,14 @@ class Slots:
 
 class UploadEngine:
     def __init__(self, api: TeleStoreApi, account: TelegramAccount, store: JobStore, parallel: int = 3,
-                 speed_limit_kb: int = 0, thumbnailer: Optional[Callable[[str], Optional[str]]] = None):
+                 speed_limit_kb: int = 0, thumbnailer: Optional[Callable[[str], Optional[str]]] = None,
+                 direct_open: bool = False):
         self.api, self.account, self.store = api, account, store
         self.parallel = max(1, parallel)
         self.limit = RateLimit(speed_limit_kb * 1024)
         self.thumbnailer = thumbnailer
+        self.direct_open = direct_open  # phase 10: open your own files straight from Telegram
+        self.media: Optional[MediaServer] = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.thread: Optional[threading.Thread] = None
         self.running: Dict[str, asyncio.Task] = {}
@@ -101,6 +105,24 @@ class UploadEngine:
     def set_speed_limit(self, kb: int) -> None:
         self.limit.rate = max(0, kb) * 1024
 
+    def set_direct_open(self, on: bool) -> None:
+        self.direct_open = on
+        if self.media and on:
+            self.api.direct = self.media.url
+        elif not on:
+            self.api.direct = None
+        if on and not self.media and self.loop and self.state == "ready":
+            self._call(self._start_media())
+
+    async def _start_media(self) -> None:
+        try:
+            self.media = MediaServer(self.account, self.api)
+            await self.media.start()
+            self.api.direct = self.media.url
+        except Exception as e:  # files still open through TeleStore
+            log.warning(f"Opening straight from Telegram isn't available: {e}")
+            self.media = None
+
     def take_notes(self) -> List[str]:
         notes, self.notes = self.notes, []
         return notes
@@ -126,6 +148,8 @@ class UploadEngine:
         try:
             await self.account.start()
             self.state = "ready"
+            if self.direct_open:
+                await self._start_media()
         except Exception as e:
             self.state = str(e)
             self.notes.append(str(e))
@@ -146,6 +170,9 @@ class UploadEngine:
         for task in list(self.running.values()):
             task.cancel()
         await asyncio.gather(*self.running.values(), return_exceptions=True)
+        if self.media:
+            self.api.direct = None
+            await self.media.stop()
         await self.account.stop()
 
     async def _add(self, local_paths: List[str], dest: str) -> List[Job]:

@@ -221,3 +221,43 @@ class TestConfig:
 def test_the_windows_app_gets_a_long_lived_token():
     from telestore.api.routes import auth
     assert "windows" in auth.APP_DEVICES
+
+
+class TestLocate:
+    def _add(self, world, **doc):
+        base = {"file_name": "film.mkv", "file_type": "video", "owner_id": "111", "file_path": "/Home", "file_size": 10,
+                "chat_id": CHAT, "message_id": 50}
+        base.update(doc)
+        world.files.insert_one(base)
+        return str(base["_id"])
+
+    def test_a_single_file(self, world):
+        fid = self._add(world)
+        body = world.client.get(f"/direct/locate/{fid}").json()
+        assert body == {"id": fid, "name": "film.mkv", "size": 10,
+                        "parts": [{"chat_id": CHAT, "message_id": 50, "size": 10, "start": 0}]}
+
+    def test_parts_in_order(self, world):
+        parts = [{"part_index": 2, "chat_id": CHAT, "message_id": 102, "part_size": 5, "start_byte": 10},
+                 {"part_index": 1, "chat_id": str(CHAT), "message_id": 101, "part_size": 10, "start_byte": 0}]
+        fid = self._add(world, is_split=True, parts=parts, file_size=15)
+        got = world.client.get(f"/direct/locate/{fid}").json()["parts"]
+        assert [(p["message_id"], p["start"], p["size"], p["chat_id"]) for p in got] == [(101, 0, 10, CHAT), (102, 10, 5, CHAT)]
+
+    def test_only_your_own_files(self, world):
+        fid = self._add(world, owner_id="999")
+        assert world.client.get(f"/direct/locate/{fid}").status_code == 404
+        assert world.client.get("/direct/locate/not-an-id").status_code == 404
+
+    def test_never_vault_files(self, world):
+        fid = self._add(world, is_vault=True, file_path="/Vault")
+        assert world.client.get(f"/direct/locate/{fid}").status_code == 403
+
+    def test_folders_and_empty_files_have_nothing_to_locate(self, world):
+        assert world.client.get(f"/direct/locate/{self._add(world, file_type='folder', chat_id=None)}").status_code == 404
+        assert world.client.get(f"/direct/locate/{self._add(world, chat_id=None, message_id=None)}").status_code == 404
+
+    def test_signed_in_only(self, world):
+        fid = self._add(world)
+        app.dependency_overrides.pop(require_auth, None)
+        assert world.client.get(f"/direct/locate/{fid}").status_code == 401

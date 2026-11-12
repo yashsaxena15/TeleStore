@@ -15,8 +15,13 @@ It looks and works like the TeleStore website, in light or dark (like Windows, o
   Double-click a folder to go in; **Back** (Alt+←, Backspace or the arrow) goes out. F5 refreshes, Ctrl+F searches.
 - **Opening files** (double-click): photos in a viewer (← → for the next one), videos and music in a
   player (Space, ← →, F for full screen), anything else is downloaded and opened with its Windows app.
-  Right-click › **Download…** saves a copy. In this version these come through the TeleStore server, as on
-  the website.
+  Right-click › **Download…** saves a copy.
+- **Straight from Telegram** (Settings › Viewing, on by default): your own files open, play and download
+  from your storage channel with your Telegram account, at your home connection's speed, without using
+  the TeleStore server's bandwidth. The app runs a small web server on this PC only (127.0.0.1, with a
+  random secret in every address) that streams the file from Telegram with byte ranges, so videos start
+  at once and seeking works; the server only says which messages hold the file (`GET /direct/locate`).
+  Files shared with you and Private Vault files open through the TeleStore server, as on the website.
 - **Right-click** (or the keys): Open, Download…, Rename (F2), Move to…, Add to / Remove from Starred,
   Share… (people as Viewer or Editor, and a link anyone can open), Move to Trash (Delete). In Trash:
   Restore, Delete forever, and **Empty trash** at the top. Protected items say why they can't be deleted.

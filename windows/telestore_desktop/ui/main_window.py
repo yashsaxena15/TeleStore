@@ -213,6 +213,9 @@ class MainWindow(QMainWindow):
             self.s.settings.theme = new_theme
             self.s.settings.save()
             self.s.engine.set_speed_limit(self.s.settings.speed_limit_kb)
+            self.s.settings.direct_open = d.direct.isChecked()
+            self.s.settings.save()
+            self.s.engine.set_direct_open(self.s.settings.direct_open)
             if changed:
                 dialogs.info(self, "Theme", "The new theme is used the next time TeleStore opens.")
 
