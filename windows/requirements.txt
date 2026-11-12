@@ -1,0 +1,5 @@
+# TeleStore for Windows (python -m telestore_desktop)
+PySide6==6.8.1
+pyrofork==2.3.68  # the same Telegram library as the server and the workers
+TgCrypto-pyrofork==1.2.8  # fast Telegram encryption (tgcrypto has no Windows build for Python 3.12)
+requests==2.32.3

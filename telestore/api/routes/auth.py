@@ -22,7 +22,7 @@ logger = setup_logger("auth_routes")
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 # Apps that sign in (the Android app sends "android") get a 90-day token instead of 24 hours
-APP_DEVICES = {"android"}
+APP_DEVICES = {"android", "windows"}
 APP_TOKEN_HOURS = 90 * 24
 
 
