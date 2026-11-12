@@ -163,9 +163,36 @@ async def list_worker_nodes(admin: bool = Depends(require_admin)):
             "ip": n.get("ip"),
             "specs": n.get("specs"),
             "last_seen": last_seen.isoformat() if last_seen else None,
-            "status": "online" if is_online else "offline"
+            "status": "online" if is_online else "offline",
+            "bot": n.get("bot_slot"),  # which of the workers' bots it sends with (0 = the first)
         })
     return {"nodes": result, "count": len(result)}
+
+
+def tokens_for_worker(worker_id: str) -> List[str]:
+    """The bots set aside for workers (from the 7th on, if there are 7 or more), with this worker's own
+    bot first: a worker sends with the first one, so two workers don't share a bot. Each worker keeps
+    its bot (stored on its WorkerNodes record); a new worker gets one no other worker has, or the one
+    fewest workers share once every bot is taken."""
+    pool = list(TOKENS[6:] if len(TOKENS) >= 7 else TOKENS)
+    if len(pool) <= 1:
+        return pool
+    try:
+        nodes = get_remote_db()["WorkerNodes"]
+        node = nodes.find_one({"worker_id": worker_id}) or {}
+        slot = node.get("bot_slot")
+        if not isinstance(slot, int) or not 0 <= slot < len(pool):
+            used = [0] * len(pool)
+            for other in nodes.find({"worker_id": {"$ne": worker_id}, "bot_slot": {"$exists": True}}):
+                s = other.get("bot_slot")
+                if isinstance(s, int) and 0 <= s < len(pool):
+                    used[s] += 1
+            slot = used.index(min(used))
+            nodes.update_one({"worker_id": worker_id}, {"$set": {"worker_id": worker_id, "bot_slot": slot}}, upsert=True)
+    except Exception as e:  # never stop a claim over this: the shared first bot, as before
+        logger.warning(f"[WORKER_CLAIM] Couldn't pick a bot of its own for {worker_id}: {e}")
+        return pool
+    return pool[slot:] + pool[:slot]
 
 
 @router.post("/claim-task")
@@ -210,8 +237,7 @@ async def claim_task(
 
     logger.info(f"[WORKER_CLAIM] Task {doc['task_id']} ('{doc.get('filename')}') claimed by worker {body.worker_id}")
 
-    # Allocate dedicated bot tokens for this worker (using bot tokens from index 6 onwards if available)
-    worker_tokens = TOKENS[6:] if len(TOKENS) >= 7 else TOKENS
+    worker_tokens = tokens_for_worker(body.worker_id)
 
     return {
         "has_task": True,

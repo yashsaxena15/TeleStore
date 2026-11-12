@@ -3,6 +3,7 @@ import sys
 import time
 import shutil
 import asyncio
+import contextvars
 import threading
 import logging
 import secrets
@@ -55,6 +56,19 @@ UPLOAD_LIMIT_KB = kb_setting("WORKER_UPLOAD_LIMIT_KB")
 ARIA2C = shutil.which("aria2c")
 SKILLS = (["torrent"] if (torrent_engine.AVAILABLE or ARIA2C) else []) + (["torrent_parts"] if torrent_engine.AVAILABLE else [])
 TORRENT_REPORT_SECONDS = 2
+# Tasks at once: one downloading, and up to [MAX_TASKS - 1] earlier ones still uploading to Telegram.
+# The next task starts downloading as soon as the current one's download is over, so the line is
+# busy both ways. 1 = one task at a time (download, then upload, then the next).
+MAX_TASKS = max(1, int(os.getenv("WORKER_MAX_TASKS", "2") or 2))
+# The running task's "download is over" signal (each task runs in its own asyncio task)
+_download_done: contextvars.ContextVar = contextvars.ContextVar("download_done", default=None)
+
+
+def mark_downloaded() -> None:
+    """The running task has all its data: only its upload to Telegram is left, so the next task may start."""
+    done = _download_done.get()
+    if done is not None:
+        done.set()
 
 HEADERS = {
     "X-Worker-Key": WORKER_KEY,
@@ -98,6 +112,7 @@ class DistributedWorker:
         self.running = True
         self.bot_clients = {}
         self.last_report = {}  # task_id → the last progress sent (resent while waiting for Telegram)
+        self.jobs = {}  # running asyncio task → its "download is over" event
         self.download_limit = RateLimit(DOWNLOAD_LIMIT_KB * 1024)
         self.upload_limit = RateLimit(UPLOAD_LIMIT_KB * 1024)
         os.makedirs(WORK_DIR, exist_ok=True)
@@ -394,6 +409,7 @@ class DistributedWorker:
             for fut in futures:
                 fut.cancel()
             raise
+        mark_downloaded()  # the last part is uploading
         results = sorted([await asyncio.wrap_future(f) for f in futures], key=lambda r: r["part_index"])
         base = {"task_id": task_id, "user_id": task_data["user_id"], "chat_id": chat_id,
                 "destination_path": task_data.get("destination_path", "/Home"), "file_name": name,
@@ -447,6 +463,7 @@ class DistributedWorker:
             os.path.join(task_dir, "dl"), os.path.join(task_dir, "parts"),
             slots=slots, on_part=holder.append, cancelled=lambda: not self.running, on_progress=on_progress,
             done_parts=set(range(1, total + 1)) - {index})
+        mark_downloaded()
         part = holder[0]
         try:
             result = await self.upload_part(bot, task_id, chat_id, name, part.path, index, part.start, part.length, False)
@@ -475,6 +492,7 @@ class DistributedWorker:
         await self.fetch_torrent(task_id, torrent)
         logger.info(f"Task {task_id}: torrent file #{task_data['torrent_file_index']} '{name}' ({size_text(size)})")
         await self.download_torrent_file(task_id, torrent, int(task_data["torrent_file_index"]), size, name, dl_dir)
+        mark_downloaded()
 
         path = torrent_file_path(dl_dir, task_data.get("torrent_rel_path") or name, name)
         if not path:
@@ -511,7 +529,8 @@ class DistributedWorker:
         os.remove(path)
         await self.report_complete({**base, "is_multipart": True, "parts": results, "part_size": PART_MAX_SIZE})
 
-    async def process_task(self, task_data: dict, tg_config: dict):
+    async def process_task(self, task_data: dict, tg_config: dict, download_done: asyncio.Event = None):
+        _download_done.set(download_done)
         task_id = task_data["task_id"]
         source_url = task_data["source_url"]
         filename = task_data.get("filename") or "file"
@@ -609,6 +628,7 @@ class DistributedWorker:
                                 await self.report_progress(task_id, transferred, part_size, speed, prog, eta, phase)
 
                 check_download(filename, transferred, part_size, head)
+                mark_downloaded()
 
                 # Upload part file to Telegram Cloud
                 step = "uploading to Telegram"
@@ -752,7 +772,8 @@ class DistributedWorker:
                 )
                 upload_tasks.append(p_task)
 
-                # Wait for all Telegram uploads to finish
+                # Wait for all Telegram uploads to finish (the next task may start downloading meanwhile)
+                mark_downloaded()
                 step = "uploading to Telegram"
                 logger.info(f"Waiting for {len(upload_tasks)} part uploads to finish...")
                 results = await asyncio.gather(*upload_tasks)
@@ -804,8 +825,28 @@ class DistributedWorker:
             is_quota = is_gdrive_quota_error(err_msg)
             await self.report_fail(task_id, err_msg, is_quota)
         finally:
+            mark_downloaded()
             self.last_report.pop(task_id, None)
             shutil.rmtree(task_dir, ignore_errors=True)
+
+    async def wait_for_room(self) -> None:
+        """Until a new task may start: none is downloading, and fewer than MAX_TASKS are running."""
+        while self.running:
+            self.jobs = {job: done for job, done in self.jobs.items() if not job.done()}
+            if len(self.jobs) < MAX_TASKS and all(done.is_set() for done in self.jobs.values()):
+                return
+            await asyncio.sleep(1)
+
+    def start_task(self, task: dict, tg_config: dict) -> asyncio.Task:
+        """Runs a claimed task in the background; the loop claims the next once its download is over."""
+        if self.jobs:
+            logger.info(f"Starting task {task.get('task_id')} while {len(self.jobs)} earlier one(s) finish uploading.")
+        done = asyncio.Event()
+        job = asyncio.create_task(self.process_task(task, tg_config, done))
+        job.add_done_callback(lambda j: j.cancelled() or not j.exception() or
+                              logger.error(f"Task {task.get('task_id')} stopped unexpectedly: {j.exception()}"))
+        self.jobs[job] = done
+        return job
 
     async def run(self):
         self.session = aiohttp.ClientSession(
@@ -825,8 +866,14 @@ class DistributedWorker:
                     + ", upload to Telegram " + (f"{UPLOAD_LIMIT_KB} KB/s" if UPLOAD_LIMIT_KB else "none")
                     + f", upload to torrent peers {torrent_engine.UPLOAD_LIMIT // 1024} KB/s")
 
+        logger.info(f"Tasks at once: {MAX_TASKS} (the next one downloads while earlier ones upload)" if MAX_TASKS > 1
+                    else "Tasks at once: 1")
+
         while self.running:
             try:
+                await self.wait_for_room()
+                if not self.running:
+                    break
                 async with self.session.post(
                     f"{MASTER_URL}/api/worker/claim-task",
                     headers=HEADERS,
@@ -838,7 +885,7 @@ class DistributedWorker:
                         if data.get("has_task") and data.get("task"):
                             task = data["task"]
                             tg_cfg = data.get("telegram_config", {})
-                            await self.process_task(task, tg_cfg)
+                            self.start_task(task, tg_cfg)
                         else:
                             await asyncio.sleep(2)
                     elif resp.status == 401:
@@ -852,6 +899,8 @@ class DistributedWorker:
                 logger.error(f"Error in worker loop: {e}")
                 await asyncio.sleep(3)
 
+        if self.jobs:
+            await asyncio.gather(*self.jobs, return_exceptions=True)
         if self.session:
             await self.session.close()
 

@@ -68,6 +68,21 @@ Logs are kept in `logs/worker.log` next to them (5 files of 10 MB), across resta
 
 ---
 
+## Two tasks at once, and a bot of its own
+
+- **The next task downloads while the last one uploads.** A Telegram upload goes at about 4–6 MB/s
+  whatever the line's speed (Telegram's client library sends 512 KB pieces, 4 at a time, each waiting
+  for Telegram's reply). So as soon as a task's download is over, the worker claims the next and
+  downloads it while the first one is still uploading. Only one task downloads at a time;
+  `WORKER_MAX_TASKS` (default 2) is how many run at once. Set it to 1 for one task at a time.
+  Disk: the next task's data, plus the file still uploading (up to 1.95 GB per part).
+- **Each worker sends with its own bot.** The bots from the 7th on in the main server's `TOKENS` are
+  for workers. The server gives each worker one no other worker has (kept on its `WorkerNodes`
+  record, shown as `bot` in `/api/worker/nodes`), or the one fewest share once all are taken. Workers
+  send with the first bot they're given, so older workers get theirs without an update.
+
+---
+
 ## Speed caps for one machine
 
 Each worker machine can have its own caps, in its settings file (`/etc/tele_worker.env`, or the
