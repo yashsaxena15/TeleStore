@@ -1,6 +1,8 @@
 """The TeleStore server's API, as the website and the Android app use it (no file data goes here)."""
 
-from typing import List, Optional
+import os
+from typing import Callable, List, Optional
+from urllib.parse import quote, urlencode
 
 import requests
 
@@ -71,6 +73,76 @@ class TeleStoreApi:
         self.token = None
 
     # ── Files ──
+    def list_files(self, path: str, page: int = 1, page_size: int = 200, sort_by: str = "name", order: str = "asc",
+                   q: Optional[str] = None, kind: Optional[str] = None) -> dict:
+        """One page of a folder ("/Home/…", "starred", "trash", "all"), or a search with [q]."""
+        params = {"path": path, "page": page, "page_size": page_size, "sort_by": sort_by, "sort_order": order}
+        if q:
+            params["q"] = q
+        if kind:
+            params["kind"] = kind
+        return self._call("GET", "files", params=params)
+
+    def create_folder(self, name: str, parent: str) -> dict:
+        return self._call("POST", "folders/create", json={"folderName": name, "currentPath": parent})
+
+    def shared_with_me(self) -> List[dict]:
+        return self._call("GET", "shares/with-me").get("shares") or []
+
+    def browse_share(self, share_id: str, path: str = "") -> dict:
+        return self._call("GET", f"shares/{quote(share_id, safe='')}/browse", params={"path": path})
+
+    # ── Addresses with the token in them (players and image loading can't send headers) ──
+    def _url(self, path: str, **params) -> str:
+        return f"{self.server}/{path}?{urlencode({k: v for k, v in params.items() if v is not None})}"
+
+    def file_url(self, item, inline: bool = True) -> str:
+        if item.share_id:
+            return self._url(f"shares/{quote(item.share_id, safe='')}/dl/{quote(item.id, safe='')}",
+                             inline=1 if inline else None, token=self.token)
+        return self._url(f"dl/{quote(item.name, safe='')}", file_id=item.id, inline=1 if inline else None, token=self.token)
+
+    def thumbnail_url(self, item) -> Optional[str]:
+        if item.share_id:
+            return self._url(f"shares/{quote(item.share_id, safe='')}/thumb/{quote(item.id, safe='')}",
+                             token=self.token) if item.has_thumb or item.kind in ("photo", "video") else None
+        if item.thumbnail:
+            return self._url(f"files/thumbnail/{quote(item.thumbnail, safe='')}", auth_token=self.token)
+        if item.kind in ("photo", "video"):
+            return self._url(f"files/preview/{quote(item.id, safe='')}", token=self.token)
+        return None
+
+    def fetch(self, url: str, timeout: float = 30) -> bytes:
+        try:
+            resp = self.http.get(url, timeout=timeout)
+        except requests.RequestException as e:
+            raise ApiError(f"Couldn't reach TeleStore ({type(e).__name__}).") from e
+        if resp.status_code >= 400:
+            raise ApiError(_detail(resp), resp.status_code)
+        return resp.content
+
+    def download(self, url: str, target: str, progress: Optional[Callable[[int, int], bool]] = None) -> None:
+        """Saves [url] to [target]; [progress](done, total) returning False stops it."""
+        tmp = target + ".part"
+        try:
+            with self.http.get(url, stream=True, timeout=(30, 120)) as resp:
+                if resp.status_code >= 400:
+                    raise ApiError(_detail(resp), resp.status_code)
+                total = int(resp.headers.get("Content-Length") or 0)
+                done = 0
+                with open(tmp, "wb") as f:
+                    for chunk in resp.iter_content(1024 * 1024):
+                        f.write(chunk)
+                        done += len(chunk)
+                        if progress and progress(done, total) is False:
+                            raise InterruptedError("Download cancelled")
+            os.replace(tmp, target)
+        except requests.RequestException as e:
+            raise ApiError(f"The download stopped ({type(e).__name__}).") from e
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+
     def folders(self, path: str) -> List[dict]:
         """The folders directly inside [path] ("/Home", "/Home/Movies"...), by name."""
         found, page = [], 1

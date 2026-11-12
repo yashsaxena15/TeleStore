@@ -5,14 +5,29 @@ No file data passes through the TeleStore server, so big uploads don't depend on
 Everything else (the website, the Android app, cloud transfers, the workers) is unchanged; the files
 this app uploads show up there like any other.
 
-## How it works
+## The window
+
+It looks and works like the TeleStore website, in light or dark (like Windows, or chosen in Settings):
+
+- **The sidebar**: **New** (Upload files, Upload folder, New folder), then **Home, Recent, Starred,
+  Shared with me, Photos, Trash**, your storage used, and your account (Settings, the website, Sign out).
+- **The files**: breadcrumbs (Home › Movies › 2024; click one to go back there), search, grid or list.
+  Double-click a folder to go in; **Back** (Alt+←, Backspace or the arrow) goes out. F5 refreshes, Ctrl+F searches.
+- **Opening files** (double-click): photos in a viewer (← → for the next one), videos and music in a
+  player (Space, ← →, F for full screen), anything else is downloaded and opened with its Windows app.
+  Right-click › **Download…** saves a copy. In this version these come through the TeleStore server, as on
+  the website.
+- **Uploads go into the folder you're looking at**: drop files or folders on the window, or New › Upload.
+  A panel in the bottom corner shows each file's progress, speed and time left, with pause, resume and
+  cancel; it hides once everything is done.
+
+## How uploads work
 
 1. **Sign in to TeleStore** with the same username and password as the website.
 2. **Sign in to Telegram once** (phone number, code, and the two-step password if you have one) with
    the account that owns your TeleStore storage channel. The session is saved only on this PC,
    encrypted for your Windows account (DPAPI). The app has no bot token and no database password.
-3. **Pick a TeleStore folder on the left, then drop files or folders** (or use *Add files…* / *Add folder…*).
-   For each file the app:
+3. For each file the app:
    - asks the server where it goes (`POST /direct/prepare`): your storage channel, and its parts;
    - sends it to the channel with your Telegram account. A file over 1.95 GB is sent in 1.95 GB parts,
      each **read by position from the original file** (no copies on disk), several at once;
@@ -30,15 +45,17 @@ next start) sends only the parts still missing. A file that changed since it was
 
 ## Speed
 
-Telegram takes one file or part at about 5 MB/s, so the app sends several parts at once
-(*Settings → Parts sent at once*, default 3, up to 8). *Upload speed cap* limits the total.
+Telegram takes one file or part at about 5 MB/s, so the app sends several parts at once (3).
+*Settings → Limit upload speed* caps the total.
 When Telegram asks to slow down, the app waits and continues by itself.
 
 ## Files on this PC (`%APPDATA%\TeleStore`)
 
 | File | What |
 |---|---|
-| `settings.json` | server, username, speed settings, last folder |
+| `settings.json` | server, username, speed limit, theme, grid or list, last folder |
+| `thumbs\` | thumbnails already seen |
+| `opened\` | files downloaded to open them |
 | `telestore.auth` | TeleStore sign-in (encrypted) |
 | `telegram.session` | Telegram sign-in (encrypted) |
 | `uploads.json` | the upload list and the parts already sent |

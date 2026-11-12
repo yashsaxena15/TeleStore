@@ -14,6 +14,8 @@ class Settings:
     parallel: int = 3  # parts sent to Telegram at once (each about 5 MB/s)
     speed_limit_kb: int = 0  # 0 = no cap
     last_folder: str = "/Home"
+    theme: str = "system"  # system (like Windows), light or dark
+    view: str = "grid"  # grid or list
 
     @classmethod
     def load(cls) -> "Settings":
@@ -26,6 +28,8 @@ class Settings:
         s = cls(**{k: v for k, v in raw.items() if k in known})
         s.parallel = min(8, max(1, int(s.parallel or 3)))
         s.speed_limit_kb = max(0, int(s.speed_limit_kb or 0))
+        s.theme = s.theme if s.theme in ("system", "light", "dark") else "system"
+        s.view = s.view if s.view in ("grid", "list") else "grid"
         return s
 
     def save(self) -> None:
