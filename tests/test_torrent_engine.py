@@ -158,7 +158,9 @@ class TestDownload:
 
     def test_uploads_to_others_are_capped(self, engine):
         settings = engine.session.get_settings()
-        assert settings["upload_rate_limit"] == te.UPLOAD_LIMIT == 1024  # as little as possible
+        assert settings["upload_rate_limit"] == te.UPLOAD_LIMIT >= 1024  # never 0, which means no cap
+        # 1 KB/s unless the machine's settings say otherwise (TORRENT_UPLOAD_LIMIT_KB, as in .env)
+        assert te.UPLOAD_LIMIT == int(os.getenv("TORRENT_UPLOAD_LIMIT_KB") or 1) * 1024
         # Our own requests for data don't count against the cap (that would slow downloads)
         assert settings["rate_limit_ip_overhead"] is False
 

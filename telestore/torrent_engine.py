@@ -307,6 +307,10 @@ class TorrentEngine:
                 })
             time.sleep(POLL_SECONDS)
 
+    def set_download_limit(self, bytes_per_second: int) -> None:
+        """A cap on download speed for the whole session (0 = none): a worker machine's own setting."""
+        self.session.apply_settings({"download_rate_limit": max(0, int(bytes_per_second))})
+
 
 _engine: Optional[TorrentEngine] = None
 _engine_lock = threading.Lock()

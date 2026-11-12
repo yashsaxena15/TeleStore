@@ -14,8 +14,8 @@ from pyrogram import Client
 # transfer_core.py (shared with the main server) sits next to this file on worker machines;
 # run from the repo, it is telestore/transfer_core.py
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "telestore"))
-from transfer_core import (HEAD_BYTES, HTML_NAMES, SpeedMeter, aria2_file_args, check_download,  # noqa: E402,F401
-                           eta_seconds, is_google_limit, looks_like_html, parse_aria2_line, retry_after_flood,
+from transfer_core import (HEAD_BYTES, HTML_NAMES, RateLimit, SpeedMeter, aria2_file_args, check_download,  # noqa: E402,F401
+                           eta_seconds, kb_setting, is_google_limit, looks_like_html, parse_aria2_line, retry_after_flood,
                            size_text, torrent_file_path)
 import torrent_engine  # noqa: E402  (also shared: telestore/torrent_engine.py, copied next to this file)
 
@@ -44,6 +44,11 @@ PART_MAX_SIZE = 1950 * 1024 * 1024  # 1.95 GB Part standard
 # No limit on how long a whole download takes (big files need many minutes), only on a quiet connection
 READ_TIMEOUT = int(os.getenv("READ_TIMEOUT", "120"))
 UPLOAD_REPORT_SECONDS = 5
+# This machine's own speed caps in KB/s, from its settings file (empty or 0 = no cap): downloads of
+# every kind (web, Google Drive, torrents) and uploads to Telegram. Uploads to other torrent peers
+# have their own cap, TORRENT_UPLOAD_LIMIT_KB (torrent_engine.py).
+DOWNLOAD_LIMIT_KB = kb_setting("WORKER_DOWNLOAD_LIMIT_KB")
+UPLOAD_LIMIT_KB = kb_setting("WORKER_UPLOAD_LIMIT_KB")
 # Torrents: with libtorrent (pip install libtorrent, in this worker's virtual environment) a file
 # comes part by part, at most two parts of 1.95 GB on disk; aria2c (apt install aria2) is the
 # fallback, a whole file at a time. Either way the same no-seeding rules as the main server.
@@ -93,6 +98,8 @@ class DistributedWorker:
         self.running = True
         self.bot_clients = {}
         self.last_report = {}  # task_id → the last progress sent (resent while waiting for Telegram)
+        self.download_limit = RateLimit(DOWNLOAD_LIMIT_KB * 1024)
+        self.upload_limit = RateLimit(UPLOAD_LIMIT_KB * 1024)
         os.makedirs(WORK_DIR, exist_ok=True)
 
     async def get_or_create_bot(self, token: str, api_id: int, api_hash: str) -> Client:
@@ -164,10 +171,14 @@ class DistributedWorker:
     def upload_progress(self, task_id: str, label: str):
         """A Telegram upload's progress callback: tells the master every few seconds that this worker is
         still busy, so a long upload isn't taken back as abandoned."""
-        state = {"last": 0.0}
+        state = {"last": 0.0, "sent": 0}
         meter = SpeedMeter()
 
         async def progress(current: int, total: int):
+            # Called after each 512 KB is handed to Telegram, which waits for this before the next:
+            # waiting here keeps the upload under this machine's cap
+            await self.upload_limit.take(current - state["sent"])
+            state["sent"] = current
             now = time.time()
             speed = meter.update(current)
             if now - state["last"] < UPLOAD_REPORT_SECONDS:
@@ -292,7 +303,7 @@ class DistributedWorker:
 
     async def download_torrent_file(self, task_id: str, torrent: str, index: int, size: int, name: str, dl_dir: str) -> None:
         """Downloads one file of a torrent with aria2c, telling the master its progress every few seconds."""
-        cmd = aria2_file_args(WORK_DIR, torrent, index, dl_dir)
+        cmd = aria2_file_args(WORK_DIR, torrent, index, dl_dir, DOWNLOAD_LIMIT_KB)
         cmd[0] = ARIA2C
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
         info = {"done": 0, "speed_bps": 0, "progress": 0.0, "peers": 0}
@@ -583,6 +594,7 @@ class DistributedWorker:
                             chunk = await resp.content.read(chunk_size)
                             if not chunk:
                                 break
+                            await self.download_limit.take(len(chunk))
                             if len(head) < HEAD_BYTES:
                                 head += chunk[:HEAD_BYTES - len(head)]
                             pf.write(chunk)
@@ -691,6 +703,7 @@ class DistributedWorker:
                     chunk = await resp.content.read(chunk_size)
                     if not chunk:
                         break
+                    await self.download_limit.take(len(chunk))
                     if len(head) < HEAD_BYTES:
                         head += chunk[:HEAD_BYTES - len(head)]
 
@@ -803,6 +816,14 @@ class DistributedWorker:
         how = ("libtorrent, part by part, and single parts of big files" if torrent_engine.AVAILABLE else
                f"aria2c at {ARIA2C}, a whole file at a time" if ARIA2C else "")
         logger.info(f"Torrent files: {'yes (' + how + ')' if how else 'no (neither libtorrent nor aria2c is installed)'}")
+        if DOWNLOAD_LIMIT_KB and torrent_engine.AVAILABLE:
+            try:
+                torrent_engine.get_engine().set_download_limit(DOWNLOAD_LIMIT_KB * 1024)
+            except Exception as e:
+                logger.warning(f"The download cap couldn't be given to libtorrent: {e}")
+        logger.info("Speed caps: download " + (f"{DOWNLOAD_LIMIT_KB} KB/s" if DOWNLOAD_LIMIT_KB else "none")
+                    + ", upload to Telegram " + (f"{UPLOAD_LIMIT_KB} KB/s" if UPLOAD_LIMIT_KB else "none")
+                    + f", upload to torrent peers {torrent_engine.UPLOAD_LIMIT // 1024} KB/s")
 
         while self.running:
             try:
