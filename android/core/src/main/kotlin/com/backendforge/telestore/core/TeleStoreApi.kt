@@ -351,6 +351,36 @@ class TeleStoreApi(
     /** How much the account stores, out of its quota. */
     suspend fun storage(): StorageStats = get(url("files/analytics"))
 
+    // ── Straight from Telegram (the phone's own Telegram account) ──────────────
+    suspend fun directConfig(): DirectConfig = get(url("direct/config"))
+
+    suspend fun directPrepare(folder: String, name: String, size: Long): DirectPlan =
+        post(url("direct/prepare"), buildJsonObject {
+            put("path", folder)
+            put("filename", name)
+            put("filesize", size)
+        })
+
+    /** Saves a file whose parts are in the storage channel ([messages]: part index to message id). */
+    suspend fun directComplete(folder: String, name: String, size: Long, messages: Map<Int, Long>, takenAt: String? = null): DirectSaved =
+        post(url("direct/complete"), buildJsonObject {
+            put("path", folder)
+            put("filename", name)
+            put("filesize", size)
+            put("parts", kotlinx.serialization.json.buildJsonArray {
+                messages.toSortedMap().forEach { (index, id) ->
+                    add(buildJsonObject {
+                        put("part_index", index)
+                        put("message_id", id)
+                    })
+                }
+            })
+            takenAt?.let { put("taken_at", it) }
+        })
+
+    suspend fun directLocate(fileId: String): DirectLocation =
+        get(url("direct/locate").newBuilder().addPathSegment(fileId).build())
+
     // ── Playback ────────────────────────────────────────────────────────────────
     /** Size, length, audio tracks and subtitles of a video (the server probes it once, then caches it). */
     suspend fun mediaInfo(item: FileItem): MediaInfo {

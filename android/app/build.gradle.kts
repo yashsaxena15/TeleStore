@@ -50,7 +50,13 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        // TDLib's native library stays compressed-free and aligned for 16 KB memory pages (Android 15)
+        jniLibs.useLegacyPackaging = false
     }
+
+    // TDLib (Telegram's official library), built by android/tdlib/build.sh; arm64 phones only.
+    // On other phones the library isn't there and everything goes through TeleStore, as before.
+    sourceSets["main"].jniLibs.srcDir("../tdlib/out/jniLibs")
 }
 
 kotlin {
@@ -61,6 +67,8 @@ kotlin {
 
 dependencies {
     implementation(project(":core"))
+    // TDLib's Java side (Client, TdApi), compiled by android/tdlib/build.sh
+    implementation(files("../tdlib/out/tdlib.jar"))
     implementation(libs.kotlinx.coroutines.android)
 
     implementation(libs.androidx.core.ktx)

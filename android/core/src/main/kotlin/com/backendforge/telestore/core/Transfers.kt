@@ -187,6 +187,9 @@ interface ChunkSource {
 
     /** Reads exactly [length] bytes at [offset] into [buffer]. */
     fun read(offset: Long, length: Int, buffer: ByteArray)
+
+    /** The file's own path when it can be read directly (TDLib then sends it without a copy), else null. */
+    val localPath: String? get() = null
 }
 
 /**

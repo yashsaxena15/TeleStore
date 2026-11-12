@@ -99,7 +99,8 @@ class VideoViewModel(private val container: AppContainer) : ViewModel() {
 
     val player: ExoPlayer = ExoPlayer.Builder(container.context)
         // Reads downloaded copies (content://) as well as the server (through the app's own client)
-        .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(container.context, OkHttpDataSource.Factory(container.api().http))))
+        .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(container.context,
+            com.backendforge.telestore.telegram.DirectOrHttpDataSource.Factory(container.telegramFiles, OkHttpDataSource.Factory(container.api().http)))))
         .setAudioAttributes(
             AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
             /* handleAudioFocus = */ true, // pauses the music player while a video plays

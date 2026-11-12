@@ -29,7 +29,9 @@ class PlaybackService : MediaSessionService() {
         super.onCreate()
         val container = (application as TeleStoreApplication).container
         // The app's own client: it adds the sign-in token and shares connections
-        val dataSource = DefaultDataSource.Factory(this, OkHttpDataSource.Factory(container.api().http)) // + downloaded copies
+        // Your own songs straight from Telegram when that's on (else, and for shared songs, from TeleStore)
+        val dataSource = DefaultDataSource.Factory(this, com.backendforge.telestore.telegram.DirectOrHttpDataSource.Factory(
+            container.telegramFiles, OkHttpDataSource.Factory(container.api().http))) // + downloaded copies
         val player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
             .setAudioAttributes(

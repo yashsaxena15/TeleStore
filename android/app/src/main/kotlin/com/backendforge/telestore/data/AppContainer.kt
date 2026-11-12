@@ -71,10 +71,22 @@ class AppContainer(val context: Context) {
     val playlists: com.backendforge.telestore.ui.playlists.PlaylistStore by lazy {
         com.backendforge.telestore.ui.playlists.PlaylistStore({ api() }, scope)
     }
+    /** The phone's own Telegram account (TDLib), for files straight from Telegram. */
+    val telegram by lazy { com.backendforge.telestore.telegram.TelegramAccount(context.applicationContext) }
+
+    /** Your own files straight from Telegram, for the players and downloads. */
+    val telegramFiles by lazy { com.backendforge.telestore.telegram.TelegramFiles(this) }
+
     private var musicStarted = false
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     init {
+        // Telegram on this phone starts with the app once it has been signed in here
+        scope.launch {
+            session.state.collect {
+                if (it != null && settings.telegramUsed) runCatching { startTelegram() }
+            }
+        }
         // Signing out stops the music (its stream needs the token that just ended)
         scope.launch {
             session.state.collect {
@@ -94,6 +106,11 @@ class AppContainer(val context: Context) {
                     unreadNotifications.value = 0
                     features.value = com.backendforge.telestore.core.Features()
                     protection.clear()
+                    // Telegram on this phone belongs to the account too: signing out of TeleStore ends it
+                    if (settings.telegramUsed) {
+                        settings.telegramUsed = false
+                        launch { runCatching { telegram.signOut() } }
+                    }
                 }
             }
         }
@@ -125,6 +142,18 @@ class AppContainer(val context: Context) {
             }
             .build()
     }
+
+    /** Starts Telegram on this phone with the server's Telegram app ID (a saved session signs in by itself). */
+    suspend fun startTelegram() {
+        if (!telegram.available) {
+            telegram.start(com.backendforge.telestore.core.DirectConfig(0, ""))
+            return
+        }
+        telegram.start(api().directConfig())
+    }
+
+    /** Whether your own files go straight between this phone and Telegram right now. */
+    val telegramDirect: Boolean get() = settings.telegramDirect && settings.telegramUsed && telegram.isReady
 
     /** The API for the signed-in server; a 401 anywhere signs the app out. */
     fun api(): TeleStoreApi {

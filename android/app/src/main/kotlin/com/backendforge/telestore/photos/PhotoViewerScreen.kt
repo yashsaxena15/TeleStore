@@ -547,7 +547,8 @@ private fun VideoPage(url: String, api: TeleStoreApi, active: Boolean, showContr
     val context = LocalContext.current
     val player = remember(url) {
         ExoPlayer.Builder(context)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(context, OkHttpDataSource.Factory(api.http))))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(context, com.backendforge.telestore.telegram.DirectOrHttpDataSource.Factory(
+                (context.applicationContext as com.backendforge.telestore.TeleStoreApplication).container.telegramFiles, OkHttpDataSource.Factory(api.http)))))
             .setLoadControl(PlayerMemory.video())
             .build()
             .apply {

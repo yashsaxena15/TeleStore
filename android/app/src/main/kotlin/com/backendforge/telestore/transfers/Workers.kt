@@ -143,6 +143,33 @@ class UploadWorker(context: Context, params: WorkerParameters) : TransferWorker(
             throw ApiException(0, "This file can't be opened any more. Pick it again to upload it.")
         }
         val file = source.use {
+            if (transfer.uploadId == null && transfer.shareId == null && container.telegramDirect &&
+                com.backendforge.telestore.core.DirectRules.canUploadDirect(folder, true, true, transfer.size)
+            ) {
+                // Straight to Telegram with the phone's own account (no server bandwidth); the server's way if that fails
+                val direct = try {
+                    com.backendforge.telestore.core.DirectUploader(
+                        api = container.api(),
+                        sender = com.backendforge.telestore.telegram.TdlibSender(container.telegram, applicationContext.cacheDir),
+                        source = it,
+                        name = transfer.name,
+                        size = transfer.size,
+                        folder = folder,
+                        sentBefore = transfer.directParts,
+                        onPartSent = { index, id -> store.update(transferId) { t -> t.copy(directParts = t.directParts + (index to id)) } },
+                        onProgress = { sent -> store.update(transferId, force = false) { t -> t.copy(done = sent) } },
+                        onSaving = { store.update(transferId) { t -> t.copy(status = TransferStatus.SAVING, done = t.size, speedBps = 0) } },
+                    ).upload()?.let { id -> com.backendforge.telestore.core.FileItem(id = id, name = transfer.name) } ?: DIRECT_SAVED
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: UnauthorizedException) {
+                    throw e
+                } catch (e: Exception) {
+                    android.util.Log.w("TeleStore", "Straight to Telegram failed; uploading through TeleStore", e)
+                    null
+                }
+                if (direct != null) return@use direct.takeIf { d -> d !== DIRECT_SAVED }
+            }
             ChunkedUploader(
                 api = container.api(),
                 source = it,
@@ -159,6 +186,9 @@ class UploadWorker(context: Context, params: WorkerParameters) : TransferWorker(
         store.notifyUploaded(folder)
     }
 }
+
+/** A direct upload saved without the server saying which file it became. */
+private val DIRECT_SAVED = com.backendforge.telestore.core.FileItem(id = "", name = "")
 
 class DownloadWorker(context: Context, params: WorkerParameters) : TransferWorker(context, params) {
     override suspend fun run(transfer: PhoneTransfer) {
@@ -180,6 +210,30 @@ class DownloadWorker(context: Context, params: WorkerParameters) : TransferWorke
         ).also { created ->
             store.update(transferId) { it.copy(localUri = created.toString()) }
         }
+        // Your own file straight from Telegram (no server bandwidth), continuing a partial one; else from TeleStore
+        val viaTelegram = transfer.remotePath == null && transfer.fileId != null && container.telegramDirect &&
+            (transfer.etag == null || transfer.etag.startsWith(TG_TAG))
+        if (viaTelegram) {
+            val target = UriDownloadTarget(applicationContext, localUri, transfer.size)
+            val total = try {
+                store.update(transferId) { it.copy(etag = TG_TAG) }
+                container.telegramFiles.download(transfer.fileId!!, target) { done, size ->
+                    store.update(transferId, force = false) { it.copy(done = done, size = size) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (target.length() > 0) throw e // part of it came from Telegram: the retry continues there
+                android.util.Log.w("TeleStore", "Straight from Telegram failed; downloading through TeleStore", e)
+                store.update(transferId) { it.copy(etag = null) }
+                null
+            }
+            if (total != null) {
+                if (!transfer.offline) DownloadFiles.publish(applicationContext, localUri)
+                store.update(transferId) { it.copy(status = TransferStatus.DONE, done = total, size = total, speedBps = 0) }
+                return
+            }
+        }
         val result = ResumableDownloader(api.http).download(
             url = url,
             target = UriDownloadTarget(applicationContext, localUri, transfer.size),
@@ -190,6 +244,11 @@ class DownloadWorker(context: Context, params: WorkerParameters) : TransferWorke
         store.update(transferId) { it.copy(etag = result.etag) }
         if (!transfer.offline) DownloadFiles.publish(applicationContext, localUri)
         store.update(transferId) { it.copy(status = TransferStatus.DONE, done = result.totalBytes, size = result.totalBytes, speedBps = 0) }
+    }
+
+    private companion object {
+        /** Marks a download that comes straight from Telegram (it continues there after a break). */
+        const val TG_TAG = "telegram"
     }
 
     private fun mimeOf(name: String): String? =
