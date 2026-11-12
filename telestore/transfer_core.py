@@ -152,6 +152,37 @@ async def retry_after_flood(send: Callable[[], Awaitable[T]], retries: int = FLO
     raise RuntimeError("unreachable")
 
 
+# ── Speed caps (a worker machine's own, set in its settings file) ─────────────
+
+def kb_setting(name: str) -> int:
+    """A speed setting in KB/s from the environment: missing, empty, 0 or not a number means no cap (0)."""
+    try:
+        return max(0, int(float(os.getenv(name, "") or 0)))
+    except ValueError:
+        return 0
+
+
+class RateLimit:
+    """Keeps a flow of bytes under [bytes_per_second] (0 = no cap), shared by every caller in one event
+    loop: each caller books the time its bytes take at that speed and waits for its booking. Up to one
+    second of unused time is kept as credit, so a short pause doesn't make the average fall below the cap."""
+
+    BURST_SECONDS = 1.0
+
+    def __init__(self, bytes_per_second: int):
+        self.rate = max(0, int(bytes_per_second))
+        self._free_at = 0.0
+
+    async def take(self, size: int) -> None:
+        if self.rate <= 0 or size <= 0:
+            return
+        now = time.monotonic()
+        self._free_at = max(self._free_at, now - self.BURST_SECONDS) + size / self.rate
+        wait = self._free_at - now
+        if wait > 0:
+            await asyncio.sleep(wait)
+
+
 # ── Torrents (aria2c) ─────────────────────────────────────────────────────────
 
 TORRENT_TRACKERS = (
@@ -176,8 +207,10 @@ TORRENT_TRACKERS = (
 TORRENT_UPLOAD_LIMIT = "1K"
 
 
-def aria2_args(dht_dir: str) -> list:
-    """aria2c's command line before the download's own options (the same on every machine)."""
+def aria2_args(dht_dir: str, download_limit_kb: int = 0) -> list:
+    """aria2c's command line before the download's own options (the same on every machine; a worker
+    can add its own download speed cap, in KB/s, 0 = none)."""
+    limit = [f"--max-overall-download-limit={download_limit_kb}K"] if download_limit_kb > 0 else []
     return [
         "aria2c",
         "--enable-dht=true",
@@ -192,12 +225,12 @@ def aria2_args(dht_dir: str) -> list:
         f"--bt-tracker={','.join(TORRENT_TRACKERS)}",
         f"--dht-file-path={dht_dir.rstrip('/')}/dht.dat",
         f"--dht-file-path6={dht_dir.rstrip('/')}/dht6.dat",
-    ]
+    ] + limit
 
 
-def aria2_file_args(dht_dir: str, torrent_path: str, file_index: int, work_dir: str) -> list:
+def aria2_file_args(dht_dir: str, torrent_path: str, file_index: int, work_dir: str, download_limit_kb: int = 0) -> list:
     """One file of a torrent (its 1-based index), into work_dir; a second run picks up where it was."""
-    return aria2_args(dht_dir) + [
+    return aria2_args(dht_dir, download_limit_kb) + [
         f"--select-file={file_index}",
         f"--dir={work_dir}",
         "--summary-interval=1",

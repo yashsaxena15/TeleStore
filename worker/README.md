@@ -68,6 +68,47 @@ Logs are kept in `logs/worker.log` next to them (5 files of 10 MB), across resta
 
 ---
 
+## Speed caps for one machine
+
+Each worker machine can have its own caps, in its settings file (`/etc/tele_worker.env`, or the
+file a machine without systemd loads, below). Restart the worker after changing them.
+
+| Setting | Caps | Empty or 0 |
+|---|---|---|
+| `WORKER_DOWNLOAD_LIMIT_KB` | every download on this machine: web links, Google Drive, torrents (libtorrent and aria2c) | no cap |
+| `WORKER_UPLOAD_LIMIT_KB` | uploads to Telegram | no cap |
+| `TORRENT_UPLOAD_LIMIT_KB` | uploads to other torrent peers while downloading | 1 KB/s |
+
+For example, 2 MB/s down and 1 MB/s up:
+```
+WORKER_DOWNLOAD_LIMIT_KB=2048
+WORKER_UPLOAD_LIMIT_KB=1024
+```
+The worker writes its caps in its log when it starts ("Speed caps: ..."). A machine without these
+lines works at full speed, as before. They only apply to worker machines, not the main server.
+
+---
+
+## A worker without systemd (an Android phone with a chroot Ubuntu)
+
+`setup_worker.sh` ends by making a systemd service, which a chroot (for example chroot-distro on
+a phone) doesn't have. Do its steps by hand instead:
+
+1. `apt install -y python3 python3-venv python3-pip python3-dev build-essential aria2 curl tmux`
+2. Put `worker.py`, `requirements.txt`, `transfer_core.py` and `torrent_engine.py` in
+   `/root/tele_worker/`, then `python3 -m venv venv && ./venv/bin/pip install -r requirements.txt`.
+3. Write the settings to `/root/tele_worker/worker.env` (`chmod 600`): `MASTER_URL`, `WORKER_KEY`,
+   a `WORKER_ID` of its own, `WORK_DIR=/root/tele_worker/cache`, and any speed caps above.
+4. Start it with a loop that restarts it, as systemd would, for example in `tmux`:
+   ```bash
+   cd /root/tele_worker && set -a && . ./worker.env && set +a
+   while true; do ./venv/bin/python3 worker.py >> logs/console.log 2>&1; sleep 5; done
+   ```
+5. On the phone: no battery restrictions for the app that runs the chroot, a wake lock
+   (`termux-wake-lock`), Wi-Fi kept on while asleep, and about 5 GB free for torrent parts.
+
+---
+
 ## How to Add a Worker VM (3 Simple Steps)
 
 ### Step 1: Ensure Master has a Secret Key
