@@ -64,6 +64,7 @@ def _rounded(image: QImage, size: int) -> QPixmap:
 class Browser(QWidget):
     open_item = Signal(object, list)  # the item, and the items around it (for next / previous)
     download_item = Signal(object)
+    action = Signal(str, list)  # rename, move, star, unstar, share, trash, restore, delete, empty-trash
     files_dropped = Signal(list)  # local paths, to upload here
     location_changed = Signal(object)
 
@@ -157,7 +158,12 @@ class Browser(QWidget):
         self.view = view
         self.set_view(view, reload=False)
         self.thumbs.signals.loaded.connect(self._thumb_loaded)
-        for keys, slot in ((QKeySequence.Back, self.go_back), (Qt.Key_Backspace, self.go_back),
+        self.empty_btn = QPushButton("Empty trash")
+        self.empty_btn.clicked.connect(lambda: self.action.emit("empty-trash", []))
+        self.empty_btn.hide()
+        header.insertWidget(3, self.empty_btn)  # after the stretch, before search
+        for keys, slot in ((Qt.Key_F2, lambda: self._key_action("rename")), (QKeySequence.Delete, lambda: self._key_action("trash")),
+                           (QKeySequence.Back, self.go_back), (Qt.Key_Backspace, self.go_back),
                            (QKeySequence.Refresh, self.reload), (QKeySequence.Find, self.search.setFocus)):
             QShortcut(QKeySequence(keys), self, activated=slot)
 
@@ -178,6 +184,7 @@ class Browser(QWidget):
         self.back.setEnabled(bool(self.history))
         if loc.kind != "search":
             self.search.clear()
+        self.empty_btn.setVisible(loc.kind == "trash")
         self._show_crumbs()
         self.location_changed.emit(loc)
         self.reload()
@@ -368,14 +375,49 @@ class Browser(QWidget):
             return
         menu = QMenu(self)
         first = items[0]
-        if len(items) == 1:
-            menu.addAction(theme.icon("external", self.p.text, 16), "Open", lambda: self._activate(first))
+        own = not any(i.share_id for i in items)
         files = [i for i in items if not i.is_folder]
-        if files and self.loc.kind != "trash":
-            menu.addAction(theme.icon("download", self.p.text, 16), "Download…" if len(files) == 1 else f"Download {len(files)} files…",
-                           lambda: [self.download_item.emit(i) for i in files])
+
+        def add(ico, text, fn, shortcut=None):
+            a = menu.addAction(theme.icon(ico, self.p.text, 16), text, fn)
+            if shortcut:
+                a.setShortcut(QKeySequence(shortcut))
+            return a
+
+        if self.loc.kind == "trash":
+            add("refresh", "Restore", lambda: self.action.emit("restore", items))
+            menu.addSeparator()
+            add("trash", "Delete forever", lambda: self.action.emit("delete", items))
+        else:
+            if len(items) == 1:
+                add("external", "Open", lambda: self._activate(first))
+            if files:
+                add("download", "Download…" if len(files) == 1 else f"Download {len(files)} files…",
+                    lambda: [self.download_item.emit(i) for i in files])
+            if own:
+                menu.addSeparator()
+                if len(items) == 1:
+                    add("settings", "Rename", lambda: self.action.emit("rename", items), "F2")
+                add("folder-up", "Move to…", lambda: self.action.emit("move", items))
+                starred = all(i.starred for i in items)
+                add("star", "Remove from Starred" if starred else "Add to Starred",
+                    lambda: self.action.emit("unstar" if starred else "star", items))
+                if len(items) == 1:
+                    add("users", "Share…", lambda: self.action.emit("share", items))
+                menu.addSeparator()
+                add("trash", "Move to Trash", lambda: self.action.emit("trash", items), "Del")
         if menu.actions():
             menu.exec(view.viewport().mapToGlobal(pos))
+
+    def _key_action(self, name: str) -> None:
+        items = self.selected()
+        if not items or any(i.share_id for i in items):
+            return
+        if self.loc.kind == "trash":
+            if name == "trash":
+                self.action.emit("delete", items)
+        elif name != "rename" or len(items) == 1:
+            self.action.emit(name, items)
 
     # ── Dropping files to upload here ──
     def dragEnterEvent(self, event) -> None:

@@ -11,7 +11,7 @@ from telestore_desktop import DEFAULT_SERVER, paths
 class Settings:
     server: str = DEFAULT_SERVER
     username: str = ""
-    parallel: int = 3  # parts sent to Telegram at once (each about 5 MB/s)
+    parallel: int = 2  # files or parts sent at once (each over several connections)
     speed_limit_kb: int = 0  # 0 = no cap
     last_folder: str = "/Home"
     theme: str = "system"  # system (like Windows), light or dark
@@ -26,7 +26,7 @@ class Settings:
             raw = {}
         known = {f.name for f in fields(cls)}
         s = cls(**{k: v for k, v in raw.items() if k in known})
-        s.parallel = min(8, max(1, int(s.parallel or 3)))
+        s.parallel = min(8, max(1, int(s.parallel or 2)))
         s.speed_limit_kb = max(0, int(s.speed_limit_kb or 0))
         s.theme = s.theme if s.theme in ("system", "light", "dark") else "system"
         s.view = s.view if s.view in ("grid", "list") else "grid"

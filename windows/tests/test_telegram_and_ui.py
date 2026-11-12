@@ -159,6 +159,57 @@ class FakeBrowseApi:
         self.made.append((name, parent))
         return {}
 
+    calls = None
+
+    def _log(self, *call):
+        if self.calls is None:
+            self.calls = []
+        self.calls.append(call)
+        return {}
+
+    def rename(self, file_id, new_name):
+        return self._log("rename", file_id, new_name)
+
+    def move(self, file_id, target):
+        return self._log("move", file_id, target)
+
+    def star(self, file_id, starred):
+        return self._log("star", file_id, starred)
+
+    def trash(self, file_id):
+        if file_id == "locked":
+            from telestore_desktop.api import ApiError
+            raise ApiError("This item is protected from deletion.", 423)
+        return self._log("trash", file_id)
+
+    def restore(self, file_id):
+        return self._log("restore", file_id)
+
+    def delete_forever(self, file_id):
+        return self._log("delete", file_id)
+
+    def empty_trash(self):
+        return self._log("empty") or {"message": "Trash emptied"}
+
+    def folders(self, path):
+        return [{"file_name": "Movies", "file_type": "folder"}] if path == "/Home" else []
+
+    def share_view(self, item_id):
+        link = {"enabled": True, "token": "tok1", "state": "active"} if ("link", item_id, True) in (self.calls or []) else None
+        return {"members": [{"user_id": 5, "username": "bob", "name": "Bob", "role": "viewer"}], "link": link}
+
+    def share_link(self, item_id, enabled):
+        return self._log("link", item_id, enabled)
+
+    def share_add(self, item_id, who, role="viewer"):
+        return self._log("add", item_id, who, role)
+
+    def share_remove(self, item_id, user_id):
+        return self._log("remove", item_id, user_id)
+
+    def link_address(self, token):
+        return f"https://ts.example/s/{token}"
+
     def thumbnail_url(self, item):
         return None
 
@@ -360,3 +411,109 @@ def test_other_files_are_downloaded_then_opened(qapp, monkeypatch, tmp_path):
     monkeypatch.setattr(viewers, "open_with_windows", lambda path: opened.append(path))
     viewers.open_item(None, SimpleNamespace(), None, None, Item(id="abcdef123", name="Report: Q3?.pdf", kind="pdf", size=5), [])
     assert opened == saved and saved[0].endswith("abcdef12_Report_ Q3_.pdf")
+
+
+# ── Phase 9: right-click actions ──
+
+def _ready(qapp, window):
+    _pump(qapp, lambda: window.browser.grid.count() == 4)
+    return [window.browser.grid.item(i).data(Qt.UserRole) for i in range(4)]
+
+
+def _calls(window):
+    return window.s.api.calls or []
+
+
+def test_rename(qapp, window, monkeypatch):
+    from telestore_desktop.ui import dialogs
+    items = _ready(qapp, window)
+    monkeypatch.setattr(dialogs, "ask_text", lambda *a, **k: "holiday.mp4")
+    window.item_action("rename", [items[1]])
+    _pump(qapp, lambda: ("rename", "a1", "holiday.mp4") in _calls(window))
+
+
+def test_move_star_trash_restore_delete(qapp, window, monkeypatch):
+    from telestore_desktop.ui import actions, dialogs
+    items = _ready(qapp, window)
+    monkeypatch.setattr(dialogs, "confirm", lambda *a: True)
+    monkeypatch.setattr(actions.MoveDialog, "exec", lambda self: True)
+    monkeypatch.setattr(actions.MoveDialog, "target", lambda self: "/Home/Movies")
+    window.item_action("move", items[1:3])
+    window.item_action("star", [items[2]])
+    window.item_action("trash", [items[3]])
+    window.item_action("restore", [items[3]])
+    window.item_action("delete", [items[3]])
+    window.item_action("empty-trash", [])
+    want = [("move", "a1", "/Home/Movies"), ("move", "a2", "/Home/Movies"), ("star", "a2", True), ("trash", "a3"),
+            ("restore", "a3"), ("delete", "a3"), ("empty",)]
+    _pump(qapp, lambda: all(w in _calls(window) for w in want))
+
+
+def test_nothing_happens_without_confirming(qapp, window, monkeypatch):
+    from telestore_desktop.ui import dialogs
+    items = _ready(qapp, window)
+    monkeypatch.setattr(dialogs, "confirm", lambda *a: False)
+    window.item_action("trash", [items[1]])
+    window.item_action("delete", [items[1]])
+    for _ in range(20):
+        qapp.processEvents()
+        time.sleep(0.01)
+    assert _calls(window) == []
+
+
+def test_a_protected_item_says_why(qapp, window, monkeypatch):
+    from telestore_desktop.items import Item
+    from telestore_desktop.ui import dialogs
+    told = []
+    monkeypatch.setattr(dialogs, "confirm", lambda *a: True)
+    monkeypatch.setattr(dialogs, "info", lambda parent, title, text: told.append(text))
+    window.item_action("trash", [Item(id="locked", name="Taxes", kind="folder")])
+    _pump(qapp, lambda: told)
+    assert "protected" in told[0]
+
+
+def test_keys_f2_and_delete(qapp, window, monkeypatch):
+    from telestore_desktop.ui import dialogs
+    monkeypatch.setattr(dialogs, "confirm", lambda *a: False)  # Delete asks first
+    monkeypatch.setattr(dialogs, "ask_text", lambda *a, **k: "")  # F2 asks for the name
+    items = _ready(qapp, window)
+    got = []
+    window.browser.action.connect(lambda name, its: got.append((name, [i.id for i in its])))
+    window.browser.grid.item(1).setSelected(True)
+    window.browser._key_action("rename")
+    window.browser._key_action("trash")
+    assert got == [("rename", ["a1"]), ("trash", ["a1"])]
+    window.open_place("trash")
+    window.browser.items = items
+    assert window.browser.empty_btn.isVisibleTo(window)
+
+
+def test_move_dialog_lists_folders_but_not_the_ones_moving(qapp):
+    from telestore_desktop.ui import theme
+    from telestore_desktop.ui.actions import MoveDialog
+    from telestore_desktop.ui.runner import Runner
+    api = SimpleNamespace(folders=lambda path: [{"file_name": "Movies"}, {"file_name": "Music"}] if path == "/Home" else [])
+    d = MoveDialog(api, Runner(), theme.LIGHT, 1, exclude=["/Home/Music"])
+    home = d.tree.topLevelItem(0)
+    _pump(qapp, lambda: home.childCount() == 1)
+    assert home.child(0).text(0) == "Movies"
+    d.tree.setCurrentItem(home.child(0))
+    assert d.target() == "/Home/Movies"
+
+
+def test_share_dialog(qapp, window):
+    from telestore_desktop.items import Item
+    from telestore_desktop.ui.actions import ShareDialog
+    d = ShareDialog(window.s.api, window.s.runner, Item(id="a1", name="clip.mp4", kind="video"))
+    _pump(qapp, lambda: d.people.count() == 1 and "Bob" in d.people.item(0).text())
+    assert not d.link_on.isChecked() and not d.copy.isEnabled()
+    d.link_on.setChecked(True)
+    _pump(qapp, lambda: d.link.text() == "https://ts.example/s/tok1")
+    d.who.setText("carol")
+    d.role.setCurrentIndex(1)
+    d._add()
+    _pump(qapp, lambda: ("add", "a1", "carol", "editor") in _calls(window))
+    d.people.setCurrentRow(0)
+    d._remove()
+    _pump(qapp, lambda: ("remove", "a1", 5) in _calls(window))
+    d.close()

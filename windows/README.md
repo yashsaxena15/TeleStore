@@ -17,6 +17,9 @@ It looks and works like the TeleStore website, in light or dark (like Windows, o
   player (Space, ← →, F for full screen), anything else is downloaded and opened with its Windows app.
   Right-click › **Download…** saves a copy. In this version these come through the TeleStore server, as on
   the website.
+- **Right-click** (or the keys): Open, Download…, Rename (F2), Move to…, Add to / Remove from Starred,
+  Share… (people as Viewer or Editor, and a link anyone can open), Move to Trash (Delete). In Trash:
+  Restore, Delete forever, and **Empty trash** at the top. Protected items say why they can't be deleted.
 - **Uploads go into the folder you're looking at**: drop files or folders on the window, or New › Upload.
   A panel in the bottom corner shows each file's progress, speed and time left, with pause, resume and
   cancel; it hides once everything is done.
@@ -45,9 +48,12 @@ next start) sends only the parts still missing. A file that changed since it was
 
 ## Speed
 
-Telegram takes one file or part at about 5 MB/s, so the app sends several parts at once (3).
+Telegram's own client library sends one file over one connection, 4 pieces of 512 KB at a time,
+about 5 MB/s whatever the line. The app sends a file over a few connections at once (about 12
+pieces in flight, `fast_upload.py`), so one file can use most of a fast home connection, and two
+files or parts go at the same time. Each piece is sent again if it fails; anything unexpected makes
+that file go the library's usual way. When Telegram asks to slow down, the app waits and continues.
 *Settings → Limit upload speed* caps the total.
-When Telegram asks to slow down, the app waits and continues by itself.
 
 ## Files on this PC (`%APPDATA%\TeleStore`)
 
