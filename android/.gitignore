@@ -15,3 +15,7 @@ captures/
 !app/src/test/
 !app/src/test/**
 
+
+# TDLib, built by android/tdlib/build.sh (CI caches it)
+tdlib/td/
+tdlib/out/
