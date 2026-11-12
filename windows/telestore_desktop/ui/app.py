@@ -15,7 +15,7 @@ from telestore_desktop.api import ApiError, TeleStoreApi
 from telestore_desktop.engine import UploadEngine
 from telestore_desktop.jobs import JobStore
 from telestore_desktop.settings import Settings
-from telestore_desktop.ui import dialogs, thumbs
+from telestore_desktop.ui import dialogs, theme, thumbs
 from telestore_desktop.ui.main_window import MainWindow
 from telestore_desktop.ui.runner import Runner
 
@@ -56,6 +56,8 @@ class App:
         self.qt.setStyle("Fusion")
         self.runner = Runner()
         self.settings = Settings.load()
+        self.palette = theme.pick(self.settings.theme)
+        self.qt.setStyleSheet(theme.stylesheet(self.palette))
         self.window = None
 
     def telestore(self):
@@ -104,9 +106,8 @@ class App:
         engine = UploadEngine(api, account, store, self.settings.parallel, self.settings.speed_limit_kb, thumbs.make)
         engine.start()
         engine.ready.wait(5)
-        who = f"Signed in as {self.settings.username or 'you'} · uploads go straight to Telegram"
         state = SimpleNamespace(api=api, engine=engine, store=store, settings=self.settings, runner=self.runner,
-                                who=who, sign_out=self.sign_out)
+                                username=self.settings.username, palette=self.palette, sign_out=self.sign_out)
         self.window = MainWindow(state)
         self.window.show()
         return self.qt.exec()
@@ -125,7 +126,8 @@ class App:
                 self.window.s.api.logout()
             finally:
                 secure_store.forget(AUTH_FILE)
-        self.window.timer.stop()
+        self.window.status_timer.stop()
+        self.window.panel.timer.stop()
         self.qt.quit()
 
 

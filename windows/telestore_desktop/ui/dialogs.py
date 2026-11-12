@@ -1,8 +1,9 @@
 """Sign-in to TeleStore, sign-in to Telegram, and the settings."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QMessageBox,
-                               QPushButton, QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QInputDialog,
+                               QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox, QStackedWidget, QVBoxLayout,
+                               QWidget)
 
 from telestore_desktop.api import ApiError, TeleStoreApi
 from telestore_desktop.telegram import SignIn
@@ -11,7 +12,7 @@ from telestore_desktop.telegram import SignIn
 def _note(text: str) -> QLabel:
     label = QLabel(text)
     label.setWordWrap(True)
-    label.setStyleSheet("color: palette(mid);")
+    label.setObjectName("muted")
     return label
 
 
@@ -36,6 +37,7 @@ class LoginDialog(QDialog):
         form.addRow("Username", self.username)
         form.addRow("Password", self.password)
         self.button = QPushButton("Sign in")
+        self.button.setObjectName("primaryButton")
         self.button.setDefault(True)
         self.button.clicked.connect(self._sign_in)
         layout = QVBoxLayout(self)
@@ -96,6 +98,7 @@ class TelegramDialog(QDialog):
         self.error.setStyleSheet("color: #c62828;")
         self.error.setWordWrap(True)
         self.button = QPushButton("Send code")
+        self.button.setObjectName("primaryButton")
         self.button.setDefault(True)
         self.button.clicked.connect(self._next)
         layout = QVBoxLayout(self)
@@ -149,32 +152,61 @@ class TelegramDialog(QDialog):
 
 
 class SettingsDialog(QDialog):
+    """One simple page: upload speed, theme, and signing out."""
+
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.parallel = QSpinBox()
-        self.parallel.setRange(1, 8)
-        self.parallel.setValue(settings.parallel)
+        self.setMinimumWidth(440)
+        self.sign_out = None  # "telegram" or "telestore" when chosen
+        self.limit_on = QCheckBox("Limit upload speed")
         self.limit = QSpinBox()
-        self.limit.setRange(0, 1_000_000)
-        self.limit.setSuffix(" KB/s")
-        self.limit.setSpecialValueText("No cap")
-        self.limit.setValue(settings.speed_limit_kb)
-        self.sign_out_tg = QCheckBox("Sign out of Telegram on this PC")
-        self.sign_out_ts = QCheckBox("Sign out of TeleStore on this PC")
+        self.limit.setRange(1, 1000)
+        self.limit.setSuffix(" MB/s")
+        self.limit.setMinimumWidth(110)
+        on = settings.speed_limit_kb > 0
+        self.limit_on.setChecked(on)
+        self.limit.setValue(max(1, round(settings.speed_limit_kb / 1024)) if on else 5)
+        self.limit.setEnabled(on)
+        self.limit_on.toggled.connect(self.limit.setEnabled)
+        self.theme = QComboBox()
+        for key, text in (("system", "Like Windows"), ("light", "Light"), ("dark", "Dark")):
+            self.theme.addItem(text, key)
+        self.theme.setCurrentIndex(max(0, self.theme.findData(settings.theme)))
+        speed = QHBoxLayout()
+        speed.addWidget(self.limit_on)
+        speed.addWidget(self.limit)
+        speed.addStretch()
         form = QFormLayout()
-        form.addRow("Parts sent at once", self.parallel)
-        form.addRow("Upload speed cap", self.limit)
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        form.addRow("Uploads", speed)
+        form.addRow("Theme", self.theme)
+        out_tg = QPushButton("Sign out of Telegram")
+        out_tg.clicked.connect(lambda: self._out("telegram"))
+        out_ts = QPushButton("Sign out of TeleStore")
+        out_ts.clicked.connect(lambda: self._out("telestore"))
+        outs = QHBoxLayout()
+        outs.addWidget(out_tg)
+        outs.addWidget(out_ts)
+        outs.addStretch()
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
         layout.addLayout(form)
-        layout.addWidget(_note("Each part goes to Telegram at about 5 MB/s, so 3–4 at once uses most home connections. "
-                               "Big files are cut into 1.95 GB parts."))
-        layout.addWidget(self.sign_out_tg)
-        layout.addWidget(self.sign_out_ts)
+        layout.addWidget(_note("Uploads go straight from this PC to your Telegram storage channel. "
+                               "Without a limit they use as much of your connection as Telegram allows."))
+        layout.addSpacing(8)
+        layout.addWidget(_note("Account"))
+        layout.addLayout(outs)
+        layout.addSpacing(8)
         layout.addWidget(buttons)
+
+    def _out(self, which: str) -> None:
+        self.sign_out = which
+        self.accept()
+
+    def speed_limit_kb(self) -> int:
+        return self.limit.value() * 1024 if self.limit_on.isChecked() else 0
 
 
 def confirm(parent, title: str, text: str) -> bool:
@@ -187,3 +219,8 @@ def info(parent, title: str, text: str) -> None:
     box.setText(text)
     box.setTextInteractionFlags(Qt.TextSelectableByMouse)
     box.exec()
+
+
+def ask_text(parent, title: str, label: str, value: str = "") -> str:
+    text, ok = QInputDialog.getText(parent, title, label, QLineEdit.Normal, value)
+    return text.strip() if ok else ""
