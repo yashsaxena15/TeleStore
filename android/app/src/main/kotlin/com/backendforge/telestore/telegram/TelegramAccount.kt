@@ -30,6 +30,13 @@ sealed interface TgState {
     data object SignedOut : TgState
     data class WaitCode(val phone: String, val via: String) : TgState
     data class WaitPassword(val hint: String) : TgState
+
+    /**
+     * Signing in by QR code: [link] (tg://login?token=…) shown as a QR code, scanned on a phone where
+     * Telegram is signed in (Settings › Devices › Link Desktop Device). Telegram renews it every half
+     * minute or so; each new one arrives here.
+     */
+    data class WaitQr(val link: String) : TgState
     data class Ready(val name: String, val userId: Long) : TgState
 
     /** A step this app can't do (a new Telegram account, an email check): finish it in Telegram first. */
@@ -217,6 +224,7 @@ class TelegramAccount(private val context: Context) {
             is TdApi.AuthorizationStateWaitPhoneNumber -> _state.value = TgState.SignedOut
             is TdApi.AuthorizationStateWaitCode -> _state.value = TgState.WaitCode(phone, via(auth.codeInfo?.type))
             is TdApi.AuthorizationStateWaitPassword -> _state.value = TgState.WaitPassword(auth.passwordHint.orEmpty())
+            is TdApi.AuthorizationStateWaitOtherDeviceConfirmation -> _state.value = TgState.WaitQr(auth.link)
             is TdApi.AuthorizationStateReady -> scope.launch {
                 val me = runCatching { send(TdApi.GetMe()) }.getOrNull()
                 val name = listOfNotNull(me?.firstName, me?.lastName).joinToString(" ").ifBlank { "your Telegram account" }
@@ -276,12 +284,25 @@ class TelegramAccount(private val context: Context) {
         send(TdApi.SetAuthenticationPhoneNumber(phone, TdApi.PhoneNumberAuthenticationSettings().apply { authenticationTokens = arrayOf() }))
     }
 
+    /**
+     * Signs in by QR code instead of a phone number: no number or code is typed on this phone, so it
+     * suits someone else's phone. The QR code comes as [TgState.WaitQr].
+     */
+    suspend fun startQr() {
+        send(TdApi.RequestQrCodeAuthentication(longArrayOf()))
+    }
+
     suspend fun sendCode(code: String) {
         send(TdApi.CheckAuthenticationCode(code.trim()))
     }
 
     suspend fun sendPassword(password: String) {
         send(TdApi.CheckAuthenticationPassword(password))
+    }
+
+    /** Leaves a half-done sign-in (a QR code showing) and starts again from the choice of QR code or phone number. */
+    suspend fun restartSignIn() {
+        if (client != null && _state.value !is TgState.Ready) runCatching { send(TdApi.LogOut()) }
     }
 
     /** Signs this phone out of Telegram (the session is ended on Telegram's side too). */

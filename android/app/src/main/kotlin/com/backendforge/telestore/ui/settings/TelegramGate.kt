@@ -92,7 +92,7 @@ fun TelegramGate(container: AppContainer, content: @Composable () -> Unit) {
         }
     }
 
-    val needsSetup = !signedInHere || state is TgState.SignedOut || state is TgState.WaitCode ||
+    val needsSetup = !signedInHere || state is TgState.SignedOut || state is TgState.WaitCode || state is TgState.WaitQr ||
         state is TgState.WaitPassword || state is TgState.Unsupported
     if (!needsSetup) {
         content()
