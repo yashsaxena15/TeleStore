@@ -135,7 +135,9 @@ class UploadsPanel(QFrame):
                 self.rows[e.key].update_from(e)
         keys = {e.key for e in entries}
         for key in [k for k in self.rows if k not in keys]:
-            self.rows.pop(key).deleteLater()
+            gone = self.rows.pop(key)
+            gone.hide()
+            gone.deleteLater()
         height = min(300, sum(r.sizeHint().height() for r in self.rows.values()))
         if height and self.scroll.height() != height:
             self.scroll.setFixedHeight(height)

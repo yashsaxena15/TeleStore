@@ -16,7 +16,7 @@ from telestore_desktop.downloads import DownloadManager
 from telestore_desktop.engine import UploadEngine
 from telestore_desktop.jobs import JobStore
 from telestore_desktop.settings import Settings
-from telestore_desktop.ui import dialogs, theme, thumbs
+from telestore_desktop.ui import diagnostics, dialogs, theme, thumbs
 from telestore_desktop.ui.main_window import MainWindow
 from telestore_desktop.ui.runner import Runner
 
@@ -85,6 +85,7 @@ class App:
     def run(self) -> int:
         _logging()
         log.info(f"TeleStore for Windows {__version__} starting")
+        self._watchers = diagnostics.install(self.qt)
         while True:
             try:
                 api = self.telestore()

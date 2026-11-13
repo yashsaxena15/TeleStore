@@ -40,6 +40,7 @@ def _friendly(e: Exception) -> str:
 def _client(api_id: int, api_hash: str, session_string: Optional[str] = None) -> Client:
     return Client("telestore-desktop", api_id=api_id, api_hash=api_hash, session_string=session_string,
                   in_memory=True, no_updates=True, device_model="TeleStore for Windows",
+                  max_concurrent_transmissions=4,  # (the library's own reads; most go through fast_download)
                   app_version=__version__, system_version="Windows")
 
 

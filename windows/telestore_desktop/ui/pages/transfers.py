@@ -36,6 +36,8 @@ class TransfersPage(Page):
         self.server_error = ""
         self.filter = "all"
         self.rows = {}
+        self.seen = {}  # entry key -> the order it first appeared in (rows don't jump around)
+        self.last = {}  # entry key -> what its row shows now
         self.loading_server = False
 
         self.subtitle = QLabel("Uploads, downloads and the server's transfers")
@@ -134,7 +136,9 @@ class TransfersPage(Page):
         out += [from_server(t) for t in self.server_tasks if not t.get("group_id")]
         out += [from_group(gid, g) for gid, g in self.server_groups.items()]
         order = {RUNNING: 0, QUEUED: 1, STOPPED: 2, BROKEN: 3, FINISHED: 4}
-        out.sort(key=lambda e: (order.get(e.status, 5), -e.when))
+        for e in out:
+            self.seen.setdefault(e.key, len(self.seen))
+        out.sort(key=lambda e: (order.get(e.status, 5), self.seen[e.key]))
         return out
 
     def refresh(self) -> None:
@@ -150,15 +154,20 @@ class TransfersPage(Page):
         # Rows are kept and updated in place; the order follows the list
         keys = [e.key for e in shown]
         for key in [k for k in self.rows if k not in keys]:
-            self.rows.pop(key).deleteLater()
+            gone = self.rows.pop(key)
+            self.last.pop(key, None)
+            gone.hide()
+            gone.deleteLater()
         for n, e in enumerate(shown):
             row = self.rows.get(e.key)
+            look = (e.status, round(e.progress, 1), e.line, tuple(e.actions), e.name)
             if row is None:
                 row = TransferRow(e, self.p, show_kind=True)
                 row.act.connect(self._act)
                 self.rows[e.key] = row
-            else:
+            elif self.last.get(e.key) != look:
                 row.update_from(e)
+            self.last[e.key] = look
             if self.list_box.indexOf(row) != n:
                 self.list_box.insertWidget(n, row)
         self.scroll.setVisible(bool(shown))

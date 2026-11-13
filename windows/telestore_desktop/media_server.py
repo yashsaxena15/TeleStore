@@ -16,6 +16,8 @@ import time
 from typing import Optional
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
+from telestore_desktop import fast_download
+
 log = logging.getLogger("telestore.media")
 CHUNK = 1024 * 1024  # what Telegram sends at a time
 LOCATE_SECONDS = 600
@@ -42,8 +44,12 @@ class MediaServer:
         self.places = {}  # file id -> (when, the server's answer)
         self.messages = {}  # (chat, message) -> message
         self.served = 0  # bytes sent (for tests and the log)
+        self.fast: Optional[fast_download.FastReader] = None
 
     async def start(self) -> None:
+        client = getattr(self.account, "client", None)
+        if client is not None and getattr(client, "storage", None) is not None:
+            self.fast = fast_download.FastReader(client)
         self.server = await asyncio.start_server(self._handle, "127.0.0.1", 0)
         self.port = self.server.sockets[0].getsockname()[1]
         log.info(f"Opening files straight from Telegram on 127.0.0.1:{self.port}")
@@ -52,6 +58,8 @@ class MediaServer:
         if self.server:
             self.server.close()
             await self.server.wait_closed()
+        if self.fast:
+            await self.fast.close()
 
     def url(self, item, inline: bool = True) -> Optional[str]:
         """This PC's address for one of your own files, or None (shared files go through TeleStore)."""
@@ -151,16 +159,39 @@ class MediaServer:
             if p_end < start or p_start > end:
                 continue
             lo, hi = max(start, p_start) - p_start, min(end, p_end) - p_start
-            msg = await self._message(int(part["chat_id"]), int(part["message_id"]))
-            skip, need = lo % CHUNK, hi - lo + 1
-            async for chunk in self.account.client.stream_media(msg, offset=lo // CHUNK):
-                piece = chunk[skip:skip + need]
-                skip = 0
-                writer.write(piece)
-                await writer.drain()
-                need -= len(piece)
-                self.served += len(piece)
-                if need <= 0:
-                    break
+            chat_id, message_id = int(part["chat_id"]), int(part["message_id"])
+            need = hi - lo + 1
+            sent = 0
+            if self.fast:
+                for attempt in range(2):
+                    msg = await self._message(chat_id, message_id)
+                    try:
+                        async for piece in self.fast.read(msg, lo + sent, hi):
+                            writer.write(piece)
+                            await writer.drain()
+                            sent += len(piece)
+                            self.served += len(piece)
+                        break
+                    except fast_download.ReferenceExpired:
+                        self.messages.pop((chat_id, message_id), None)  # fetch it again, with a new reference
+                        if attempt:
+                            raise IOError("Telegram keeps refusing this file's reference")
+                    except fast_download.Unsupported as e:
+                        log.info(f"Reading this file the usual way ({e})")
+                        break
+                need -= sent
+            if need > 0:  # the library's way: one piece after another
+                msg = await self._message(chat_id, message_id)
+                at = lo + sent
+                skip = at % CHUNK
+                async for chunk in self.account.client.stream_media(msg, offset=at // CHUNK):
+                    piece = chunk[skip:skip + need]
+                    skip = 0
+                    writer.write(piece)
+                    await writer.drain()
+                    need -= len(piece)
+                    self.served += len(piece)
+                    if need <= 0:
+                        break
             if need > 0:
                 raise IOError(f"Telegram sent {need} bytes too few")
