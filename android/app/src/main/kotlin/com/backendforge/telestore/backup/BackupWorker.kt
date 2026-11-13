@@ -116,7 +116,9 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
      */
     private suspend fun backUpStraight(source: UriChunkSource, item: PhoneItem, folder: String): Boolean {
         if (!container.telegramDirect || !com.backendforge.telestore.core.DirectRules.canUploadDirect(folder, true, true, item.size)) return false
-        return try {
+        // Only to Telegram: a Telegram problem stops this run and the backup tries again later (never the server)
+        return com.backendforge.telestore.transfers.telegramOnly {
+            container.awaitTelegram()
             com.backendforge.telestore.core.DirectUploader(
                 api = container.api(),
                 sender = com.backendforge.telestore.telegram.TdlibSender(container.telegram, applicationContext.cacheDir),
@@ -127,13 +129,6 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 takenAt = item.takenIso,
             ).upload()
             true
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: UnauthorizedException) {
-            throw e
-        } catch (e: Exception) {
-            android.util.Log.w("TeleStore", "Backing up straight to Telegram failed; using TeleStore", e)
-            false
         }
     }
 

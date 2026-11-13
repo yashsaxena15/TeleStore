@@ -70,7 +70,8 @@ class MainActivity : FragmentActivity() {
                 } else {
                     val locked by container.appLock.locked.collectAsStateWithLifecycle()
                     Box(Modifier.fillMaxSize()) {
-                        MainScreen(container, current)
+                        // Telegram is required: the setup steps until it's signed in on this phone
+                        com.backendforge.telestore.ui.settings.TelegramGate(container) { MainScreen(container, current) }
                         // Covers the app (and takes every touch) until unlocked
                         if (locked) LockScreen(container.appLock, this@MainActivity)
                     }

@@ -21,6 +21,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -46,13 +47,12 @@ import kotlinx.coroutines.launch
  * Telegram, without using the TeleStore server.
  */
 @Composable
-fun TelegramScreen(container: AppContainer, onBack: () -> Unit) {
+fun TelegramScreen(container: AppContainer, onBack: (() -> Unit)?, onSignOutOfTeleStore: (() -> Unit)? = null) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val state by container.telegram.state.collectAsState()
     var busy by remember { mutableStateOf(false) }
     var field by remember { mutableStateOf("") }
-    var direct by remember { mutableStateOf(container.settings.telegramDirect) }
 
     LaunchedEffect(Unit) {
         attempt("Couldn't start Telegram on this phone.", { scope.launch { snackbar.showSnackbar(it) } }) { container.startTelegram() }
@@ -79,13 +79,16 @@ fun TelegramScreen(container: AppContainer, onBack: () -> Unit) {
         }
     }
 
-    Scaffold(topBar = { AppTopBar(title = "Telegram on this phone", onBack = onBack) }, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+    Scaffold(
+        topBar = { if (onBack != null) AppTopBar(title = "Telegram on this phone", onBack = onBack) else AppTopBar(title = "Sign in to Telegram") },
+        snackbarHost = { SnackbarHost(snackbar) },
+    ) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
-                Panel(Icons.Default.Bolt, "Straight from Telegram",
-                    "With your Telegram account signed in here, uploads, photo backup, playback and downloads of your own files " +
-                        "go straight between this phone and your Telegram storage channel, at your connection's speed, without " +
-                        "using the TeleStore server. Files shared with you and Private Vault files still go through TeleStore.") {}
+                Panel(Icons.Default.Bolt, "Your files live in your Telegram",
+                    "TeleStore uses your own Telegram account on this phone: uploads, photo backup, playback, photos and downloads " +
+                        "of your files go straight between this phone and your Telegram storage chat, at your connection's speed. " +
+                        "Files shared with you and Private Vault files come through TeleStore.") {}
             }
             item {
                 Panel(Icons.AutoMirrored.Filled.Send, "Telegram account") {
@@ -120,17 +123,16 @@ fun TelegramScreen(container: AppContainer, onBack: () -> Unit) {
                         }
                         is TgState.Ready -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             StatusPill("Signed in as ${s.name}", good = true)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("Use my Telegram for my files")
-                                    Text("Uploads, backup, playback and downloads", style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                Switch(checked = direct, onCheckedChange = { direct = it; container.settings.telegramDirect = it })
-                            }
+                            Text("Signing out of Telegram here also stops your uploads, backup and downloads until you sign in again.",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             OutlinedButton(onClick = { step { container.telegram.signOut() } }, enabled = !busy) { Text("Sign out of Telegram on this phone") }
                         }
                     }
+                }
+            }
+            if (onSignOutOfTeleStore != null) {
+                item {
+                    TextButton(onClick = onSignOutOfTeleStore, modifier = Modifier.fillMaxWidth()) { Text("Sign out of TeleStore instead") }
                 }
             }
         }

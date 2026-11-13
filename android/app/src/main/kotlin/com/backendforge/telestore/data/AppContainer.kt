@@ -14,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import com.backendforge.telestore.transfers.PickedFile
 import com.backendforge.telestore.transfers.TransferManager
@@ -81,10 +82,10 @@ class AppContainer(val context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     init {
-        // Telegram on this phone starts with the app once it has been signed in here
+        // Telegram on this phone starts with the app whenever someone is signed in (it's required)
         scope.launch {
             session.state.collect {
-                if (it != null && settings.telegramUsed) runCatching { startTelegram() }
+                if (it != null && telegram.available) runCatching { startTelegram() }
             }
         }
         // Signing out stops the music (its stream needs the token that just ended)
@@ -107,7 +108,7 @@ class AppContainer(val context: Context) {
                     features.value = com.backendforge.telestore.core.Features()
                     protection.clear()
                     // Telegram on this phone belongs to the account too: signing out of TeleStore ends it
-                    if (settings.telegramUsed) {
+                    if (settings.telegramUsed || telegram.isReady) {
                         settings.telegramUsed = false
                         launch { runCatching { telegram.signOut() } }
                     }
@@ -136,6 +137,8 @@ class AppContainer(val context: Context) {
     val imageLoader: ImageLoader by lazy {
         ImageLoader.Builder(context)
             .components {
+                // Your own photos at full size straight from Telegram (before the network: it's asked first)
+                add(com.backendforge.telestore.telegram.TelegramImageFetcher.Factory(telegramFiles) { api().http })
                 add(OkHttpNetworkFetcherFactory(callFactory = { api().http }))
                 // A frame of each video on the phone, for its tile in Photos
                 add(VideoFrameDecoder.Factory())
@@ -152,8 +155,34 @@ class AppContainer(val context: Context) {
         telegram.start(api().directConfig())
     }
 
-    /** Whether your own files go straight between this phone and Telegram right now. */
-    val telegramDirect: Boolean get() = settings.telegramDirect && settings.telegramUsed && telegram.isReady
+    /**
+     * Your own files go only between this phone and Telegram (uploads, backup, playback, photos,
+     * downloads), never through the TeleStore server. True whenever the phone can run Telegram;
+     * only phones that can't (not 64-bit ARM) use TeleStore for them. Shared files, Private Vault
+     * files and the server's own transfers still go through TeleStore.
+     */
+    val telegramDirect: Boolean get() = telegram.available
+
+    /**
+     * Telegram on this phone, ready to use: starts it if needed and waits for it to connect.
+     * Throws [com.backendforge.telestore.core.ApiException] when it's signed out (sign in again in
+     * the app) and [com.backendforge.telestore.core.NetworkException] when it doesn't come up in
+     * time (the caller tries again later).
+     */
+    suspend fun awaitTelegram(timeoutMs: Long = 30_000) {
+        if (telegram.isReady) return
+        if (telegram.state.value is com.backendforge.telestore.telegram.TgState.Starting) runCatching { startTelegram() }
+        val state = kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+            telegram.state.first { it !is com.backendforge.telestore.telegram.TgState.Starting }
+        }
+        when (state) {
+            is com.backendforge.telestore.telegram.TgState.Ready -> return
+            null -> throw com.backendforge.telestore.core.NetworkException("Waiting for Telegram to connect…")
+            else -> throw com.backendforge.telestore.core.ApiException(
+                0, "Telegram isn't signed in on this phone. Open TeleStore and sign in to Telegram.",
+            )
+        }
+    }
 
     /** The API for the signed-in server; a 401 anywhere signs the app out. */
     fun api(): TeleStoreApi {
