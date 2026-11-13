@@ -204,9 +204,14 @@ class DownloadWorker(context: Context, params: WorkerParameters) : TransferWorke
         if (transfer.offline && !OfflineSync.fits((transfer.size - transfer.done).coerceAtLeast(0), OfflineFiles.freeBytes(applicationContext))) {
             throw ApiException(0, "Not enough space on this phone.")
         }
+        if (!transfer.offline && transfer.localUri == null) {
+            DownloadFiles.freeBytes(applicationContext, transfer.targetTree)?.let { free ->
+                if (transfer.size > free) throw ApiException(0, "Not enough space on this phone for ${transfer.name}.")
+            }
+        }
         val localUri = transfer.localUri?.let(Uri::parse) ?: (
             if (transfer.offline) OfflineFiles.create(applicationContext, transfer.fileId ?: transfer.id, transfer.name)
-            else DownloadFiles.create(applicationContext, transfer.name, mimeOf(transfer.name))
+            else DownloadFiles.create(applicationContext, transfer.name, mimeOf(transfer.name), transfer.subPath, transfer.targetTree)
         ).also { created ->
             store.update(transferId) { it.copy(localUri = created.toString()) }
         }

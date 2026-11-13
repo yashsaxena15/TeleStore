@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DriveFileMove
@@ -114,6 +115,8 @@ fun FolderScreen(
     /** Picks files on the phone and uploads them into this folder; null hides the button. */
     onUpload: ((folderPath: String) -> Unit)? = null,
     onDownload: ((FileItem) -> Unit)? = null,
+    /** Downloads the selected files and folders (folders as they are) into the downloads location. */
+    onDownloadMany: ((List<FileItem>) -> Unit)? = null,
     offlineIds: Set<String> = emptySet(),
     /** Folders kept offline (their paths). */
     offlineFolders: Set<String> = emptySet(),
@@ -207,6 +210,14 @@ fun FolderScreen(
                     backIcon = Icons.Default.Close,
                     backLabel = "Close selection",
                 ) {
+                    if (onDownloadMany != null && !state.isTrash && state.selectedItems.isNotEmpty()) {
+                        IconButton(onClick = {
+                            onDownloadMany(state.selectedItems)
+                            vm.clearSelection()
+                        }) {
+                            Icon(Icons.Default.Download, contentDescription = "Download")
+                        }
+                    }
                     IconButton(onClick = vm::selectAll) {
                         Icon(Icons.Default.SelectAll, contentDescription = "Select all")
                     }

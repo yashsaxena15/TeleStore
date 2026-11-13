@@ -70,7 +70,7 @@ fun ItemActionSheet(
     onTrash: ((FileItem) -> Unit)? = null,
     onRestore: ((FileItem) -> Unit)? = null,
     onDeleteForever: ((FileItem) -> Unit)? = null,
-    /** Saves the file (or the folder as ZIP) to Downloads/TeleStore on the phone. */
+    /** Saves the file (or the whole folder, as it is) to the downloads location (Settings › Downloads location). */
     onDownload: ((FileItem) -> Unit)? = null,
     onMoveToVault: ((FileItem) -> Unit)? = null,
     onCopyToDrive: ((FileItem) -> Unit)? = null,
@@ -246,7 +246,7 @@ fun ItemActionSheet(
                     if (onDownload != null) {
                         ActionRow(
                             icon = Icons.Default.Download,
-                            label = if (item.isFolder) "Download as ZIP" else "Download to phone",
+                            label = if (item.isFolder) "Download folder" else "Download to phone",
                             onClick = { onDismiss(); onDownload(item) },
                         )
                     }

@@ -252,7 +252,7 @@ fun ShareBrowseScreen(
     /** Opens a file with its folder's others queued; false when there's no viewer for it. */
     onOpenFile: (FileItem, List<FileItem>) -> Boolean,
     onDownload: (FileItem) -> Unit,
-    /** A folder in the share ([path] relative to the shared folder) as ZIP. */
+    /** Downloads a folder of the share ([path] relative to the shared folder) as it is. */
     onDownloadFolder: (path: String, name: String) -> Unit,
     /** Picks files on the phone and uploads them into [path] of the share. */
     onUpload: (path: String) -> Unit,
@@ -327,7 +327,7 @@ fun ShareBrowseScreen(
                         IconButton(onClick = { newFolder = true }) { Icon(Icons.Default.CreateNewFolder, contentDescription = "New folder") }
                     }
                     IconButton(onClick = { onDownloadFolder(path, if (path.isEmpty()) rootName else path.substringAfterLast('/')) }) {
-                        Icon(Icons.Default.Download, contentDescription = "Download as ZIP")
+                        Icon(Icons.Default.Download, contentDescription = "Download this folder")
                     }
                 }
             }
@@ -396,7 +396,7 @@ fun ShareBrowseScreen(
                 fun close() { actionsFor = null }
                 if (shared.isFolder) {
                     SheetRow(Icons.Default.FolderOpen, "Open folder") { close(); path = ShareRules.childPath(shared.path, shared.name) }
-                    SheetRow(Icons.Default.Download, "Download as ZIP") { close(); onDownloadFolder(ShareRules.childPath(shared.path, shared.name), shared.name) }
+                    SheetRow(Icons.Default.Download, "Download folder") { close(); onDownloadFolder(ShareRules.childPath(shared.path, shared.name), shared.name) }
                 } else {
                     SheetRow(Icons.AutoMirrored.Filled.OpenInNew, "Open") { close(); onOpenFile(file, files) }
                     SheetRow(Icons.Default.Download, "Download to phone") { close(); onDownload(file) }

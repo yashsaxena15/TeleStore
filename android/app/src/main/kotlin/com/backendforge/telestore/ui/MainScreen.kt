@@ -335,8 +335,8 @@ fun MainScreen(
         askForNotifications()
         scope.launch {
             transferMessage = try {
-                val count = container.transfers.downloadShareFolder(container.api(), shareId, path)
-                if (count == 0) "This folder is empty." else "Downloading $name as ZIP ($count files). See Transfers."
+                val count = container.transfers.downloadShareFolder(container.api(), shareId, path, name)
+                if (count == 0) "This folder is empty." else "Downloading $name ($count files) to ${downloadsPlace()}. See Transfers."
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -350,8 +350,12 @@ fun MainScreen(
         if (item.isFolder) {
             scope.launch {
                 transferMessage = try {
-                    val count = container.transfers.downloadFolder(container.api(), FolderPaths.childPath(item))
-                    if (count == 0) "This folder is empty." else "Downloading ${item.name} as ZIP ($count files). See Transfers."
+                    val count = if (item.shareId != null) {
+                        container.transfers.downloadShareFolder(container.api(), item.shareId!!, "", item.name)
+                    } else {
+                        container.transfers.downloadFolder(container.api(), FolderPaths.childPath(item), item.name)
+                    }
+                    if (count == 0) "This folder is empty." else "Downloading ${item.name} ($count files) to ${downloadsPlace()}. See Transfers."
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -360,9 +364,34 @@ fun MainScreen(
             }
         } else {
             container.transfers.download(item)
-            transferMessage = "Downloading ${item.name}. See Transfers."
+            transferMessage = "Downloading ${item.name} to ${downloadsPlace()}. See Transfers."
         }
     }
+
+    /** Several selected files and folders at once: folders come down as they are. */
+    fun downloadAll(items: List<FileItem>) {
+        if (items.size == 1) return download(items.single())
+        askForNotifications()
+        items.filter { !it.isFolder }.forEach { container.transfers.download(it) }
+        val folders = items.filter { it.isFolder }
+        scope.launch {
+            var count = items.size - folders.size
+            var failed: String? = null
+            for (folder in folders) {
+                try {
+                    count += if (folder.shareId != null) container.transfers.downloadShareFolder(container.api(), folder.shareId!!, "", folder.name)
+                    else container.transfers.downloadFolder(container.api(), FolderPaths.childPath(folder), folder.name)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    failed = (e as? ApiException)?.message ?: "Couldn't download ${folder.name}."
+                }
+            }
+            transferMessage = failed ?: "Downloading $count files to ${downloadsPlace()}. See Transfers."
+        }
+    }
+
+    fun downloadsPlace(): String = com.backendforge.telestore.transfers.DownloadFiles.describe(container.settings.downloadFolder.value)
 
     /** Keeps a file or folder on the phone for offline use, or removes the copy. */
     fun toggleOffline(item: FileItem) {
@@ -678,6 +707,7 @@ fun MainScreen(
                             onOpenFile = ::openFile,
                             onUpload = ::upload,
                             onDownload = ::download,
+                            onDownloadMany = ::downloadAll,
                             offlineIds = offlineIds,
                             offlineFolders = offlineFolders,
                             onToggleOffline = ::toggleOffline,
@@ -748,6 +778,7 @@ fun MainScreen(
                             onOpenFile = ::openFile,
                             onUpload = ::upload,
                             onDownload = ::download,
+                            onDownloadMany = ::downloadAll,
                             offlineIds = offlineIds,
                             offlineFolders = offlineFolders,
                             onToggleOffline = ::toggleOffline,
@@ -778,6 +809,7 @@ fun MainScreen(
                             onOpenFile = ::openFile,
                             onUpload = ::upload,
                             onDownload = ::download,
+                            onDownloadMany = ::downloadAll,
                             offlineIds = offlineIds,
                             offlineFolders = offlineFolders,
                             onToggleOffline = ::toggleOffline,
@@ -859,6 +891,7 @@ fun MainScreen(
                             onOpenFile = ::openFile,
                             onUpload = ::upload,
                             onDownload = ::download,
+                            onDownloadMany = ::downloadAll,
                             offlineIds = offlineIds,
                             offlineFolders = offlineFolders,
                             onToggleOffline = ::toggleOffline,
