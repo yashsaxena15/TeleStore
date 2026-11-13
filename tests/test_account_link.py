@@ -105,3 +105,21 @@ def test_the_app_cant_set_another_accounts_chat(monkeypatch):
         assert r.status_code == 409 and "admin" in r.json()["detail"]
     finally:
         app.dependency_overrides.clear()
+
+
+class StrictDb(dict):
+    """Like pymongo's Database: refuses to be used as true / false."""
+
+    def __bool__(self):
+        raise NotImplementedError("Database objects do not implement truth value testing or bool()")
+
+
+def test_works_with_a_real_style_database(monkeypatch):
+    db = StrictDb(_db())
+    monkeypatch.setattr(account_link, "_db", lambda: db)
+    db["Files"].docs = [{"owner_id": "yash"}]
+    account_link.link_telegram("yash", {"telegram_user_id": 555})  # the bot calls it without a db
+    assert db["Users"].find_one({"username": "yash"})["telegram_user_id"] == 555
+    assert db["Files"].docs[0]["owner_id"] == "555"
+    with pytest.raises(account_link.LinkRefused):
+        account_link.check_chat_free(-1001, username="yash")

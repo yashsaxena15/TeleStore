@@ -47,12 +47,12 @@ def _label(doc: dict) -> str:
 
 def telegram_owner(telegram_id, db=None) -> Optional[dict]:
     """The TeleStore account this Telegram account is linked to, if any."""
-    return (db or _db())["Users"].find_one({"telegram_user_id": {"$in": _both(telegram_id)}})
+    return (_db() if db is None else db)["Users"].find_one({"telegram_user_id": {"$in": _both(telegram_id)}})
 
 
 def chat_owner(chat_id, db=None) -> Optional[dict]:
     """The TeleStore account whose storage chat this is, if any."""
-    return (db or _db())["Users"].find_one({"index_chat_id": {"$in": _both(chat_id)}})
+    return (_db() if db is None else db)["Users"].find_one({"index_chat_id": {"$in": _both(chat_id)}})
 
 
 def check_telegram_free(username: str, telegram_id, db=None) -> None:
@@ -80,7 +80,7 @@ def check_chat_free(chat_id, username: Optional[str] = None, telegram_id=None, d
 def move_records(old_ids: Iterable, new_id: str, db=None) -> dict:
     """Everything recorded under [old_ids] (an account's username, a Telegram id it used before) now
     belongs to [new_id]. Returns how many were moved in each collection."""
-    db = db or _db()
+    db = _db() if db is None else db
     olds = [str(o) for o in old_ids if o not in (None, "") and str(o) != str(new_id)]
     moved = {}
     if not olds:
@@ -98,7 +98,7 @@ def move_records(old_ids: Iterable, new_id: str, db=None) -> dict:
 def link_telegram(username: str, telegram_data: dict, db=None) -> dict:
     """Links [username] to the Telegram account in [telegram_data] (refusing one another account uses),
     then moves the account's earlier records to it. Returns what was moved."""
-    db = db or _db()
+    db = _db() if db is None else db
     new_id = telegram_data.get("telegram_user_id")
     if new_id is None:
         raise LinkRefused("Telegram didn't say which account this is. Try again.")
