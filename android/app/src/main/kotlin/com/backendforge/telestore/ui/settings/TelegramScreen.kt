@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -103,11 +104,35 @@ fun TelegramScreen(container: AppContainer, onBack: (() -> Unit)?, onSignOutOfTe
                         )
                         is TgState.Unsupported -> Text(s.what, style = MaterialTheme.typography.bodyMedium)
                         TgState.SignedOut -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text("Your Telegram phone number, with the country code. Use the account that owns your TeleStore storage channel.",
-                                style = MaterialTheme.typography.bodyMedium)
+                            Text("Sign in with the Telegram account that owns your TeleStore storage chat.", style = MaterialTheme.typography.bodyMedium)
+                            Button(onClick = { step { container.telegram.startQr() } }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                                Text("Sign in with a QR code")
+                            }
+                            Text("Best on someone else's phone: you scan it with Telegram on your own phone, and no number or code is typed here.",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                            Text("Or your Telegram phone number, with the country code:", style = MaterialTheme.typography.bodyMedium)
                             OutlinedTextField(field, { field = it }, label = { Text("Phone number") }, placeholder = { Text("+91 98765 43210") },
                                 singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth())
                             Button(onClick = { step { container.telegram.sendPhone(field) } }, enabled = !busy && field.isNotBlank()) { Text("Send code") }
+                        }
+                        is TgState.WaitQr -> Column(
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            com.backendforge.telestore.ui.components.QrCode(s.link, contentDescription = "QR code to sign in to Telegram")
+                            Text(
+                                "On your own phone, open Telegram › Settings › Devices › Link Desktop Device, and scan this code. " +
+                                    "It renews itself every half minute; this screen follows.",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                "When you're done on this phone, sign out of TeleStore: Telegram is signed out here too. You can also end " +
+                                    "it anytime from your own phone in Telegram › Settings › Devices.",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            TextButton(onClick = { step { container.telegram.restartSignIn() } }, enabled = !busy) { Text("Use my phone number instead") }
                         }
                         is TgState.WaitCode -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text("Telegram sent a code ${s.via}. Enter it here.", style = MaterialTheme.typography.bodyMedium)
