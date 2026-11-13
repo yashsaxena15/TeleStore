@@ -45,9 +45,13 @@ export const IndexChatDialog = ({ open, onOpenChange }) => {
             setIsLoading(false);
         }
     };
-    const handleOk = () => {
+    // A group or a channel: Telegram lists each in its own picker. In a channel the bot joins as an
+    // admin that can post, edit and delete (it keeps your files there).
+    const open_ = (kind) => {
         if (botUsername) {
-            openUrl(`https://t.me/${botUsername}?startgroup=true`);
+            openUrl(kind === "channel"
+                ? `https://t.me/${botUsername}?startchannel=true&admin=post_messages+edit_messages+delete_messages`
+                : `https://t.me/${botUsername}?startgroup=true`);
         }
         onOpenChange(false);
     };
@@ -62,7 +66,8 @@ export const IndexChatDialog = ({ open, onOpenChange }) => {
             Add me to your Index chat
           </DialogTitle>
           <DialogDescription className="pt-2">
-            To upload files, you need to add this bot to your Index chat.
+            Your files are kept in a private Telegram group or channel of yours. Add the bot to it, then tap Ok on
+            the message the bot posts there.
           </DialogDescription>
         </DialogHeader>
         
@@ -71,13 +76,16 @@ export const IndexChatDialog = ({ open, onOpenChange }) => {
             <X className="h-4 w-4"/>
             Cancel
           </Button>
-          <Button onClick={handleOk} disabled={isLoading || !botUsername} className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => open_("channel")} disabled={isLoading || !botUsername} className="flex items-center gap-2">
+            Add to a channel
+          </Button>
+          <Button onClick={() => open_("group")} disabled={isLoading || !botUsername} className="flex items-center gap-2">
             {isLoading ? (<>
                 <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-solid border-primary-foreground border-r-transparent align-[-0.125em]"></div>
                 Loading...
               </>) : (<>
                 <Check className="h-4 w-4"/>
-                OK
+                Add to a group
               </>)}
           </Button>
         </DialogFooter>

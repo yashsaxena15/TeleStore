@@ -65,6 +65,10 @@ async def start_command(client: Client, message: Message) -> None:
         logger.error(f"Error in start command: {e}")
         await message.reply_text("An error occurred while processing your request.")
 
+# What the bot may do in a storage channel (Telegram's admin rights for the "add to channel" link)
+CHANNEL_RIGHTS = "post_messages+edit_messages+delete_messages"
+
+
 async def handle_verification_code(client: Client, message: Message, code: str) -> bool:
     """
     Handle Telegram verification codes sent via /start command
@@ -132,13 +136,15 @@ async def handle_verification_code(client: Client, message: Message, code: str) 
                 "1. Visit the web interface to access your files\n"
                 "2. Use /help to see available commands\n"
                 "3. Configure your settings in the Profile section\n\n"
-                "📌 <b>Important:</b> To enable file indexing, please add this bot to a group "
-                "that will be used for storing indexed files."
+                "📌 <b>Important:</b> To store your files, add this bot to a private group or channel of yours "
+                "(it becomes your storage chat), then tap Ok on the message it posts there."
             )
             
             # Create inline keyboard with "Add to Index Group" button
             bt = ButtonMaker()
-            bt.ubutton("➕ Add me to Index Group", f"https://t.me/{bot_username}?startgroup=true")
+            bt.ubutton("➕ Add me to a group", f"https://t.me/{bot_username}?startgroup=true")
+            # Channels have their own picker; the bot joins as an admin that can post, edit and delete
+            bt.ubutton("📢 Add me to a channel", f"https://t.me/{bot_username}?startchannel=true&admin={CHANNEL_RIGHTS}")
             keyboard = bt.build_menu()
             
             await message.reply(reply_text, reply_markup=keyboard)

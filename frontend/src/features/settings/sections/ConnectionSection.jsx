@@ -109,12 +109,12 @@ const IndexChatPanel = () => {
             setBusy(false);
         }
     };
-    return (<SettingsPanel icon={Hash} title="Index chat" description="The private Telegram group where your files are kept. Every file you upload is stored there as a message.">
-      {saved == null && (<p role="status" className="text-sm text-warning">Not set up yet. Uploads won't work until the bot is in one of your groups.</p>)}
+    return (<SettingsPanel icon={Hash} title="Index chat" description="The private Telegram group or channel where your files are kept. Every file you upload is stored there as a message.">
+      {saved == null && (<p role="status" className="text-sm text-warning">Not set up yet. Uploads won't work until the bot is in one of your groups or channels.</p>)}
       <ol className="grid gap-1 text-sm text-muted-foreground list-decimal pl-5">
-        <li>In Telegram, create a private group (or use one you already have).</li>
-        <li>Press <span className="text-foreground font-medium">Add bot to a chat</span> and pick that group.</li>
-        <li>In the group, tap the button the bot posts. The chat ID below fills in by itself.</li>
+        <li>In Telegram, create a private group or channel (or use one you already have).</li>
+        <li>Press <span className="text-foreground font-medium">Add bot to a chat</span> and pick it (a channel gets the bot as an admin that can post).</li>
+        <li>There, tap Ok on the message the bot posts. The chat ID below fills in by itself.</li>
       </ol>
       <Field label="Chat ID" htmlFor="index-chat" hint={trimmed && !valid ? undefined : "Group IDs start with -100. You only type one here if you already know it."}>
         <Input id="index-chat" inputMode="numeric" className="h-9 font-mono text-[13px] max-w-sm" value={value} onChange={(e) => setValue(e.target.value)} placeholder="-1001234567890"/>

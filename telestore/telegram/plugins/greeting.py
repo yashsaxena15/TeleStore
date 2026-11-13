@@ -14,12 +14,21 @@ logger = setup_logger(__name__)
 @Client.on_chat_member_updated()
 @round_robin()
 async def greeting_function(client: Client, message: ChatMemberUpdated) -> None:
-    if message.new_chat_member.user.id == client.me.id:
+    if message.new_chat_member and message.new_chat_member.user.id == client.me.id:
+        # Only when the bot has just come in (a group, or a channel as its admin), not when it leaves
+        # or its rights change
+        joined = str(message.new_chat_member.status.name).lower() in ("member", "administrator")
+        was_in = message.old_chat_member is not None and \
+            str(message.old_chat_member.status.name).lower() in ("member", "administrator")
+        if not joined or was_in:
+            return
         bt = ButtonMaker()
         bt.ibutton("Ok","make_index","header")
         bt.ibutton("Cancel","cancel_index","header")
         keyboard = bt.build_menu()
-        await client.send_message(chat_id=message.chat.id, text="Make this chat as Index chat ?", reply_markup=keyboard)
+        kind = "channel" if message.chat.type.name.lower() == "channel" else "group"
+        await client.send_message(chat_id=message.chat.id, reply_markup=keyboard,
+                                  text=f"Use this {kind} as your TeleStore storage chat? Tap Ok to keep your files here.")
     else:
         if message.chat.type.name.lower() == "channel":return
         old_status = str(message.old_chat_member.status.name).lower() if message.old_chat_member else None

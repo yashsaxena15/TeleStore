@@ -124,7 +124,7 @@ fun TelegramGate(container: AppContainer, content: @Composable () -> Unit) {
                     "connected to another account, use a different Telegram account (another phone number)."
             } else {
                 "Your files are kept in a private Telegram group or channel of your own. Open Account › Index chat, " +
-                    "add the TeleStore bot to a new group and tap Ok when it asks. Then come back here."
+                    "tap Add bot to a chat, pick your group or channel and tap Ok on the bot's message there. Then come back here."
             },
             action = "Open Account" to { showAccount = true },
             secondary = "Check again" to { recheck++ },

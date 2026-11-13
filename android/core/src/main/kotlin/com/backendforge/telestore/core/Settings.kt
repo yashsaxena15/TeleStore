@@ -62,6 +62,9 @@ data class TelegramVerification(
 ) {
     /** Opens a chat picker in Telegram to add the bot to a group (the index chat). */
     val addToGroupLink: String get() = "https://t.me/$botUsername?startgroup=true"
+
+    /** Opens Telegram's channel picker; the bot joins as an admin that can post, edit and delete. */
+    val addToChannelLink: String get() = "https://t.me/$botUsername?startchannel=true&admin=post_messages+edit_messages+delete_messages"
 }
 
 /** A row of the owner's user list (GET /user). */

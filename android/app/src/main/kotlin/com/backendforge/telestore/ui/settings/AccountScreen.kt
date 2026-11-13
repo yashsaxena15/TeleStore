@@ -213,7 +213,8 @@ private fun IndexChatPanel(container: AppContainer, saved: Long?, loaded: Boolea
     val scope = rememberCoroutineScope()
     var value by remember(saved) { mutableStateOf(saved?.toString().orEmpty()) }
     var busy by remember { mutableStateOf(false) }
-    var groupLink by remember { mutableStateOf<String?>(null) }
+    var links by remember { mutableStateOf<com.backendforge.telestore.core.TelegramVerification?>(null) }
+    var channel by remember { mutableStateOf(false) }
     val trimmed = value.trim()
     // A number that fits (a very long one would not)
     val valid = Regex("""-?\d+""").matches(trimmed) && trimmed.toLongOrNull() != null
@@ -224,7 +225,7 @@ private fun IndexChatPanel(container: AppContainer, saved: Long?, loaded: Boolea
             Text("Not set up yet. Uploads won't work until the bot is in one of your groups.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
         }
         Text(
-            "1. In Telegram, create a private group (or use one you have).\n2. Tap Add bot to a chat and pick that group.\n3. In the group, tap the button the bot posts. The chat ID fills in by itself.",
+            "1. In Telegram, create a private group or channel (or use one you have).\n2. Tap Add bot to a chat and pick it.\n3. There, tap Ok on the message the bot posts. The chat ID fills in by itself.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         OutlinedTextField(
@@ -240,7 +241,7 @@ private fun IndexChatPanel(container: AppContainer, saved: Long?, loaded: Boolea
             OutlinedButton(onClick = {
                 scope.launch {
                     attempt("Couldn't find the bot. Try again.", onMessage) { container.api().telegramVerification() }
-                        ?.let { groupLink = it.addToGroupLink }
+                        ?.let { links = it }
                 }
             }) { Text("Add bot to a chat") }
             Spacer(Modifier.weight(1f))
@@ -257,22 +258,33 @@ private fun IndexChatPanel(container: AppContainer, saved: Long?, loaded: Boolea
             ) { Text(if (busy) "Saving…" else "Save") }
         }
     }
-    groupLink?.let { link ->
+    links?.let { v ->
+        val link = if (channel) v.addToChannelLink else v.addToGroupLink
+        val kind = if (channel) "channel" else "group"
         AlertDialog(
-            onDismissRequest = { groupLink = null },
-            title = { Text("Add the bot to your group") },
+            onDismissRequest = { links = null },
+            title = { Text("Add the bot to your storage chat") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Open Telegram and pick the private group for your files. The bot then posts a button there: tap Ok.")
-                    com.backendforge.telestore.ui.components.QrCode(link, size = 180.dp, contentDescription = "QR code to add the bot to a group")
+                    // A group or a channel: Telegram lists each in its own picker
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        androidx.compose.material3.FilterChip(selected = !channel, onClick = { channel = false }, label = { Text("Group") })
+                        androidx.compose.material3.FilterChip(selected = channel, onClick = { channel = true }, label = { Text("Channel") })
+                    }
                     Text(
-                        "No Telegram on this phone? Scan the QR code with your own phone's camera and pick the group there.",
+                        if (channel) "Open Telegram and pick your private channel (you must be its admin). The bot joins as an admin " +
+                            "that can post, and posts a button there: tap Ok."
+                        else "Open Telegram and pick your private group. The bot then posts a button there: tap Ok.",
+                    )
+                    com.backendforge.telestore.ui.components.QrCode(link, size = 180.dp, contentDescription = "QR code to add the bot to a $kind")
+                    Text(
+                        "No Telegram on this phone? Scan the QR code with your own phone's camera and pick the $kind there.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             },
-            confirmButton = { TextButton(onClick = { openInBrowser(context, link); groupLink = null }) { Text("Open Telegram") } },
-            dismissButton = { TextButton(onClick = { groupLink = null }) { Text("Close") } },
+            confirmButton = { TextButton(onClick = { openInBrowser(context, link); links = null }) { Text("Open Telegram") } },
+            dismissButton = { TextButton(onClick = { links = null }) { Text("Close") } },
         )
     }
 }
