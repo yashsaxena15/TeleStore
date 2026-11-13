@@ -12,3 +12,10 @@ def home(tmp_path, monkeypatch):
     """Each test keeps the app's data in its own folder."""
     monkeypatch.setenv("TELESTORE_DESKTOP_HOME", str(tmp_path / "appdata"))
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def no_update_checks(monkeypatch):
+    """Tests never ask GitHub for updates."""
+    from telestore_desktop import updates
+    monkeypatch.setattr(updates, "check", lambda *a, **k: None)

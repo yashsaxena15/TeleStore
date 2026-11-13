@@ -67,7 +67,7 @@ def stylesheet(p: Palette) -> str:
     #newButton {{ background: {p.primary}; color: {p.primary_text}; border: none; border-radius: 8px;
                   padding: 9px 12px; font-weight: 600; text-align: left; }}
     #newButton:hover {{ background: {p.primary}; }}
-    #newButton::menu-indicator {{ image: none; }}
+    #newButton::menu-indicator, #navButton::menu-indicator {{ image: none; }}
     #sectionLabel, #muted {{ color: {p.muted}; font-size: 12px; }}
     #pageTitle {{ font-size: 18px; font-weight: 600; }}
     #crumb {{ border: none; background: transparent; padding: 4px 6px; border-radius: 6px; font-size: 15px; }}
@@ -108,6 +108,35 @@ def stylesheet(p: Palette) -> str:
     QComboBox {{ background: {p.card}; border: 1px solid {p.border}; border-radius: 8px; padding: 6px 8px; }}
     QSpinBox {{ background: {p.card}; border: 1px solid {p.border}; border-radius: 6px; padding: 3px 4px; min-height: 22px; }}
     QToolTip {{ background: {p.card}; color: {p.text}; border: 1px solid {p.border}; }}
+    #topbar {{ background: {p.background}; border-bottom: 1px solid {p.border}; }}
+    #topSearch {{ background: {p.card}; border-radius: 10px; padding: 8px 12px; }}
+    #updateButton {{ background: {p.selected}; color: {p.primary}; border: 1px solid {p.primary}; border-radius: 16px;
+                     padding: 5px 12px; font-weight: 600; }}
+    #linkButton {{ border: none; background: transparent; color: {p.primary}; padding: 4px 6px; }}
+    #linkButton:hover {{ text-decoration: underline; background: transparent; }}
+    #chip {{ background: {p.hover}; color: {p.muted}; border-radius: 8px; padding: 1px 7px; font-size: 11px; }}
+    #chipButton {{ background: {p.card}; border: 1px solid {p.border}; border-radius: 14px; padding: 5px 12px; }}
+    #chipButton:checked {{ background: {p.selected}; color: {p.primary}; border: 1px solid {p.primary}; }}
+    #navBadge {{ background: {p.primary}; color: {p.primary_text}; border-radius: 8px; padding: 0 6px; font-size: 11px;
+                 font-weight: 600; }}
+    #card {{ background: {p.card}; border: 1px solid {p.border}; border-radius: 12px; }}
+    #cardList, #transferRow {{ background: {p.card}; }}
+    #transferRow {{ border-bottom: 1px solid {p.border}; }}
+    #statValue {{ font-size: 20px; font-weight: 700; }}
+    #bigValue {{ font-size: 28px; font-weight: 700; }}
+    #sectionTitle {{ font-size: 14px; font-weight: 600; }}
+    #selectionBar {{ background: {p.selected}; border-radius: 10px; }}
+    #detailsPane {{ background: {p.card}; border-left: 1px solid {p.border}; }}
+    #detailsBody, #preview {{ background: {p.card}; }}
+    #preview {{ border-radius: 10px; }}
+    #detailsName {{ font-size: 15px; font-weight: 600; }}
+    #popup {{ background: {p.card}; border: 1px solid {p.border}; border-radius: 12px; }}
+    #popupList, #notificationRow {{ background: {p.card}; }}
+    #notificationRow {{ border-top: 1px solid {p.border}; }}
+    #notificationRowNew {{ background: {p.selected}; border-top: 1px solid {p.border}; }}
+    #notificationRow:hover, #notificationRowNew:hover {{ background: {p.hover}; }}
+    QTabWidget::pane {{ border: none; }}
+    QTextBrowser {{ background: {p.card}; border: 1px solid {p.border}; border-radius: 8px; padding: 6px; }}
     """
 
 
@@ -148,6 +177,16 @@ _PATHS = {
     "logout": '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l-5-5 5-5"/><path d="M5 12h11"/>',
     "volume": '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
     "fullscreen": '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+    "bell": '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
+    "info": '<circle cx="12" cy="12" r="9"/><path d="M12 16v-4.5M12 8h.01"/>',
+    "share": '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>',
+    "hard-drive": '<path d="M22 12H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/><path d="M6 16h.01M10 16h.01"/>',
+    "transfers": '<path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/>',
+    "link": '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+    "check-circle": '<circle cx="12" cy="12" r="9"/><path d="m8 12.5 3 3 5-6"/>',
+    "archive": '<rect x="2.5" y="3.5" width="19" height="5" rx="1"/><path d="M4.5 8.5V19a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8.5"/><path d="M10 12.5h4"/>',
+    "update": '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M3 15v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4"/>',
+    "x-circle": '<circle cx="12" cy="12" r="9"/><path d="m15 9-6 6M9 9l6 6"/>',
 }
 
 
@@ -166,6 +205,25 @@ def icon(name: str, color: str, size: int = 20, fill: bool = False) -> QIcon:
         renderer.render(painter, QRectF(0, 0, size * scale, size * scale))
         painter.end()
         pm.setDevicePixelRatio(scale)
+        result.addPixmap(pm)
+    return result
+
+
+def app_icon() -> QIcon:
+    """TeleStore's logo (the website's), for the window, the taskbar and the tray."""
+    import os
+    logo = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "logo.svg")
+    renderer = QSvgRenderer(logo)
+    result = QIcon()
+    if not renderer.isValid():
+        return icon("cloud", "#1F78B4", 32)
+    for size in (16, 24, 32, 48, 64, 128, 256):
+        pm = QPixmap(size, size)
+        pm.fill(Qt.transparent)
+        painter = QPainter(pm)
+        painter.setRenderHint(QPainter.Antialiasing)
+        renderer.render(painter, QRectF(0, 0, size, size))
+        painter.end()
         result.addPixmap(pm)
     return result
 

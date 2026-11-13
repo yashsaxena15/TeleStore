@@ -63,6 +63,18 @@ class ThumbLoader:
             self.pool.start(_Job(self, key, url))
         return None
 
+    def cached(self, key: str):
+        """The image if it's in memory or on disk, without fetching it."""
+        if key in self.memory:
+            return self.memory[key]
+        cached = self.disk_path(key)
+        if key not in self.pending and os.path.exists(cached):
+            image = QImage(cached)
+            if not image.isNull():
+                self._remember(key, image)
+                return image
+        return None
+
     def _remember(self, key: str, image: QImage) -> None:
         self.pending.discard(key)
         if image.isNull():

@@ -155,6 +155,33 @@ class FakeBrowseApi:
     def storage(self):
         return {"total_bytes": 5 * 1024 ** 3, "total_files": 12, "quota_bytes": 0}
 
+    def media(self, under, page=1, page_size=200):
+        files = [{"id": f"m{n}", "file_name": f"IMG_{n}.jpg", "file_type": "photo", "file_size": 1000,
+                  "file_path": under, "taken_at": f"2026-10-{20 - n:02d}T10:00:00"} for n in range(5)]
+        return {"files": files, "pagination": {"has_next": False, "total_items": 5}}
+
+    def shared_by_me(self):
+        return [{"share_id": "s9", "item": {"id": "a1", "name": "clip.mp4", "type": "video", "size": 5},
+                 "location": "/Home", "members": 2, "link": {"enabled": True, "token": "t", "state": "active"}}]
+
+    def remote_tasks(self):
+        return {"tasks": [{"task_id": "r1", "filename": "movie.mkv", "status": "downloading", "filesize": 1000,
+                           "transferred_bytes": 250, "download_bps": 100}]}
+
+    def notifications(self, after=None, limit=30):
+        return {"items": [{"id": "n1", "kind": "share", "title": "Bob shared Trip", "body": "", "read": False,
+                           "created_at": "2026-11-13T10:00:00Z", "target": {"type": "shared"}}],
+                "unread": 1, "latest": "n1"}
+
+    def mark_notifications_read(self, ids=None):
+        return 0
+
+    def folder_stats(self, folder_id):
+        return {"total_files": 3, "total_subfolders": 1, "total_size": 4096}
+
+    def files_under(self, folder):
+        return []
+
     def create_folder(self, name, parent):
         self.made.append((name, parent))
         return {}
@@ -244,7 +271,12 @@ def window(qapp, tmp_path):
     w.status_timer.stop()
     w.panel.timer.stop()
     engine.stop()
-    w.close()
+    from telestore_desktop.ui import dialogs
+    ask, dialogs.confirm = dialogs.confirm, lambda *a: True  # closing never waits on a question
+    try:
+        w.close()
+    finally:
+        dialogs.confirm = ask
 
 
 def _pump(qapp, cond, timeout=5):

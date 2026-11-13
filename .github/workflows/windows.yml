@@ -55,28 +55,48 @@ jobs:
       - name: Test
         run: python -m pytest tests -q -p no:cacheprovider
 
-      - name: Build TeleStore.exe
+      # The logo as an .ico, for the .exe, the installer and the Start menu
+      - name: App icon
+        run: python installer/make_icon.py installer/TeleStore.ico
+
+      # The installed app is a folder (starts faster); the portable one is a single .exe
+      - name: Build TeleStore
         run: |
           sed -i "s/^__version__ = .*/__version__ = \"${VERSION}\"/" telestore_desktop/__init__.py
-          pyinstaller --noconfirm --onefile --windowed --name "TeleStore-${VERSION}" \
-            --collect-submodules pyrogram run_telestore.py
-          ls -la dist
+          common="--noconfirm --windowed --icon installer/TeleStore.ico --collect-submodules pyrogram --add-data telestore_desktop/assets;telestore_desktop/assets"
+          pyinstaller $common --onedir --name TeleStore run_telestore.py
+          pyinstaller $common --onefile --name "TeleStore-${VERSION}-portable" run_telestore.py
+          ls -la dist dist/TeleStore
+
+      # TeleStore-Setup-<version>.exe: installs for this Windows user (no administrator), and is what
+      # the app's own updates download and run
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc "/DAppVersion=$env:VERSION" installer\TeleStore.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item "installer\Output\TeleStore-Setup-$env:VERSION.exe" dist\
+          Get-ChildItem dist\*.exe
 
       - uses: actions/upload-artifact@v4
         with:
           name: TeleStore-Windows-${{ env.VERSION }}
           path: windows/dist/*.exe
 
-      # Every merge to main replaces the rolling "windows-latest" pre-release
+      # Every merge to main replaces the rolling "windows-latest" pre-release (the app's Beta updates)
       - name: Publish windows-latest
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete windows-latest --cleanup-tag --yes || true
+          notes="TeleStore for Windows ${VERSION}, built from ${GITHUB_SHA::7}: $(git log -1 --pretty=%s).
+
+          Install with TeleStore-Setup-${VERSION}.exe (it updates itself afterwards), or run the portable .exe without installing."
           gh release create windows-latest dist/*.exe --prerelease --target "$GITHUB_SHA" \
-            --title "TeleStore for Windows (latest)" \
-            --notes "Built from ${GITHUB_SHA::7}. Download the .exe and run it: uploads go straight from your PC to Telegram."
+            --title "TeleStore for Windows (latest)" --notes "$notes"
 
       # A tag like windows-v1.0.0 makes a versioned release
       - name: Publish a versioned release

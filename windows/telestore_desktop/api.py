@@ -76,14 +76,37 @@ class TeleStoreApi:
 
     # ── Files ──
     def list_files(self, path: str, page: int = 1, page_size: int = 200, sort_by: str = "name", order: str = "asc",
-                   q: Optional[str] = None, kind: Optional[str] = None) -> dict:
-        """One page of a folder ("/Home/…", "starred", "trash", "all"), or a search with [q]."""
+                   q: Optional[str] = None, kind: Optional[str] = None, under: Optional[str] = None) -> dict:
+        """One page of a folder ("/Home/…", "starred", "trash", "archive", "all"), or a search with [q].
+        With path "all", [under] keeps only what's inside that /Home folder and its subfolders."""
         params = {"path": path, "page": page, "page_size": page_size, "sort_by": sort_by, "sort_order": order}
         if q:
             params["q"] = q
         if kind:
             params["kind"] = kind
+        if under:
+            params["under"] = under
         return self._call("GET", "files", params=params)
+
+    def media(self, under: str, page: int = 1, page_size: int = 200) -> dict:
+        """Photos and videos inside [under], newest taken first (the Photos timeline, as on the website)."""
+        return self.list_files("all", page, page_size, "taken", "desc", kind="media", under=under)
+
+    def files_under(self, folder: str) -> List[dict]:
+        """Every file inside [folder] and its subfolders (to download a whole folder)."""
+        found, page = [], 1
+        while True:
+            body = self.list_files("all", page, 500, "name", "asc", under=folder)
+            files = body.get("files") or []
+            found += [f for f in files if f.get("file_type") != "folder"]
+            pages = (body.get("pagination") or {}).get("total_pages") or 1
+            if page >= pages or not files:
+                return found
+            page += 1
+
+    def folder_stats(self, folder_id: str) -> dict:
+        """How many files and folders are inside a folder, and their size."""
+        return self._call("GET", "folders/stats", params={"id": folder_id})
 
     def create_folder(self, name: str, parent: str) -> dict:
         return self._call("POST", "folders/create", json={"folderName": name, "currentPath": parent})
@@ -129,6 +152,12 @@ class TeleStoreApi:
     def locate(self, file_id: str) -> dict:
         """Which messages of your channel hold one of your own files (for opening it straight from Telegram)."""
         return self._call("GET", f"direct/locate/{quote(file_id, safe='')}")
+
+    def shared_by_me(self) -> List[dict]:
+        return self._call("GET", "shares/mine").get("shares") or []
+
+    def stop_sharing(self, item_id: str) -> dict:
+        return self._call("DELETE", f"shares/item/{quote(item_id, safe='')}")
 
     def shared_with_me(self) -> List[dict]:
         return self._call("GET", "shares/with-me").get("shares") or []
@@ -213,6 +242,37 @@ class TeleStoreApi:
 
     def storage(self) -> dict:
         return self._call("GET", "files/analytics")
+
+    # ── Notifications (the website's bell) ──
+    def notifications(self, after: Optional[str] = None, limit: int = 30) -> dict:
+        """{items, unread, latest}: the newest first; with [after], only newer ones."""
+        params = {"limit": limit}
+        if after:
+            params["after"] = after
+        return self._call("GET", "user/notifications", params=params)
+
+    def mark_notifications_read(self, ids: Optional[List[str]] = None) -> int:
+        body = {"ids": ids} if ids else {"all": True}
+        return int(self._call("POST", "user/notifications/read", json=body).get("unread") or 0)
+
+    # ── Transfers the server runs (links, torrents, cloud drives) ──
+    def remote_tasks(self) -> dict:
+        return self._call("GET", "transfers/remote/tasks")
+
+    def cancel_remote(self, task_id: str) -> dict:
+        return self._call("POST", "transfers/remote/cancel", json={"task_id": task_id})
+
+    def retry_remote(self, task_id: str) -> dict:
+        return self._call("POST", "transfers/remote/retry", json={"task_id": task_id})
+
+    def cancel_remote_group(self, group_id: str) -> dict:
+        return self._call("POST", "transfers/remote/cancel-group", json={"group_id": group_id})
+
+    def retry_failed_remote(self, group_id: str) -> dict:
+        return self._call("POST", "transfers/remote/retry-failed", json={"group_id": group_id})
+
+    def clear_finished_remote(self) -> dict:
+        return self._call("POST", "transfers/remote/clear-completed")
 
     def create_folder_path(self, full_path: str) -> dict:
         return self._call("POST", "folders/create-path", json={"fullPath": full_path})

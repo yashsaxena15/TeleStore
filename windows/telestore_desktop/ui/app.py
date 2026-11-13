@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from telestore_desktop import APP_NAME, __version__, paths, secure_store
 from telestore_desktop import telegram as tg
 from telestore_desktop.api import ApiError, TeleStoreApi
+from telestore_desktop.downloads import DownloadManager
 from telestore_desktop.engine import UploadEngine
 from telestore_desktop.jobs import JobStore
 from telestore_desktop.settings import Settings
@@ -54,6 +55,7 @@ class App:
         self.qt.setApplicationName(APP_NAME)
         self.qt.setApplicationVersion(__version__)
         self.qt.setStyle("Fusion")
+        self.qt.setWindowIcon(theme.app_icon())
         self.runner = Runner()
         self.settings = Settings.load()
         self.palette = theme.pick(self.settings.theme)
@@ -108,7 +110,8 @@ class App:
         engine.start()
         engine.ready.wait(5)
         state = SimpleNamespace(api=api, engine=engine, store=store, settings=self.settings, runner=self.runner,
-                                username=self.settings.username, palette=self.palette, sign_out=self.sign_out)
+                                username=self.settings.username, palette=self.palette, sign_out=self.sign_out,
+                                downloads=DownloadManager(api))
         self.window = MainWindow(state)
         self.window.show()
         return self.qt.exec()
@@ -116,10 +119,7 @@ class App:
     def sign_out(self, telegram: bool, telestore: bool) -> None:
         if not dialogs.confirm(self.window, "Sign out", "Sign out now? The app closes; unfinished uploads stay in the list."):
             return
-        try:
-            self.window.s.engine.stop()
-        except Exception:
-            pass
+        self.window._shutdown()
         if telegram:
             tg.forget_session()
         if telestore:
@@ -127,8 +127,6 @@ class App:
                 self.window.s.api.logout()
             finally:
                 secure_store.forget(AUTH_FILE)
-        self.window.status_timer.stop()
-        self.window.panel.timer.stop()
         self.qt.quit()
 
 
