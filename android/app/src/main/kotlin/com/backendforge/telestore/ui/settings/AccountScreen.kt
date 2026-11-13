@@ -184,6 +184,15 @@ fun AccountScreen(container: AppContainer, onBack: () -> Unit) {
                         }
                     }
                     Text("Open Telegram and press Start in the chat with @${v.botUsername}. The code is sent for you. Then come back here.")
+                    // No Telegram on this phone (someone else's): scan it with your own phone's camera instead
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                        com.backendforge.telestore.ui.components.QrCode(v.link, size = 180.dp, contentDescription = "QR code to connect Telegram")
+                    }
+                    Text(
+                        "No Telegram on this phone? Scan the QR code with your own phone's camera: it opens the bot in your Telegram " +
+                            "with the code filled in. Press Start there, then come back here.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             },
             confirmButton = {
@@ -204,6 +213,7 @@ private fun IndexChatPanel(container: AppContainer, saved: Long?, loaded: Boolea
     val scope = rememberCoroutineScope()
     var value by remember(saved) { mutableStateOf(saved?.toString().orEmpty()) }
     var busy by remember { mutableStateOf(false) }
+    var groupLink by remember { mutableStateOf<String?>(null) }
     val trimmed = value.trim()
     // A number that fits (a very long one would not)
     val valid = Regex("""-?\d+""").matches(trimmed) && trimmed.toLongOrNull() != null
@@ -230,7 +240,7 @@ private fun IndexChatPanel(container: AppContainer, saved: Long?, loaded: Boolea
             OutlinedButton(onClick = {
                 scope.launch {
                     attempt("Couldn't find the bot. Try again.", onMessage) { container.api().telegramVerification() }
-                        ?.let { openInBrowser(context, it.addToGroupLink) }
+                        ?.let { groupLink = it.addToGroupLink }
                 }
             }) { Text("Add bot to a chat") }
             Spacer(Modifier.weight(1f))
@@ -246,5 +256,23 @@ private fun IndexChatPanel(container: AppContainer, saved: Long?, loaded: Boolea
                 },
             ) { Text(if (busy) "Saving…" else "Save") }
         }
+    }
+    groupLink?.let { link ->
+        AlertDialog(
+            onDismissRequest = { groupLink = null },
+            title = { Text("Add the bot to your group") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Open Telegram and pick the private group for your files. The bot then posts a button there: tap Ok.")
+                    com.backendforge.telestore.ui.components.QrCode(link, size = 180.dp, contentDescription = "QR code to add the bot to a group")
+                    Text(
+                        "No Telegram on this phone? Scan the QR code with your own phone's camera and pick the group there.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { openInBrowser(context, link); groupLink = null }) { Text("Open Telegram") } },
+            dismissButton = { TextButton(onClick = { groupLink = null }) { Text("Close") } },
+        )
     }
 }

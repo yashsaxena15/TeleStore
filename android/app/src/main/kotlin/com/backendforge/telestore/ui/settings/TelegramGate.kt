@@ -58,11 +58,15 @@ fun TelegramGate(container: AppContainer, content: @Composable () -> Unit) {
     var wrongAccount by remember { mutableStateOf<String?>(null) }
     var showAccount by remember { mutableStateOf(false) }
     var recheck by remember { mutableIntStateOf(0) }
+    var checked by remember { mutableStateOf(false) } // TeleStore's side has answered (or couldn't be reached)
 
     LaunchedEffect(Unit) { runCatching { container.startTelegram() } }
     // TeleStore's side: Telegram linked and a storage chat (no connection: let the app open, check next time)
     LaunchedEffect(recheck) {
-        if (signedInHere && state is TgState.Ready) return@LaunchedEffect
+        if (signedInHere && state is TgState.Ready) {
+            checked = true
+            return@LaunchedEffect
+        }
         missing = runCatching {
             val me = container.api().profile()
             when {
@@ -71,6 +75,7 @@ fun TelegramGate(container: AppContainer, content: @Composable () -> Unit) {
                 else -> null
             }
         }.getOrNull()
+        checked = true
     }
     // Signed in here: check this account can open the storage chat, then the app opens
     LaunchedEffect(state) {
@@ -107,6 +112,8 @@ fun TelegramGate(container: AppContainer, content: @Composable () -> Unit) {
     }
 
     when {
+        // Until TeleStore says what's missing, nothing else shows (no screen flashing past)
+        !checked -> Waiting("Checking your account…")
         showAccount -> AccountScreen(container, onBack = { showAccount = false; recheck++ })
         missing != null -> Steps(
             title = if (missing == "link") "Connect your Telegram" else "Make your storage chat",
