@@ -408,6 +408,14 @@ async def index_movie_callback(client: Client, callback: CallbackQuery) -> None:
             logger.warning(f"Unauthorized indexing attempt by user {user_id}")
             return
             
+        # One storage chat belongs to one account
+        from telestore.services import account_link
+        try:
+            account_link.check_chat_free(callback.message.chat.id, telegram_id=user_id)
+        except account_link.LinkRefused as refused:
+            await callback.message.edit(f"❌ {refused}")
+            return
+
         bt.ibutton("❌ Cancel", 'cancel_indexing')
         keyboard = bt.build_menu()
         await callback.message.edit("🚀 Starting indexing process...", reply_markup=keyboard)
