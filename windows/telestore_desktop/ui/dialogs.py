@@ -152,9 +152,9 @@ class TelegramDialog(QDialog):
 
 
 class SettingsDialog(QDialog):
-    """One simple page: upload speed, theme, and signing out."""
+    """One simple page: uploads, downloads, viewing, theme, updates, and signing out."""
 
-    def __init__(self, settings, parent=None):
+    def __init__(self, settings, parent=None, check_updates=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setMinimumWidth(440)
@@ -179,10 +179,40 @@ class SettingsDialog(QDialog):
         speed.addWidget(self.limit_on)
         speed.addWidget(self.limit)
         speed.addStretch()
+        self.folder = QLineEdit(settings.downloads_dir)
+        self.folder.setReadOnly(True)
+        pick = QPushButton("Change…")
+        pick.clicked.connect(self._pick_folder)
+        downloads = QHBoxLayout()
+        downloads.addWidget(self.folder, 1)
+        downloads.addWidget(pick)
+        self.auto_update = QCheckBox("Check for updates automatically")
+        self.auto_update.setChecked(settings.check_updates)
+        self.channel = QComboBox()
+        from telestore_desktop.updates import CHANNELS
+        for key, text in CHANNELS.items():
+            self.channel.addItem(text, key)
+        self.channel.setCurrentIndex(max(0, self.channel.findData(settings.update_channel)))
+        from telestore_desktop import __version__
+        check = QPushButton("Check now")
+        check.setEnabled(check_updates is not None)
+        if check_updates:
+            check.clicked.connect(lambda: check_updates(self.channel.currentData()))
+        self.update_note = QLabel(f"This is TeleStore {__version__}.")
+        self.update_note.setObjectName("muted")
+        update_row = QHBoxLayout()
+        update_row.addWidget(self.channel, 1)
+        update_row.addWidget(check)
+        update_box = QVBoxLayout()
+        update_box.addWidget(self.auto_update)
+        update_box.addLayout(update_row)
+        update_box.addWidget(self.update_note)
         form = QFormLayout()
         form.addRow("Uploads", speed)
+        form.addRow("Downloads go to", downloads)
         form.addRow("Theme", self.theme)
         form.addRow("Viewing", self.direct)
+        form.addRow("Updates", update_box)
         out_tg = QPushButton("Sign out of Telegram")
         out_tg.clicked.connect(lambda: self._out("telegram"))
         out_ts = QPushButton("Sign out of TeleStore")
@@ -206,6 +236,12 @@ class SettingsDialog(QDialog):
         layout.addLayout(outs)
         layout.addSpacing(8)
         layout.addWidget(buttons)
+
+    def _pick_folder(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        folder = QFileDialog.getExistingDirectory(self, "Where downloads go", self.folder.text())
+        if folder:
+            self.folder.setText(folder)
 
     def _out(self, which: str) -> None:
         self.sign_out = which

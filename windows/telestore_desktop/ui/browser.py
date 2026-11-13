@@ -63,7 +63,8 @@ def _rounded(image: QImage, size: int) -> QPixmap:
 
 class Browser(QWidget):
     open_item = Signal(object, list)  # the item, and the items around it (for next / previous)
-    download_item = Signal(object)
+    download_items = Signal(list)  # files and folders, to download to this PC
+    selection_changed = Signal(list)
     action = Signal(str, list)  # rename, move, star, unstar, share, trash, restore, delete, empty-trash
     files_dropped = Signal(list)  # local paths, to upload here
     location_changed = Signal(object)
@@ -142,6 +143,10 @@ class Browser(QWidget):
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(lambda pos: self._menu(self.table, pos))
 
+        for widget in (self.grid, self.table):
+            widget.itemSelectionChanged.connect(self._selection_changed)
+        self.bar = self._selection_bar()
+
         self.message = QLabel()
         self.message.setObjectName("empty")
         self.message.setAlignment(Qt.AlignCenter)
@@ -153,6 +158,7 @@ class Browser(QWidget):
         box.setContentsMargins(20, 14, 20, 12)
         box.addLayout(header)
         box.addSpacing(8)
+        box.addWidget(self.bar)
         box.addWidget(self.stack)
 
         self.view = view
@@ -164,8 +170,72 @@ class Browser(QWidget):
         header.insertWidget(3, self.empty_btn)  # after the stretch, before search
         for keys, slot in ((Qt.Key_F2, lambda: self._key_action("rename")), (QKeySequence.Delete, lambda: self._key_action("trash")),
                            (QKeySequence.Back, self.go_back), (Qt.Key_Backspace, self.go_back),
-                           (QKeySequence.Refresh, self.reload), (QKeySequence.Find, self.search.setFocus)):
+                           (QKeySequence.Refresh, self.reload), (QKeySequence.Find, self.search.setFocus),
+                           (Qt.Key_Escape, self.clear_selection)):
             QShortcut(QKeySequence(keys), self, activated=slot)
+
+    def _selection_bar(self) -> QWidget:
+        """Shown while something is selected, as on the website: what's selected and what to do with it."""
+        bar = QWidget()
+        bar.setObjectName("selectionBar")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(8, 4, 8, 4)
+        row.setSpacing(2)
+        clear = QPushButton()
+        clear.setObjectName("iconButton")
+        clear.setIcon(theme.icon("x", self.p.text, 16))
+        clear.setToolTip("Clear the selection (Esc)")
+        clear.clicked.connect(self.clear_selection)
+        self.bar_count = QLabel()
+        self.bar_count.setStyleSheet("font-weight: 600;")
+        row.addWidget(clear)
+        row.addWidget(self.bar_count)
+        row.addSpacing(10)
+        self.bar_buttons = {}
+        for key, ico, tip in (("download", "download", "Download"), ("share", "users", "Share"),
+                              ("move", "folder-up", "Move to…"), ("star", "star", "Add to Starred"),
+                              ("unstar", "star", "Remove from Starred"), ("trash", "trash", "Move to Trash"),
+                              ("restore", "refresh", "Restore"), ("delete", "x-circle", "Delete forever"),
+                              ("info", "info", "Details")):
+            b = QPushButton()
+            b.setObjectName("iconButton")
+            b.setIcon(theme.icon(ico, self.p.text, 18, fill=key == "unstar"))
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _=False, k=key: self._bar_action(k))
+            self.bar_buttons[key] = b
+            row.addWidget(b)
+        row.addStretch()
+        bar.hide()
+        return bar
+
+    def _bar_action(self, key: str) -> None:
+        items = self.selected()
+        if not items:
+            return
+        if key == "download":
+            self.download_items.emit(items)
+        else:
+            self.action.emit(key, items)
+
+    def _selection_changed(self) -> None:
+        items = self.selected()
+        self.bar.setVisible(bool(items))
+        if items:
+            n = len(items)
+            self.bar_count.setText(f"{n} selected")
+            own = not any(i.share_id for i in items)
+            trash = self.loc.kind == "trash"
+            starred = all(i.starred for i in items)
+            show = {"download": not trash, "share": own and not trash and n == 1, "move": own and not trash,
+                    "star": own and not trash and not starred, "unstar": own and not trash and starred,
+                    "trash": own and not trash, "restore": trash, "delete": trash, "info": not trash}
+            for key, b in self.bar_buttons.items():
+                b.setVisible(show[key])
+        self.selection_changed.emit(items)
+
+    def clear_selection(self) -> None:
+        self.grid.clearSelection()
+        self.table.clearSelection()
 
     def _toggle(self, ico: str, tip: str) -> QPushButton:
         b = QPushButton()
@@ -242,13 +312,17 @@ class Browser(QWidget):
         self.generation += 1
         gen = self.generation
         self.thumbs.clear_queue()
+        self.bar.hide()
         self._show_message("Loading…")
         loc = self.loc
 
         def load():
             if loc.kind == "shared":
-                return [from_share(s.get("item") or {}, s.get("share_id", ""), "", (s.get("owner") or {}).get("name", ""))
-                        for s in self.api.shared_with_me()]
+                found = [from_share(s.get("item") or {}, s.get("share_id", ""), "", (s.get("owner") or {}).get("name", ""))
+                         for s in self.api.shared_with_me()]
+                for item in found:
+                    item.share_root = True
+                return found
             if loc.kind == "share":
                 body = self.api.browse_share(loc.share_id, loc.path)
                 return [from_share(d, loc.share_id, loc.path) for d in body.get("items") or []]
@@ -376,7 +450,6 @@ class Browser(QWidget):
         menu = QMenu(self)
         first = items[0]
         own = not any(i.share_id for i in items)
-        files = [i for i in items if not i.is_folder]
 
         def add(ico, text, fn, shortcut=None):
             a = menu.addAction(theme.icon(ico, self.p.text, 16), text, fn)
@@ -391,9 +464,9 @@ class Browser(QWidget):
         else:
             if len(items) == 1:
                 add("external", "Open", lambda: self._activate(first))
-            if files:
-                add("download", "Download…" if len(files) == 1 else f"Download {len(files)} files…",
-                    lambda: [self.download_item.emit(i) for i in files])
+            add("download", "Download" if len(items) == 1 else f"Download {len(items)} items",
+                lambda: self.download_items.emit(items))
+            add("info", "Details", lambda: self.action.emit("info", items))
             if own:
                 menu.addSeparator()
                 if len(items) == 1:

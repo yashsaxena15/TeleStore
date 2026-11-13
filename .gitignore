@@ -30,3 +30,9 @@ cache/
 .env.bak*
 tree.txt
 *.swp
+
+# Windows app builds (PyInstaller and the installer)
+windows/build/
+windows/*.spec
+windows/installer/Output/
+windows/installer/TeleStore.ico
