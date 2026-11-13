@@ -112,7 +112,9 @@ fun TelegramGate(container: AppContainer, content: @Composable () -> Unit) {
             title = if (missing == "link") "Connect your Telegram" else "Make your storage chat",
             text = if (missing == "link") {
                 "TeleStore keeps your files in your own Telegram. First connect your Telegram account to TeleStore: " +
-                    "open Account, tap Connect Telegram and press Start in the bot's chat. Then come back here."
+                    "open Account, tap Connect Telegram and press Start in the bot's chat. Then come back here.\n\n" +
+                    "Each Telegram account can belong to only one TeleStore account. If the bot says yours is already " +
+                    "connected to another account, use a different Telegram account (another phone number)."
             } else {
                 "Your files are kept in a private Telegram group or channel of your own. Open Account › Index chat, " +
                     "add the TeleStore bot to a new group and tap Ok when it asks. Then come back here."

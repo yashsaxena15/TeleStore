@@ -57,6 +57,12 @@ async def make_index(client: Client, callback_query: CallbackQuery) -> None:
         try:
             username = user_data.get("username")
             if username:
+                    # One storage chat belongs to one account
+                    from telestore.services import account_link
+                    try:
+                        account_link.check_chat_free(callback_query.message.chat.id, username=username)
+                    except account_link.LinkRefused as refused:
+                        return await callback_query.message.edit(f"❌ {refused}")
                     # Update the user's index_chat_id
                     database.Users.update_one(
                         {"username": username},

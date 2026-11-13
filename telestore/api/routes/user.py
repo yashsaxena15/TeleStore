@@ -237,6 +237,56 @@ async def add_user(request: Request, user_request: AddUserRequest, user: User = 
         logger.error(f"Error adding user: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# (Before /{user_id_param}: otherwise that route would take PUT /user/index-chat)
+@router.put("/index-chat", response_model=IndexChatResponse)
+async def update_user_index_chat(request: Request, update_request: UpdateIndexChatRequest, user: User = Depends(require_auth)):
+    """
+    Update the index chat ID for the current user
+    """
+    try:
+        # Update index chat ID in database
+        update_data = {}
+        if update_request.index_chat_id is not None:
+            # One storage chat belongs to one account
+            from telestore.services import account_link
+            try:
+                account_link.check_chat_free(update_request.index_chat_id, username=user.username,
+                                             telegram_id=user.telegram_user_id)
+            except account_link.LinkRefused as refused:
+                raise HTTPException(status_code=409, detail=str(refused))
+            update_data["index_chat_id"] = update_request.index_chat_id
+        else:
+            # If None, remove the field
+            update_data["$unset"] = {"index_chat_id": ""}
+        
+        # Perform the update
+        if update_data:
+            if "$unset" in update_data:
+                # Handle removal of the field
+                database.Users.update_one(
+                    {"username": user.username},
+                    {"$unset": update_data["$unset"]}
+                )
+            else:
+                # Handle setting the field
+                database.Users.update_one(
+                    {"username": user.username},
+                    {"$set": update_data}
+                )
+        
+        # Get updated user data
+        user_data = database.Users.getUser(user.username)
+        index_chat_id = user_data.get("index_chat_id") if user_data else None
+        
+        return IndexChatResponse(index_chat_id=index_chat_id)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating user index chat: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.put("/{user_id_param}", response_model=UserResponse)
 async def update_user(request: Request, user_id_param: str, user_request: UpdateUserRequest, user: User = Depends(require_auth)):
     """
@@ -515,45 +565,6 @@ async def get_user_index_chat(request: Request, user: User = Depends(require_aut
         
     except Exception as e:
         logger.error(f"Error fetching user index chat: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.put("/index-chat", response_model=IndexChatResponse)
-async def update_user_index_chat(request: Request, update_request: UpdateIndexChatRequest, user: User = Depends(require_auth)):
-    """
-    Update the index chat ID for the current user
-    """
-    try:
-        # Update index chat ID in database
-        update_data = {}
-        if update_request.index_chat_id is not None:
-            update_data["index_chat_id"] = update_request.index_chat_id
-        else:
-            # If None, remove the field
-            update_data["$unset"] = {"index_chat_id": ""}
-        
-        # Perform the update
-        if update_data:
-            if "$unset" in update_data:
-                # Handle removal of the field
-                database.Users.update_one(
-                    {"username": user.username},
-                    {"$unset": update_data["$unset"]}
-                )
-            else:
-                # Handle setting the field
-                database.Users.update_one(
-                    {"username": user.username},
-                    {"$set": update_data}
-                )
-        
-        # Get updated user data
-        user_data = database.Users.getUser(user.username)
-        index_chat_id = user_data.get("index_chat_id") if user_data else None
-        
-        return IndexChatResponse(index_chat_id=index_chat_id)
-        
-    except Exception as e:
-        logger.error(f"Error updating user index chat: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ── Notifications (the app's phone notifications and the website's bell) ─────

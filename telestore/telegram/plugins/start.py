@@ -83,6 +83,16 @@ async def handle_verification_code(client: Client, message: Message, code: str) 
             await message.reply("Invalid verification code.")
             return True
             
+        # One Telegram account belongs to one TeleStore account (checked before the code is used up,
+        # so the same code still works from the right Telegram account)
+        from telestore.services import account_link
+        try:
+            account_link.check_telegram_free(user_id, message.from_user.id)
+        except account_link.LinkRefused as refused:
+            await message.reply(f"❌ {refused}")
+            logger.warning(f"Refused linking Telegram {message.from_user.id} to {user_id}: already another account's")
+            return True
+
         # Verify the code (this will also delete it since it's one-time use)
         is_valid = database.Tgcodes.verify_code(user_id, code)
         if not is_valid:
@@ -98,8 +108,16 @@ async def handle_verification_code(client: Client, message: Message, code: str) 
             "telegram_profile_picture": None  # Will be updated separately if needed
         }
         
-        # Update user's Telegram information in the database
-        success = database.Users.update_telegram_info(user_id, telegram_data)
+        # Link it (refused if another account took it meanwhile); the account's earlier records move with it
+        try:
+            account_link.link_telegram(user_id, telegram_data)
+            success = True
+        except account_link.LinkRefused as refused:
+            await message.reply(f"❌ {refused}")
+            return True
+        except Exception as e:
+            logger.error(f"Linking Telegram for {user_id} failed: {e}")
+            success = False
         
         if success:
             # Get bot username for the startgroup link
