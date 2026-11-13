@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Lan
@@ -184,6 +185,7 @@ fun MoreScreen(
             NavGroup {
                 MoreNavRow(icon = Icons.Default.Person, label = "Account and Telegram", onClick = onNavigateAccount)
                 MoreNavRow(icon = Icons.Default.Notifications, label = if (unread > 0) "Notifications · $unread new" else "Notifications", onClick = onNavigateNotifications)
+                DownloadsLocationRow(container)
                 MoreNavRow(icon = Icons.Default.Movie, label = "Video downloads", onClick = onNavigateDownloads)
                 MoreNavRow(icon = Icons.Default.Bolt, label = "Telegram on this phone", onClick = onNavigateTelegram)
                 if (isOwner) {
@@ -285,4 +287,86 @@ private fun MoreNavRow(
             modifier = Modifier.size(14.dp),
         )
     }
+}
+
+
+/**
+ * Settings › Downloads location: where downloaded files and folders go on the phone. The phone's
+ * folder picker chooses any folder (kept with a lasting permission); until then it's Download/TeleStore.
+ */
+@Composable
+private fun DownloadsLocationRow(container: AppContainer) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val current by container.settings.downloadFolder.collectAsStateWithLifecycle()
+    var choosing by remember { mutableStateOf(false) }
+    val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            val kept = runCatching { context.contentResolver.takePersistableUriPermission(uri, flags) }.isSuccess
+            if (kept) {
+                current?.let { old -> if (old != uri.toString()) releaseFolder(container, context, old, flags) }
+                container.settings.setDownloadFolder(uri.toString())
+            } else {
+                android.widget.Toast.makeText(context, "That folder can't be used for downloads. Pick another one.", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .clickable { choosing = true }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Icon(Icons.Default.Download, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Downloads location", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+            Text(
+                com.backendforge.telestore.transfers.DownloadFiles.describe(current),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
+    }
+    if (choosing) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { choosing = false },
+            title = { Text("Downloads location") },
+            text = {
+                Text(
+                    "Files and whole folders you download go here, with their own folders inside.\n\n" +
+                        "Now: ${com.backendforge.telestore.transfers.DownloadFiles.describe(current)}",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { choosing = false; picker.launch(current?.let(android.net.Uri::parse)) }) {
+                    Text("Choose folder")
+                }
+            },
+            dismissButton = {
+                if (current != null) {
+                    androidx.compose.material3.TextButton(onClick = {
+                        choosing = false
+                        current?.let { releaseFolder(container, context, it, flags) }
+                        container.settings.setDownloadFolder(null)
+                    }) { Text("Use Download/TeleStore") }
+                } else {
+                    androidx.compose.material3.TextButton(onClick = { choosing = false }) { Text("Cancel") }
+                }
+            },
+        )
+    }
+}
+
+/** Gives back the permission for a folder no longer used for downloads (not while downloads still go there). */
+private fun releaseFolder(container: AppContainer, context: android.content.Context, tree: String, flags: Int) {
+    if (container.transfers.store.items.value.any { it.targetTree == tree && !it.status.finished }) return
+    runCatching { context.contentResolver.releasePersistableUriPermission(android.net.Uri.parse(tree), flags) }
 }

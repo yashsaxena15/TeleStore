@@ -32,7 +32,7 @@ class AppContainer(val context: Context) {
     /** Lyrics for the song playing; LRCLIB gets its own client too (no token). */
     private val webClient = TeleStoreApi.defaultClient()
     fun lyrics(): LyricsFinder = LyricsFinder(api(), webClient)
-    val transfers = TransferManager(context.applicationContext)
+    val transfers = TransferManager(context.applicationContext) { settings.downloadFolder.value }
     val backup = BackupStore(context.applicationContext)
 
     /** A photo was archived, trashed, moved or changed in the viewer: Photos reloads. */

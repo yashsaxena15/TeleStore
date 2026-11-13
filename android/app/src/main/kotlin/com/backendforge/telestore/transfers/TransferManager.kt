@@ -11,7 +11,10 @@ import androidx.work.OneTimeWorkRequest
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import com.backendforge.telestore.core.ApiException
 import com.backendforge.telestore.core.FileItem
+import com.backendforge.telestore.core.FolderDownloads
+import com.backendforge.telestore.core.FolderFile
 import com.backendforge.telestore.core.TeleStoreApi
 import java.util.concurrent.TimeUnit
 
@@ -19,7 +22,11 @@ import java.util.concurrent.TimeUnit
  * Starts, pauses and cancels the phone's uploads and downloads. Each one is a WorkManager job,
  * so it keeps going with the screen off, survives the app being closed, and waits for a connection.
  */
-class TransferManager(private val context: Context) {
+class TransferManager(
+    private val context: Context,
+    /** The downloads location picked in Settings (a folder's tree uri), or null for Download/TeleStore. */
+    private val downloadLocation: () -> String? = { null },
+) {
     val store = TransferStore(context)
     private val work get() = WorkManager.getInstance(context)
 
@@ -43,14 +50,45 @@ class TransferManager(private val context: Context) {
         return skipped
     }
 
-    fun download(item: FileItem) {
-        // A shared file downloads through its share (it isn't this account's file)
-        val transfer = item.shareId?.let {
-            PhoneTransfer(direction = Direction.DOWNLOAD, name = item.name, size = item.size ?: 0, remotePath = "/shares/$it/dl/${item.id}")
-        } ?: PhoneTransfer(direction = Direction.DOWNLOAD, name = item.name, size = item.size ?: 0, fileId = item.id)
+    /** Downloads a file into the downloads location ([subPath]: the folders it goes in there). */
+    fun download(item: FileItem, subPath: String? = null, group: String? = null) {
+        val transfer = downloadOf(item, subPath, group, downloadLocation())
         store.add(listOf(transfer))
         enqueue(transfer)
     }
+
+    private fun downloadOf(item: FileItem, subPath: String?, group: String?, tree: String?) = PhoneTransfer(
+        direction = Direction.DOWNLOAD, name = item.name, size = item.size ?: 0,
+        // A shared file downloads through its share (it isn't this account's file)
+        fileId = if (item.shareId == null) item.id else null,
+        remotePath = item.shareId?.let { "/shares/$it/dl/${item.id}" },
+        subPath = subPath, group = group, targetTree = tree,
+    )
+
+    /**
+     * Downloads a whole folder as it is: every file, in the same folders, under the downloads location
+     * ("Trip/Day 1/a.jpg"). Your own files come straight from Telegram when that's on. Returns how many.
+     */
+    suspend fun downloadFolder(api: TeleStoreApi, folderPath: String, name: String): Int =
+        queueFolder(FolderDownloads.ownFolder(api, folderPath, name), name)
+
+    /** A folder of a share ([path] relative to the shared folder, "" = all of it), as it is. Returns how many files. */
+    suspend fun downloadShareFolder(api: TeleStoreApi, shareId: String, path: String, name: String): Int =
+        queueFolder(FolderDownloads.shareFolder(api, shareId, path, name), name)
+
+    private fun queueFolder(files: List<FolderFile>, name: String): Int {
+        val tree = downloadLocation()
+        val need = files.sumOf { it.item.size ?: 0 }
+        DownloadFiles.freeBytes(context, tree)?.let { free ->
+            if (need > free) throw ApiException(0, "Not enough space on this phone: $name needs ${sizeText(need)}, ${sizeText(free)} is free.")
+        }
+        val transfers = files.map { downloadOf(it.item, it.subPath, name, tree) }
+        store.add(transfers)
+        transfers.forEach { enqueue(it) }
+        return transfers.size
+    }
+
+    private fun sizeText(bytes: Long): String = android.text.format.Formatter.formatShortFileSize(context, bytes)
 
     /**
      * Keeps [items] on the phone for offline use (inside the app, not in Downloads); [folder] is the
@@ -88,31 +126,9 @@ class TransferManager(private val context: Context) {
 
     /** Any file the server offers at [remotePath] (e.g. a Google Drive file it fetches for us). */
     fun downloadRemote(name: String, size: Long, remotePath: String) {
-        val transfer = PhoneTransfer(direction = Direction.DOWNLOAD, name = name, size = size, remotePath = remotePath)
+        val transfer = PhoneTransfer(direction = Direction.DOWNLOAD, name = name, size = size, remotePath = remotePath, targetTree = downloadLocation())
         store.add(listOf(transfer))
         enqueue(transfer)
-    }
-
-    /** A folder comes down as ZIP files of up to 2 GB (what the server makes of it). */
-    suspend fun downloadFolder(api: TeleStoreApi, folderPath: String): Int {
-        val info = api.folderDownloadInfo(folderPath)
-        val transfers = info.parts.map { part ->
-            PhoneTransfer(direction = Direction.DOWNLOAD, name = part.name, size = part.size, remotePath = part.downloadUrl)
-        }
-        store.add(transfers)
-        transfers.forEach { enqueue(it) }
-        return info.totalFiles
-    }
-
-    /** A folder in a share ([path] relative to the shared folder) as ZIP parts. Returns how many files. */
-    suspend fun downloadShareFolder(api: TeleStoreApi, shareId: String, path: String): Int {
-        val info = api.shareZipInfo(shareId, path)
-        val transfers = info.parts.map { part ->
-            PhoneTransfer(direction = Direction.DOWNLOAD, name = part.name, size = part.size, remotePath = part.downloadUrl)
-        }
-        store.add(transfers)
-        transfers.forEach { enqueue(it) }
-        return info.totalFiles
     }
 
     fun pause(id: String) {

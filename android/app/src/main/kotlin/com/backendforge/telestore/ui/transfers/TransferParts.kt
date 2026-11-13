@@ -93,7 +93,9 @@ internal fun PhoneTransfer.toRow(): TransferRow = TransferRows.phone(
     done = done, size = size, speedBps = speedBps, createdAt = createdAt,
     // A waiting one may say why ("Waiting for the connection…")
     error = error,
-    destination = if (direction == Direction.UPLOAD) folder ?: "/Home" else null,
+    destination = if (direction == Direction.UPLOAD) folder ?: "/Home" else if (offline) null else
+        // Where it's saved on the phone: the downloads location and the folders it came in ("Download/TeleStore/Trip/Day 1")
+        listOfNotNull(com.backendforge.telestore.transfers.DownloadFiles.describe(targetTree), subPath).joinToString("/"),
 )
 
 /**

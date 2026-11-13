@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.ParcelFileDescriptor
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.annotation.RequiresApi
@@ -94,24 +95,33 @@ class UriChunkSource(context: Context, uri: Uri) : ChunkSource, AutoCloseable {
 }
 
 /**
- * The saved copy in Downloads/TeleStore (Android 10+, no permission needed). Older Android keeps it
- * in the app's own Downloads folder instead (Android/data/…/files/Download), which needs no permission.
+ * Where downloads are saved: the folder picked in Settings › Downloads location (any folder the
+ * phone's file picker offers, kept with a lasting permission), or Download/TeleStore when none is
+ * picked (Android 10+, no permission needed; older Android uses the app's own Downloads folder).
+ * A file of a downloaded folder goes in the same folders it was in ([subPath], "Trip/Day 1").
+ * Existing files are never overwritten: the phone names a second copy "name (1).ext".
  */
 object DownloadFiles {
     const val FOLDER = "TeleStore"
+    private val folderLock = Any()
 
     /** Creates the empty file and returns its uri; hidden from other apps until [publish]. */
-    fun create(context: Context, name: String, mime: String?): Uri =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) createInDownloads(context, name, mime) else {
-            val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir, FOLDER).apply { mkdirs() }
+    fun create(context: Context, name: String, mime: String?, subPath: String? = null, tree: String? = null): Uri {
+        val parts = subPath?.split('/')?.filter { it.isNotBlank() }.orEmpty()
+        if (tree != null) return createInTree(context, Uri.parse(tree), parts, name, mime)
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) createInDownloads(context, name, mime, parts) else {
+            var dir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir, FOLDER)
+            parts.forEach { dir = File(dir, it) }
+            dir.mkdirs()
             Uri.fromFile(uniqueFile(dir, name).apply { createNewFile() })
         }
+    }
 
     @RequiresApi(Build.VERSION_CODES.Q)
-    private fun createInDownloads(context: Context, name: String, mime: String?): Uri {
+    private fun createInDownloads(context: Context, name: String, mime: String?, parts: List<String>): Uri {
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, name)
-            put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER")
+            put(MediaStore.Downloads.RELATIVE_PATH, (listOf(Environment.DIRECTORY_DOWNLOADS, FOLDER) + parts).joinToString("/"))
             put(MediaStore.Downloads.IS_PENDING, 1)
             mime?.let { put(MediaStore.Downloads.MIME_TYPE, it) }
         }
@@ -119,9 +129,49 @@ object DownloadFiles {
             ?: throw IOException("Couldn't create the file in Downloads.")
     }
 
+    /** A file in the picked folder ([tree]), inside its subfolders (made when missing). */
+    private fun createInTree(context: Context, tree: Uri, parts: List<String>, name: String, mime: String?): Uri {
+        val resolver = context.contentResolver
+        val dir = synchronized(folderLock) {
+            var docId = try {
+                DocumentsContract.getTreeDocumentId(tree)
+            } catch (e: Exception) {
+                throw IOException("The downloads folder can't be used any more. Pick it again in Settings › Downloads location.")
+            }
+            for (part in parts) docId = childFolder(context, tree, docId, part)
+            DocumentsContract.buildDocumentUriUsingTree(tree, docId)
+        }
+        return try {
+            DocumentsContract.createDocument(resolver, dir, mime ?: "application/octet-stream", name)
+        } catch (e: Exception) {
+            null
+        } ?: throw IOException("Couldn't create $name in the downloads folder. Check it still exists, or pick another in Settings.")
+    }
+
+    /** The id of folder [name] inside [parentId], made when it isn't there yet. */
+    private fun childFolder(context: Context, tree: Uri, parentId: String, name: String): String {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId)
+        val columns = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE)
+        runCatching {
+            context.contentResolver.query(children, columns, null, null, null)?.use { c ->
+                while (c.moveToNext()) {
+                    if (c.getString(1) == name && c.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR) return c.getString(0)
+                }
+            }
+        }
+        val made = try {
+            DocumentsContract.createDocument(context.contentResolver, DocumentsContract.buildDocumentUriUsingTree(tree, parentId),
+                DocumentsContract.Document.MIME_TYPE_DIR, name)
+        } catch (e: Exception) {
+            null
+        } ?: throw IOException("Couldn't make the folder $name in the downloads folder.")
+        return DocumentsContract.getDocumentId(made)
+    }
+
     /** Makes the finished file visible in Files and other apps. */
     fun publish(context: Context, uri: Uri) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && uri.scheme == "content") {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && uri.scheme == "content" && uri.authority == MediaStore.AUTHORITY) {
             runCatching {
                 context.contentResolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
             }
@@ -130,8 +180,29 @@ object DownloadFiles {
 
     fun delete(context: Context, uri: Uri) {
         runCatching {
-            if (uri.scheme == "file") File(uri.path!!).delete() else context.contentResolver.delete(uri, null, null)
+            when {
+                uri.scheme == "file" -> File(uri.path!!).delete()
+                DocumentsContract.isDocumentUri(context, uri) -> DocumentsContract.deleteDocument(context.contentResolver, uri)
+                else -> context.contentResolver.delete(uri, null, null)
+            }
         }
+    }
+
+    /** Free space where downloads go, when the phone can tell (null for a folder on another app's storage). */
+    fun freeBytes(context: Context, tree: String?): Long? = runCatching {
+        val onPhone = tree == null || DocumentsContract.getTreeDocumentId(Uri.parse(tree)).startsWith("primary:")
+        if (!onPhone) return null
+        android.os.StatFs(Environment.getExternalStorageDirectory().path).availableBytes
+    }.getOrNull()
+
+    /** "Download/TeleStore", or the picked folder's path as the phone shows it ("Movies/TeleStore", "SD card/…"). */
+    fun describe(tree: String?): String {
+        if (tree == null) return "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER"
+        val id = runCatching { DocumentsContract.getTreeDocumentId(Uri.parse(tree)) }.getOrNull() ?: return "Picked folder"
+        val volume = id.substringBefore(':')
+        val path = id.substringAfter(':', "")
+        val where = if (volume == "primary") "Phone storage" else "SD card"
+        return if (path.isEmpty()) where else "$where/$path"
     }
 
     private fun uniqueFile(dir: File, name: String): File {

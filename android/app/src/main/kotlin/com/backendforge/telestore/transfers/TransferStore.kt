@@ -42,8 +42,14 @@ data class PhoneTransfer(
     val directParts: Map<Int, Long> = emptyMap(),
     // Downloads
     val fileId: String? = null,
-    /** A server path for folder ZIP parts (/folders/download-zip?…); null downloads [fileId]. */
+    /** A server path to download from (a shared file, a cloud file); null downloads [fileId]. */
     val remotePath: String? = null,
+    /** The folders it goes in under the downloads location ("Trip/Day 1"); null = straight in it. */
+    val subPath: String? = null,
+    /** The folder it came with, when a whole folder was downloaded (shown in Transfers). */
+    val group: String? = null,
+    /** The downloads location it was started with (a picked folder's tree uri; null = Download/TeleStore). */
+    val targetTree: String? = null,
     val localUri: String? = null,
     val etag: String? = null,
     val speedBps: Long = 0,

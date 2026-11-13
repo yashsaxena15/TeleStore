@@ -55,6 +55,18 @@ class AppSettings(context: Context) {
         get() = prefs.getBoolean(KEY_TG_USED, false)
         set(value) = prefs.edit().putBoolean(KEY_TG_USED, value).apply()
 
+    private val _downloadFolder = MutableStateFlow(prefs.getString(KEY_DOWNLOAD_FOLDER, null))
+    /**
+     * Where downloads go: a folder the user picked (a content:// tree the app may write into), or
+     * null for Download/TeleStore. Files and whole folders land there with their own folders.
+     */
+    val downloadFolder: StateFlow<String?> = _downloadFolder.asStateFlow()
+
+    fun setDownloadFolder(treeUri: String?) {
+        prefs.edit().putString(KEY_DOWNLOAD_FOLDER, treeUri).apply()
+        _downloadFolder.value = treeUri
+    }
+
     /** Vibration on long-press, swipes and PIN keys. */
     var haptics: Boolean
         get() = prefs.getBoolean(KEY_HAPTICS, true)
@@ -122,5 +134,6 @@ class AppSettings(context: Context) {
         const val KEY_APP_LOCK = "app_lock"
         const val KEY_APP_LOCK_AFTER = "app_lock_after"
         const val KEY_STORAGE_LINE = "storage_line"
+        const val KEY_DOWNLOAD_FOLDER = "download_folder"
     }
 }
