@@ -45,11 +45,6 @@ class AppSettings(context: Context) {
         get() = prefs.getBoolean(KEY_ONLINE_LYRICS, true)
         set(value) = prefs.edit().putBoolean(KEY_ONLINE_LYRICS, value).apply()
 
-    /** Use the phone's own Telegram account for uploads, backup, playback and downloads of your own files. */
-    var telegramDirect: Boolean
-        get() = prefs.getBoolean(KEY_TG_DIRECT, true)
-        set(value) = prefs.edit().putBoolean(KEY_TG_DIRECT, value).apply()
-
     /** Telegram was signed in on this phone (TDLib starts with the app only then). */
     var telegramUsed: Boolean
         get() = prefs.getBoolean(KEY_TG_USED, false)
@@ -129,7 +124,6 @@ class AppSettings(context: Context) {
         const val KEY_BG_PLAY = "video_background_play"
         const val KEY_ONLINE_LYRICS = "online_lyrics"
         const val KEY_HAPTICS = "haptics"
-        const val KEY_TG_DIRECT = "telegram_direct"
         const val KEY_TG_USED = "telegram_used"
         const val KEY_APP_LOCK = "app_lock"
         const val KEY_APP_LOCK_AFTER = "app_lock_after"

@@ -20,19 +20,21 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Your own files straight from Telegram: the player, the music service and downloads read them from
  * the storage channel with the phone's own Telegram account. The server only says which messages
- * hold a file (/direct/locate). Anything that can't come that way (files shared with you, the
- * Private Vault, a Telegram problem) comes from the TeleStore server, as before.
+ * hold a file (/direct/locate). Your own files never come through the server: a Telegram problem
+ * shows as an error and the next try uses Telegram again. Files shared with you and Private Vault
+ * files (the server keeps them behind the PIN) come from the TeleStore server.
  */
 class TelegramFiles(private val container: AppContainer) {
     private val places = ConcurrentHashMap<String, Pair<Long, DirectLocation>>()
-    private val failed = ConcurrentHashMap.newKeySet<String>()
+    /** Private Vault files (the server answers 403 to /direct/locate): these come through TeleStore. */
+    private val vault = ConcurrentHashMap.newKeySet<String>()
 
     /** The file id in a TeleStore address for one of your files (/dl/<name>?file_id=…), when it may come straight. */
     fun fileIdIn(uri: Uri): String? {
         if (!container.telegramDirect) return null
         val base = runCatching { container.api().baseUrl }.getOrNull() ?: return null
         if (uri.host != base.host || uri.pathSegments.firstOrNull() != "dl") return null
-        return uri.getQueryParameter("file_id")?.takeIf { it.isNotBlank() && it !in failed }
+        return uri.getQueryParameter("file_id")?.takeIf { it.isNotBlank() && it !in vault }
     }
 
     suspend fun locate(fileId: String): DirectLocation {
@@ -42,12 +44,15 @@ class TelegramFiles(private val container: AppContainer) {
         return loc
     }
 
+    /** Waits for Telegram on this phone to be connected (see AppContainer.awaitTelegram). */
+    suspend fun awaitTelegram() = container.awaitTelegram(timeoutMs = 15_000)
+
     /** A file was played: Telegram's own copies on the phone are kept under 1 GB. */
     fun played() = container.telegram.trimCache()
 
-    /** This file couldn't come straight from Telegram: it comes through TeleStore from now on. */
-    fun markFailed(fileId: String) {
-        failed += fileId
+    /** A Private Vault file: it comes through TeleStore (behind the PIN) from now on. */
+    fun markVault(fileId: String) {
+        vault += fileId
     }
 
     /** Bytes [from, from + length) of a file, from its parts' messages. */
@@ -109,12 +114,20 @@ class DirectOrHttpDataSource(private val files: TelegramFiles, private val http:
         val id = files.fileIdIn(dataSpec.uri)
         val found = id?.let {
             try {
-                runBlocking { files.locate(it) }
+                runBlocking {
+                    files.awaitTelegram()
+                    files.locate(it)
+                }
             } catch (e: Exception) {
-                // The player stopped this read (a seek, or leaving): not a reason to use TeleStore
+                // The player stopped this read (a seek, or leaving): nothing went wrong
                 if (cancelled(e)) throw InterruptedIOException("Stopped")
-                android.util.Log.w("TeleStore", "Playing $it through TeleStore: ${e.message}")
-                null
+                if ((e as? com.backendforge.telestore.core.ApiException)?.status == 403) {
+                    files.markVault(it) // a Private Vault file: through TeleStore
+                    null
+                } else {
+                    // Your own files only come from Telegram: the player shows the problem, and trying again uses Telegram
+                    throw IOException("Couldn't play this from Telegram: ${e.message ?: "Telegram isn't connected"}", e)
+                }
             }
         }
         if (id == null || found == null) return http.open(dataSpec)
@@ -142,8 +155,7 @@ class DirectOrHttpDataSource(private val files: TelegramFiles, private val http:
             } catch (e: Exception) {
                 // The player stopped this read (a seek, resuming, or leaving): the file stays on Telegram
                 if (cancelled(e)) throw InterruptedIOException("Stopped")
-                android.util.Log.w("TeleStore", "Playing $fileId through TeleStore from now on: Telegram failed at byte $pos", e)
-                fileId?.let(files::markFailed) // the next try comes through TeleStore
+                android.util.Log.w("TeleStore", "Telegram failed at byte $pos of $fileId", e)
                 throw IOException(e.message ?: "Telegram didn't send the file", e)
             }
             if (w.isEmpty()) throw IOException("Telegram sent no data")
