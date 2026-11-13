@@ -331,6 +331,9 @@ fun MainScreen(
         picker.launch(arrayOf("*/*"))
     }
 
+    /** Where downloads go, in words ("Download/TeleStore", "SD card/Movies"). */
+    fun downloadsPlace(): String = com.backendforge.telestore.transfers.DownloadFiles.describe(container.settings.downloadFolder.value)
+
     fun downloadShareFolder(shareId: String, path: String, name: String) {
         askForNotifications()
         scope.launch {
@@ -390,8 +393,6 @@ fun MainScreen(
             transferMessage = failed ?: "Downloading $count files to ${downloadsPlace()}. See Transfers."
         }
     }
-
-    fun downloadsPlace(): String = com.backendforge.telestore.transfers.DownloadFiles.describe(container.settings.downloadFolder.value)
 
     /** Keeps a file or folder on the phone for offline use, or removes the copy. */
     fun toggleOffline(item: FileItem) {
