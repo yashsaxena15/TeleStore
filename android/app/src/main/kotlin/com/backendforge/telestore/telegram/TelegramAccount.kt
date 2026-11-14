@@ -123,12 +123,18 @@ class TelegramAccount(private val context: Context) {
     private val knownChats = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<Long, Boolean>())
 
     /** Makes sure Telegram on this phone knows the storage channel (it must have seen it once). */
+    /** While the storage chat is being looked for in a fresh Telegram sign-in: how many chats were checked. */
+    val chatsChecked = MutableStateFlow(0)
+
     suspend fun ensureChat(chatId: Long) {
         if (chatId in knownChats) return
-        if (runCatching { send(TdApi.GetChat(chatId)) }.isFailure) {
+        if (runCatching { send(TdApi.GetChat(chatId)) }.isFailure && !openChannelDirectly(chatId)) {
+            // Not known yet (a fresh sign-in knows no chats): go through the chat list until it shows up
             var found = false
+            chatsChecked.value = 0
             for (round in 0 until 50) {
                 val more = runCatching { send(TdApi.LoadChats(TdApi.ChatListMain(), 100)) }
+                chatsChecked.value = (round + 1) * 100
                 found = runCatching { send(TdApi.GetChat(chatId)) }.isSuccess
                 if (found || more.isFailure) break // found it, or every chat is loaded
             }
@@ -136,6 +142,21 @@ class TelegramAccount(private val context: Context) {
                 "Sign in with the account that owns the channel.")
         }
         knownChats += chatId
+    }
+
+    /**
+     * A channel or group is found by its id straight away (no going through every chat): its chat is
+     * made from the supergroup id, then Telegram says whether this account is in it. False when that
+     * doesn't work (then the chat list is searched).
+     */
+    private suspend fun openChannelDirectly(chatId: Long): Boolean {
+        val supergroupId = -chatId - 1_000_000_000_000L
+        if (supergroupId <= 0) return false
+        return runCatching {
+            send(TdApi.CreateSupergroupChat(supergroupId, false))
+            val group = send(TdApi.GetSupergroup(supergroupId))
+            group.status !is TdApi.ChatMemberStatusLeft && group.status !is TdApi.ChatMemberStatusBanned
+        }.getOrDefault(false)
     }
 
     // ── Reading files of the storage channel ──

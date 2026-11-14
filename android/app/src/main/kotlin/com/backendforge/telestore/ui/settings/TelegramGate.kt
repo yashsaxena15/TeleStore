@@ -35,6 +35,7 @@ import com.backendforge.telestore.data.AppContainer
 import com.backendforge.telestore.telegram.TgState
 import com.backendforge.telestore.ui.components.AppTopBar
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Telegram is required: your files live in your own Telegram and this phone reads and writes them
@@ -59,6 +60,9 @@ fun TelegramGate(container: AppContainer, content: @Composable () -> Unit) {
     var showAccount by remember { mutableStateOf(false) }
     var recheck by remember { mutableIntStateOf(0) }
     var checked by remember { mutableStateOf(false) } // TeleStore's side has answered (or couldn't be reached)
+    var openTry by remember { mutableIntStateOf(0) } // "Try again" on opening the storage chat
+    var stuck by remember { mutableStateOf(false) } // opening the storage chat took too long
+    val chatsChecked by container.telegram.chatsChecked.collectAsState()
 
     LaunchedEffect(Unit) { runCatching { container.startTelegram() } }
     // TeleStore's side: Telegram linked and a storage chat (no connection: let the app open, check next time)
@@ -78,11 +82,20 @@ fun TelegramGate(container: AppContainer, content: @Composable () -> Unit) {
         checked = true
     }
     // Signed in here: check this account can open the storage chat, then the app opens
-    LaunchedEffect(state) {
+    LaunchedEffect(state, openTry) {
         when (state) {
             is TgState.Ready -> {
+                stuck = false
                 val chat = runCatching { container.api().indexChat().chatId }.getOrNull()
-                val problem = if (chat == null) null else runCatching { container.telegram.ensureChat(chat) }.exceptionOrNull()
+                // Never wait for ever: a fresh Telegram sign-in with very many chats can be slow to search
+                var timedOut = false
+                val problem = if (chat == null) null else runCatching {
+                    if (withTimeoutOrNull(OPEN_CHAT_TIMEOUT_MS) { container.telegram.ensureChat(chat) } == null) timedOut = true
+                }.exceptionOrNull()
+                if (timedOut) {
+                    stuck = true
+                    return@LaunchedEffect
+                }
                 wrongAccount = problem?.message
                 if (problem == null) {
                     container.settings.telegramUsed = true
@@ -137,10 +150,25 @@ fun TelegramGate(container: AppContainer, content: @Composable () -> Unit) {
             secondary = "Check again" to { wrongAccount = null; recheck++ },
             onSignOut = ::signOutOfTeleStore,
         )
-        state is TgState.Ready -> Waiting("Opening your storage chat…")
+        stuck && state is TgState.Ready -> Steps(
+            title = "Couldn't open your storage chat",
+            text = "Telegram on this phone hasn't found your storage chat yet. Right after signing in to Telegram " +
+                "it may still be loading your chats: try again in a moment.\n\nIf it keeps happening, this Telegram account " +
+                "may not be in your storage chat. Sign in with the account that owns it.",
+            action = "Try again" to { stuck = false; openTry++ },
+            secondary = "Use a different Telegram account" to { scope.launch { runCatching { container.telegram.signOut() }; stuck = false } },
+            onSignOut = ::signOutOfTeleStore,
+        )
+        state is TgState.Ready -> Waiting(
+            if (chatsChecked > 0) "Looking through your Telegram chats for your storage chat… ($chatsChecked checked)"
+            else "Opening your storage chat…",
+        )
         else -> TelegramScreen(container, onBack = null, onSignOutOfTeleStore = ::signOutOfTeleStore)
     }
 }
+
+/** How long opening the storage chat may take before the app says so and offers a way out. */
+private const val OPEN_CHAT_TIMEOUT_MS = 60_000L
 
 @Composable
 private fun Steps(
@@ -172,13 +200,13 @@ private fun Steps(
 private fun Waiting(text: String) {
     Scaffold { padding ->
         Column(
-            Modifier.fillMaxSize().padding(padding),
+            Modifier.fillMaxSize().padding(padding).padding(horizontal = 32.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             CircularProgressIndicator()
             Spacer(Modifier.height(16.dp))
-            Text(text, style = MaterialTheme.typography.bodyMedium)
+            Text(text, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
         }
     }
 }
