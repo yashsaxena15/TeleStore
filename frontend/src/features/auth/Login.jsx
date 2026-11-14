@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { getApiBaseUrl, fetchWithTimeout } from "@/lib/api";
-import { useGoogleSignIn } from "./useGoogleSignIn";
 import { ForgotPasswordDialog } from "./ForgotPasswordDialog";
 import { BackendUrlUpdater } from "@/features/settings/BackendUrlUpdater";
 import logger from "@/lib/logger";
@@ -25,49 +24,6 @@ const Login = () => {
     // Only the desktop app talks to a server of the user's choosing; the website is the server
     const isDesktop = authService.isTauri();
     const configureBackend = isDesktop ? () => setShowBackendConfig(true) : undefined;
-    const handleCredentialResponse = async (credential) => {
-        setIsLoading(true);
-        setError("");
-        try {
-            const baseUrl = getApiBaseUrl();
-            const apiUrl = baseUrl ? `${baseUrl}` : '';
-            logger.info("Attempting Google login with baseUrl", { baseUrl, apiUrl: `${apiUrl}/auth/google` });
-            const res = await fetchWithTimeout(`${apiUrl}/auth/google`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    ...authService.getAuthHeaders()
-                },
-                body: JSON.stringify({ token: credential }),
-            }, 5000);
-
-            if (res.ok) {
-                const responseData = await res.json();
-                // Store auth token in localStorage for both Tauri and browser
-                if (responseData.auth_token) {
-                    localStorage.setItem('auth_token', responseData.auth_token);
-                }
-                // Force a small delay to ensure session is properly set
-                await new Promise(resolve => setTimeout(resolve, 100));
-                navigate("/");
-            }
-            else {
-                const errorData = await res.json();
-                logger.error("Google login failed", errorData);
-                setError(errorData.detail || "Google authentication failed");
-            }
-        }
-        catch (err) {
-            logger.error("Google login error", err);
-            // Use our error dialog instead of showing backend config
-            showError("Connection Error", "Unable to connect to the backend server. Please check your connection and try again.", "network", undefined, // No retry for now
-            undefined, // Default dismiss behavior
-            configureBackend);
-        }
-        finally {
-            setIsLoading(false);
-        }
-    };
     const handleSubmit = async (e) => {
         e.preventDefault();
         setIsLoading(true);
@@ -116,7 +72,6 @@ const Login = () => {
             setIsLoading(false);
         }
     };
-    const google = useGoogleSignIn(handleCredentialResponse);
     const handleBackendConfigSuccess = () => {
         setShowBackendConfig(false);
         setError("");
@@ -148,8 +103,8 @@ const Login = () => {
             
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="username" className="text-foreground">Username</Label>
-                <Input id="username" placeholder="Enter your username" value={username} onChange={(e) => setUsername(e.target.value)} className="bg-background border-input text-foreground placeholder:text-muted-foreground" disabled={isLoading} required/>
+                <Label htmlFor="username" className="text-foreground">Username or email</Label>
+                <Input id="username" placeholder="Your username or email" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} className="bg-background border-input text-foreground placeholder:text-muted-foreground" disabled={isLoading} required/>
               </div>
               
               <div className="space-y-2">
@@ -183,18 +138,6 @@ const Login = () => {
               </Button>
             </form>
             
-            {google.available && (<>
-                <div className="relative my-6">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-border"></div>
-                  </div>
-                  <div className="relative flex justify-center text-sm">
-                    <span className="px-2 bg-card text-muted-foreground">Or continue with</span>
-                  </div>
-                </div>
-                {/* Google draws its own button here */}
-                <div ref={google.buttonRef} className="flex justify-center min-h-[44px]"/>
-              </>)}
 
             <div className="flex flex-col space-y-3 mt-4">
               <div className="text-center text-sm text-muted-foreground">

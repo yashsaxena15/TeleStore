@@ -6,7 +6,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,24 +23,20 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -51,14 +46,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.backendforge.telestore.data.AppContainer
-import kotlinx.coroutines.launch
 
 @Composable
 fun SignInScreen(container: AppContainer) {
     val vm: SignInViewModel = viewModel { SignInViewModel(container) }
     val state by vm.state.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     var forgotOpen by rememberSaveable { mutableStateOf(false) }
     if (forgotOpen) {
         ForgotPasswordDialog(
@@ -96,7 +88,7 @@ fun SignInScreen(container: AppContainer) {
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
                 )
                 OutlinedTextField(
-                    value = state.username, onValueChange = vm::onUsername, label = { Text("Username") },
+                    value = state.username, onValueChange = vm::onUsername, label = { Text("Username or email") },
                     singleLine = true, enabled = !state.busy, modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                 )
@@ -116,27 +108,6 @@ fun SignInScreen(container: AppContainer) {
                     modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(14.dp),
                 ) {
                     if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text("Sign in")
-                }
-
-                state.googleClientId?.let { clientId ->
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        HorizontalDivider(Modifier.weight(1f))
-                        Text("or", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        HorizontalDivider(Modifier.weight(1f))
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            scope.launch {
-                                try {
-                                    requestGoogleIdToken(context, clientId)?.let(vm::signInWithGoogle)
-                                } catch (e: IllegalStateException) {
-                                    vm.showError(e.message ?: "Google sign-in failed.")
-                                }
-                            }
-                        },
-                        enabled = !state.busy,
-                        modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(14.dp),
-                    ) { Text("Continue with Google") }
                 }
 
                 Spacer(Modifier.height(8.dp))

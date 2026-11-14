@@ -57,20 +57,10 @@ class TeleStoreApi(
     private val slowHttp: OkHttpClient by lazy { http.newBuilder().readTimeout(6, TimeUnit.MINUTES).build() }
 
     // ── Sign-in ─────────────────────────────────────────────────────────────────
-    /** The Google client ID for "Continue with Google", or null when the server hasn't set it up. */
-    suspend fun googleConfig(): GoogleConfig = get(url("auth/google/config"))
-
     suspend fun login(username: String, password: String): LoginResponse =
         post(url("auth/login"), buildJsonObject {
             put("username", username.trim())
             put("password", password)
-            put("device", DEVICE)
-        })
-
-    /** Signs in with a Google ID token from Credential Manager. */
-    suspend fun googleLogin(idToken: String): LoginResponse =
-        post(url("auth/google"), buildJsonObject {
-            put("token", idToken)
             put("device", DEVICE)
         })
 
@@ -828,6 +818,10 @@ class TeleStoreApi(
         }
         if (response.isSuccessful) return response
         val message = response.use { errorMessage(it) }
+        // A wrong vault PIN is a 401 too, but it isn't the sign-in that failed: stay signed in
+        if (response.code == 401 && request.url.encodedPath.contains("/vault/")) {
+            throw ApiException(401, message ?: "Incorrect vault PIN.")
+        }
         if (response.code == 401) {
             onUnauthorized()
             throw UnauthorizedException(message ?: "Please sign in again.")

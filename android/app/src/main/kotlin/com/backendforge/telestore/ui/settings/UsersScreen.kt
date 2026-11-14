@@ -26,7 +26,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -221,7 +220,7 @@ fun UsersScreen(container: AppContainer, myUsername: String, onBack: () -> Unit)
             title = { Text("Email for ${user.name}") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Google sign-in users sign in with this address.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("They can sign in with this address, and password reset codes go here.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(email, { email = it }, singleLine = true, label = { Text("Email") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), modifier = Modifier.fillMaxWidth())
                 }
             },
@@ -290,7 +289,6 @@ private fun UserCard(
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(user.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                        StatusPill(if (user.isGoogle) "Google" else "Password", good = null)
                     }
                     if (!user.email.isNullOrBlank() && user.email != user.name) {
                         Text(user.email.orEmpty(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -370,18 +368,17 @@ private fun SwitchLine(label: String, detail: String, checked: Boolean, enabled:
     }
 }
 
-/** A password account (username, email, password) or a Google one (email only). */
+/** A new account: username, email and password (they sign in with the username or the email). */
 @Composable
 private fun AddUserDialog(container: AppContainer, onDismiss: () -> Unit, onAdded: (ManagedUser) -> Unit) {
     val scope = rememberCoroutineScope()
-    var google by remember { mutableStateOf(false) }
     var username by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var canUpload by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
-    val valid = email.isNotBlank() && (google || (username.isNotBlank() && password.isNotEmpty()))
+    val valid = email.isNotBlank() && username.isNotBlank() && password.isNotEmpty()
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -389,20 +386,16 @@ private fun AddUserDialog(container: AppContainer, onDismiss: () -> Unit, onAdde
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "They get their own private library, empty to start. To upload, they connect Telegram and add the bot to their own group once they sign in.",
+                    "They get their own private library, empty to start. They sign in with the username or the email and the password. To upload, they connect Telegram and add the bot to their own group once they sign in.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = !google, onClick = { google = false; error = null }, label = { Text("Username & password") })
-                    FilterChip(selected = google, onClick = { google = true; error = null }, label = { Text("Google") })
-                }
-                if (!google) OutlinedTextField(username, { username = it; error = null }, singleLine = true, label = { Text("Username") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(username, { username = it; error = null }, singleLine = true, label = { Text("Username") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(
                     email, { email = it; error = null }, singleLine = true, label = { Text("Email") },
-                    supportingText = if (google) ({ Text("They sign in with this Google account.") }) else null,
+                    supportingText = { Text("They can sign in with this too, and get password reset codes here.") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), modifier = Modifier.fillMaxWidth(),
                 )
-                if (!google) PasswordField(password, "Password") { password = it; error = null }
+                PasswordField(password, "Password") { password = it; error = null }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Can upload", style = MaterialTheme.typography.bodyMedium)
@@ -415,14 +408,14 @@ private fun AddUserDialog(container: AppContainer, onDismiss: () -> Unit, onAdde
         },
         confirmButton = {
             TextButton(enabled = valid && !busy, onClick = {
-                if (!google && password.length < MIN_PASSWORD) {
+                if (password.length < MIN_PASSWORD) {
                     error = "Use a password of at least $MIN_PASSWORD characters."
                     return@TextButton
                 }
                 scope.launch {
                     busy = true
                     attempt("Couldn't add the user.", { error = it }) {
-                        if (google) container.api().addUser(email, canUpload) else container.api().addUser(email, canUpload, username, password)
+                        container.api().addUser(email, canUpload, username, password)
                     }?.let {
                         onAdded(it)
                         onDismiss()

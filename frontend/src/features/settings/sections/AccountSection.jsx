@@ -53,7 +53,7 @@ const ChangePasswordDialog = ({ open, onOpenChange, username }) => {
           <DialogDescription>Used when you sign in as {username}.</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="grid gap-3">
-          <Field label="Current password" htmlFor="pw-current" hint="Leave empty if you sign in with Telegram or Google and never set one.">
+          <Field label="Current password" htmlFor="pw-current" hint="Leave empty if you never set one.">
             <Input id="pw-current" type="password" autoComplete="current-password" value={form.current} onChange={set("current")}/>
           </Field>
           <Field label="New password" htmlFor="pw-new">

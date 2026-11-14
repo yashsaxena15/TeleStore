@@ -7,6 +7,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
@@ -46,13 +47,11 @@ class TeleStoreApiTest {
     }
 
     @Test
-    fun `google sign-in returns the account name`() = runTest {
-        server.enqueue(json("""{"message":"Login successful","user":{"email":"a@b.c","username":"google_a@b.c"},"auth_token":"g-token"}"""))
-        val res = api.googleLogin("id-token")
-        assertEquals("google_a@b.c", res.account)
+    fun `signing in with an email gives the account's username`() = runTest {
+        server.enqueue(json("""{"message":"Login successful","username":"bob","auth_token":"t"}"""))
+        assertEquals("bob", api.login("bob@example.com", "pw").account)
         val body = TeleStoreApi.json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
-        assertEquals("id-token", body["token"]!!.jsonPrimitive.content)
-        assertEquals("android", body["device"]!!.jsonPrimitive.content)
+        assertEquals("bob@example.com", body["username"]!!.jsonPrimitive.content)
     }
 
     @Test
@@ -60,6 +59,15 @@ class TeleStoreApiTest {
         server.enqueue(json("""{"detail":"Incorrect username or password"}""", 401))
         val e = assertThrows<UnauthorizedException> { api.login("bob", "nope") }
         assertEquals("Incorrect username or password", e.message)
+    }
+
+    @Test
+    fun `a wrong vault PIN doesn't sign the app out`() = runTest {
+        server.enqueue(json("""{"detail":"Incorrect 4-digit PIN."}""", 401))
+        val e = assertThrows<ApiException> { api.vaultUnlock("1234") }
+        assertEquals(401 to "Incorrect 4-digit PIN.", e.status to e.message)
+        assertFalse(e is UnauthorizedException)
+        assertEquals(0, signedOut)
     }
 
     @Test
@@ -129,12 +137,6 @@ class TeleStoreApiTest {
         server.enqueue(json("""{"files":[]}"""))
         api.listFiles(query = "   ")
         assertNull(server.takeRequest().requestUrl!!.queryParameter("q"))
-    }
-
-    @Test
-    fun `google config may be missing`() = runTest {
-        server.enqueue(json("""{"client_id":null}"""))
-        assertNull(api.googleConfig().clientId)
     }
 
     @Test

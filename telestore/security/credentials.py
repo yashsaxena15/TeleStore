@@ -3,10 +3,7 @@ from fastapi.security import HTTPBearer
 from typing import Optional
 import hmac
 import logging
-from google.oauth2 import id_token
-import os
-from google.auth.transport import requests as google_requests
-from telestore.config import GOOGLE_CLIENT_ID, DEFAULT_ADMIN_USERNAME, DEFAULT_ADMIN_PASSWORD
+from telestore.config import DEFAULT_ADMIN_USERNAME, DEFAULT_ADMIN_PASSWORD
 from telestore.db import database
 from pydantic import BaseModel
 from telestore.security.attempt_limiter import TooManyAttempts, password_limiter
@@ -36,9 +33,6 @@ class User(BaseModel):
 # Both values come from .env (DEFAULT_ADMIN_PASSWORD is required by telestore.config).
 USERNAME = DEFAULT_ADMIN_USERNAME
 
-# List of authorized admin emails (configurable via .env: AUTHORIZED_ADMIN_EMAILS)
-_raw_admin_emails = os.getenv("AUTHORIZED_ADMIN_EMAILS", "")
-AUTHORIZED_ADMINS = [e.strip() for e in _raw_admin_emails.split(",") if e.strip()]
 
 security = HTTPBearer(auto_error=False)
 
@@ -67,7 +61,8 @@ def verify_credentials(username: str, password: str) -> bool:
 
 def canonical_username(username: Optional[str]) -> str:
     """The stored spelling of a typed username: spaces around it and letter case don't matter
-    (phone keyboards add a trailing space and capitalise the first letter)."""
+    (phone keyboards add a trailing space and capitalise the first letter). An email address works
+    too: it finds the one account with that email (none if two accounts share it)."""
     import re
     name = (username or "").strip()
     if not name:
@@ -78,6 +73,12 @@ def canonical_username(username: Optional[str]) -> str:
         doc = database.Users.find_one({"username": {"$regex": f"^{re.escape(name)}$", "$options": "i"}})
         if doc and isinstance(doc.get("username"), str):
             return doc["username"]
+        if "@" in name:
+            email = name.lower()
+            found = [d.get("username") for d in database.Users.get_all_users() or []
+                     if isinstance(d.get("username"), str) and (d.get("email") or "").strip().lower() == email]
+            if len(found) == 1:
+                return found[0]
     except Exception as e:
         logger.error(f"Username lookup failed for '{name}': {e}")
     return name
@@ -100,43 +101,6 @@ def check_login(username: str, password: str) -> Optional[str]:
         logger.warning(f"Password sign-in for '{name}' locked for {lock}s after repeated failures")
         raise TooManyAttempts(lock)
     return None
-
-def verify_google_token(token: str) -> Optional[dict]:
-    """Verify Google ID token and return user info if valid"""
-    try:
-        logger.info(f"Verifying Google token with client ID: {GOOGLE_CLIENT_ID}")
-        
-        # Check if GOOGLE_CLIENT_ID is set
-        if not GOOGLE_CLIENT_ID:
-            logger.error("GOOGLE_CLIENT_ID is not set in environment variables")
-            return None
-            
-        # Specify the CLIENT_ID of the app that accesses the backend:
-        idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), GOOGLE_CLIENT_ID)
-        
-        # Who may sign in is decided by the login route (added users and AUTHORIZED_ADMIN_EMAILS)
-        user_email = idinfo['email']
-        if not idinfo.get('email_verified', False):
-            logger.warning(f"Google account {user_email} has no verified email")
-            return None
-        
-        # ID token is valid. Get user info
-        user_info = {
-            "user_id": idinfo['sub'],
-            "email": idinfo['email'],
-            "name": idinfo.get('name', ''),
-            "picture": idinfo.get('picture', '')
-        }
-        
-        logger.info(f"Google token verified successfully for user: {user_info['email']}")
-        return user_info
-    except ValueError as e:
-        # Invalid token
-        logger.error(f"Invalid Google token: {str(e)}")
-        return None
-    except Exception as e:
-        logger.error(f"Google token verification failed: {e}")
-        return None
 
 ACCOUNT_DISABLED = "This account has been turned off. Ask the owner to turn it back on."
 UPLOADS_DISABLED = "Uploading is turned off for this account. Ask the owner to turn it on."
@@ -193,12 +157,7 @@ def is_admin(request: Request) -> bool:
     # Check if user authenticated via username/password (always admin)
     if request.session.get("auth_method") == "local":
         return True
-    
-    # Check if Google user is in authorized admins list
-    if request.session.get("auth_method") == "google":
-        user_email = request.session.get("user_email")
-        return user_email in AUTHORIZED_ADMINS
-    
+        
     return False
 
 def archive_choice(user_data: Optional[dict]) -> str:
@@ -300,13 +259,8 @@ def get_current_user(request: Request) -> Optional[str]:
     if is_authenticated(request):
         # For local auth, return the username
         username = request.session.get("username")
-        # For Google auth, check if user has Telegram verification
-        if request.session.get("auth_method") == "google":
-            user_data = database.Users.getUser(username)
-            if user_data and user_data.get("telegram_user_id"):
-                return str(user_data.get("telegram_user_id"))
         # For local auth (admin), return the Telegram user ID if available
-        elif request.session.get("auth_method") == "local":
+        if request.session.get("auth_method") == "local":
             # Check if the admin user has a Telegram user ID
             user_data = database.Users.getUser(username)
             if user_data and user_data.get("telegram_user_id"):

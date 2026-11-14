@@ -109,7 +109,7 @@ class TestAuthRoutes:
             },
         )
         assert response.status_code == 401
-        assert response.json()["detail"] == "Incorrect username or password"
+        assert response.json()["detail"] == "Incorrect username, email or password"
 
     def test_login_failure_unknown_user(self, client):
         """Login with non-existent user and wrong password fails with 401."""

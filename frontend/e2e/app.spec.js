@@ -499,13 +499,13 @@ test.describe("import from Instagram", () => {
 });
 
 test.describe("sign-in and passwords", () => {
-    test("login trims the username; Google is hidden when not set up", async ({ page, request }) => {
+    test("login trims the username or email; there is no Google sign-in", async ({ page, request }) => {
         await page.goto("/login");
         await expect(page.getByText("Forgot password?")).toBeVisible();
         await expect(page.getByText("Or continue with")).toHaveCount(0);
         // The website is the server; only the desktop app picks one
         await expect(page.getByText("Configure Backend URL")).toHaveCount(0);
-        await page.getByLabel("Username").fill("yashsaxena15 ");
+        await page.getByLabel("Username or email").fill("yashsaxena15 ");
         await page.getByLabel("Password", { exact: true }).fill("right");
         await page.getByRole("button", { name: "Sign In" }).click();
         await expect.poll(async () => (await mutations(request)).find((r) => r.path === "/auth/login")?.body).toBe('{"username":"yashsaxena15","password":"right"}');
