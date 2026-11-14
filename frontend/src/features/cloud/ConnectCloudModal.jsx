@@ -4,9 +4,23 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, getApiBaseUrl } from "@/lib/api";
 import { ChevronDown, ChevronUp, Cloud, ExternalLink, CheckCircle2 } from "lucide-react";
-export const ConnectCloudModal = ({ open, onOpenChange, onSuccess, }) => {
+const GDRIVE_MESSAGE_TYPES = new Set(["GDRIVE_AUTH_SUCCESS", "GDRIVE_AUTH_ERROR"]);
+// Origins allowed to post the OAuth result back: the TeleStore server that
+// serves the callback page. The redirect URI is built from this page's origin,
+// and the API base may be same-origin or an absolute URL (desktop build).
+const getTrustedOrigins = () => {
+    const origins = new Set([window.location.origin]);
+    try {
+        origins.add(new URL(getApiBaseUrl() || "/", window.location.href).origin);
+    }
+    catch {
+        // Invalid custom server URL: keep same-origin only
+    }
+    return origins;
+};
+export const ConnectCloudModal =({ open, onOpenChange, onSuccess, }) => {
     const [selectedProvider, setSelectedProvider] = useState("google_drive");
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [customClientId, setCustomClientId] = useState("");
@@ -14,13 +28,18 @@ export const ConnectCloudModal = ({ open, onOpenChange, onSuccess, }) => {
     const [isConnecting, setIsConnecting] = useState(false);
     useEffect(() => {
         const handleMessage = (event) => {
-            if (event.data?.type === "GDRIVE_AUTH_SUCCESS") {
+            if (!getTrustedOrigins().has(event.origin))
+                return;
+            const type = event.data?.type;
+            if (typeof type !== "string" || !GDRIVE_MESSAGE_TYPES.has(type))
+                return;
+            if (type === "GDRIVE_AUTH_SUCCESS") {
                 toast.success(`Google Drive successfully connected: ${event.data.email}`);
                 setIsConnecting(false);
                 onSuccess();
                 onOpenChange(false);
             }
-            else if (event.data?.type === "GDRIVE_AUTH_ERROR") {
+            else if (type === "GDRIVE_AUTH_ERROR") {
                 toast.error(`Authorization failed: ${event.data.error}`);
                 setIsConnecting(false);
             }
