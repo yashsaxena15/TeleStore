@@ -15,11 +15,14 @@ from test_telegram_and_ui import _pump, qapp, window  # noqa: F401  (fixtures)
 
 
 # ── Updates ──
-def _release(tag, version, prerelease=False, asset=None):
+def _release(tag, version, prerelease=False, asset=None, digest=True):
     name = asset or f"TeleStore-Setup-{version}.exe"
+    assets = [{"name": f"TeleStore-{version}-portable.exe", "browser_download_url": "x", "size": 1},
+              {"name": name, "browser_download_url": f"https://gh/{tag}/{name}", "size": 1234}]
+    if digest:
+        assets.append({"name": name + ".sha256", "browser_download_url": f"https://gh/{tag}/{name}.sha256", "size": 100})
     return {"tag_name": tag, "prerelease": prerelease, "draft": False, "html_url": f"https://gh/{tag}", "body": "Notes",
-            "assets": [{"name": f"TeleStore-{version}-portable.exe", "browser_download_url": "x", "size": 1},
-                       {"name": name, "browser_download_url": f"https://gh/{tag}/{name}", "size": 1234}]}
+            "assets": assets}
 
 
 LISTING = [_release("android-latest", "1.0.200", True, asset="TeleStore-1.0.200.apk"),
@@ -38,6 +41,8 @@ def test_only_windows_installers_are_seen():
     found = updates.releases_from(LISTING)
     assert [(r.version, r.channel) for r in found] == [("1.0.70", "beta"), ("1.1.0", "stable"), ("1.0.5", "stable")]
     assert found[0].setup_url.endswith("TeleStore-Setup-1.0.70.exe") and found[0].size == 1234
+    assert found[0].sha256_url.endswith("TeleStore-Setup-1.0.70.exe.sha256")
+    assert updates.releases_from([_release("windows-latest", "1.0.9", True, digest=False)])[0].sha256_url == ""
 
 
 def test_channels():
@@ -53,6 +58,7 @@ class _Resp:
     def __init__(self, status=200, body=None, data=b"", headers=None):
         self.status_code, self._body, self.data = status, body, data
         self.headers = headers or {"Content-Length": str(len(data))}
+        self.text = data.decode("latin-1")
 
     def json(self):
         return self._body
@@ -78,14 +84,85 @@ def test_check_says_whether_there_is_something_newer():
         real("beta", "1.0.0", get=lambda *a, **k: _Resp(status=403, body={}))
 
 
+def _sha(data):
+    import hashlib
+    return hashlib.sha256(data).hexdigest()
+
+
+def _github(exe, digest_text, calls=None, digest_status=200):
+    """A fake GitHub serving the installer and its .sha256."""
+    def get(url, *a, **k):
+        if calls is not None:
+            calls.append(url)
+        if url.endswith(".sha256"):
+            return _Resp(status=digest_status, data=digest_text.encode())
+        return _Resp(data=exe)
+    return get
+
+
+def _rel(size=10, digest_url="https://x/TeleStore-Setup-1.2.0.exe.sha256"):
+    return updates.Release("1.2.0", "beta", "https://x/TeleStore-Setup-1.2.0.exe", size, "https://x", "", digest_url)
+
+
 def test_download_checks_the_size(tmp_path):
-    rel = updates.Release("1.2.0", "beta", "https://x/setup.exe", 10, "https://x")
-    path = updates.download(rel, folder=str(tmp_path), get=lambda *a, **k: _Resp(data=b"0123456789"))
-    assert open(path, "rb").read() == b"0123456789" and path.endswith("TeleStore-Setup-1.2.0.exe")
+    data = b"0123456789"
+    rel = _rel()
+    path = updates.download(rel, folder=str(tmp_path), get=_github(data, _sha(data)))
+    assert open(path, "rb").read() == data and path.endswith("TeleStore-Setup-1.2.0.exe")
     rel.size = 99
     with pytest.raises(ConnectionError):
-        updates.download(rel, folder=str(tmp_path / "b"), get=lambda *a, **k: _Resp(data=b"short"))
+        updates.download(rel, folder=str(tmp_path / "b"), get=_github(b"short", _sha(b"short")))
     assert not os.listdir(tmp_path / "b")
+
+
+def test_download_accepts_sha256sum_format(tmp_path):
+    data = b"installer bytes"
+    for text in (f"{_sha(data)}  TeleStore-Setup-1.2.0.exe\n", f"{_sha(data).upper()} *TeleStore-Setup-1.2.0.exe",
+                 _sha(data)):
+        folder = tmp_path / str(abs(hash(text)))
+        assert open(updates.download(_rel(len(data)), folder=str(folder), get=_github(data, text)), "rb").read() == data
+
+
+def test_download_refuses_a_hash_mismatch(tmp_path):
+    data = b"0123456789"
+    with pytest.raises(updates.VerificationError, match="checksum"):
+        updates.download(_rel(), folder=str(tmp_path), get=_github(data, _sha(b"something else")))
+    assert not os.listdir(tmp_path)  # nothing left to run
+
+
+def test_download_refuses_without_a_published_hash(tmp_path):
+    calls = []
+    with pytest.raises(updates.VerificationError, match="no published checksum"):
+        updates.download(_rel(digest_url=""), folder=str(tmp_path), get=_github(b"0123456789", "", calls))
+    assert calls == []  # the installer isn't even fetched
+    with pytest.raises(updates.VerificationError):  # the .sha256 link is broken
+        updates.download(_rel(), folder=str(tmp_path), get=_github(b"0123456789", "", digest_status=404))
+    with pytest.raises(updates.VerificationError, match="isn't valid"):
+        updates.download(_rel(), folder=str(tmp_path), get=_github(b"0123456789", "not a hash"))
+    assert not os.listdir(tmp_path)
+
+
+def test_cached_installer_is_reused_only_when_its_hash_matches(tmp_path):
+    data = b"0123456789"
+    cached = tmp_path / "TeleStore-Setup-1.2.0.exe"
+    cached.write_bytes(b"EVILEVIL!!")  # same size, different content
+    calls = []
+    path = updates.download(_rel(), folder=str(tmp_path), get=_github(data, _sha(data), calls))
+    assert open(path, "rb").read() == data and any(u.endswith(".exe") for u in calls)  # downloaded again
+    calls.clear()
+    assert updates.download(_rel(), folder=str(tmp_path), get=_github(data, _sha(data), calls)) == path
+    assert not any(u.endswith(".exe") for u in calls)  # the good copy is reused
+    cached.write_bytes(b"EVILEVIL!!")
+    with pytest.raises(updates.VerificationError):
+        updates.download(_rel(), folder=str(tmp_path), get=_github(b"EVILEVIL!!", _sha(data)))
+    assert not cached.exists()
+
+
+def test_parse_sha256():
+    h = "a" * 64
+    assert updates.parse_sha256(f"{h}  TeleStore-Setup-1.0.exe\n") == h
+    assert updates.parse_sha256(h.upper()) == h
+    assert updates.parse_sha256("") is None and updates.parse_sha256("abc  x.exe") is None
 
 
 def test_not_installed_when_run_from_source():
