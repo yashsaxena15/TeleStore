@@ -16,7 +16,7 @@ from fastapi import APIRouter, Request, Depends, HTTPException, Query, UploadFil
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
-from telestore.security.credentials import require_auth, require_upload, User
+from telestore.security.credentials import require_auth, require_cloud, require_cloud_upload, User
 from telestore.services.google_drive_manager import GoogleDriveManager
 from telestore.services.remote_transfer_manager import remote_transfer_manager
 from telestore.db import database
@@ -116,7 +116,10 @@ def _get_user_identifiers(user: User) -> List[str]:
 
 @router.get("/accounts")
 async def list_cloud_accounts(user: User = Depends(require_auth)):
-    """List all connected cloud accounts for the current user."""
+    """List all connected cloud accounts for the current user (none while cloud features are off for them,
+    so the apps don't offer drives they can't open)."""
+    if not user.cloud:
+        return {"accounts": []}
     accounts = database.CloudAccounts.get_user_accounts(user_id=_get_user_identifiers(user))
     return {"accounts": accounts}
 
@@ -124,7 +127,7 @@ async def list_cloud_accounts(user: User = Depends(require_auth)):
 async def generate_gdrive_auth_url(
     request: Request,
     body: AuthUrlRequest,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_cloud)
 ):
     """Generate the Google OAuth 2.0 authorization consent URL."""
     user_id = str(user.telegram_user_id) if user.telegram_user_id else user.username
@@ -291,7 +294,7 @@ async def list_cloud_files(
     query: Optional[str] = Query(default=None),
     sort_by: Optional[str] = Query(default="name"),
     sort_order: Optional[str] = Query(default="asc"),
-    user: User = Depends(require_auth)
+    user: User = Depends(require_cloud)
 ):
     """List files and folders in a Google Drive directory."""
     account = database.CloudAccounts.get_account_raw(account_id=account_id, user_id=_get_user_identifiers(user))
@@ -326,7 +329,7 @@ async def list_cloud_files(
 async def delete_cloud_file(
     account_id: str,
     body: DeleteFileRequest,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_cloud)
 ):
     """Trash or delete a file/folder in Google Drive."""
     account = database.CloudAccounts.get_account_raw(account_id=account_id, user_id=_get_user_identifiers(user))
@@ -349,7 +352,7 @@ async def delete_cloud_file(
 async def rename_cloud_file(
     account_id: str,
     body: RenameFileRequest,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_cloud)
 ):
     """Rename a file or folder in Google Drive."""
     account = database.CloudAccounts.get_account_raw(account_id=account_id, user_id=_get_user_identifiers(user))
@@ -372,7 +375,7 @@ async def rename_cloud_file(
 async def create_cloud_folder(
     account_id: str,
     body: CreateFolderRequest,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_cloud)
 ):
     """Create a new folder in Google Drive."""
     account = database.CloudAccounts.get_account_raw(account_id=account_id, user_id=_get_user_identifiers(user))
@@ -405,7 +408,7 @@ async def create_cloud_folder(
 async def transfer_cloud_internal(
     account_id: str,
     body: CloudInternalTransferRequest,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_cloud)
 ):
     """
     Copy or cut/move files and folders directly within Google Drive using Google Drive API v3.
@@ -488,7 +491,7 @@ async def transfer_cloud_internal(
 @router.get("/{account_id}/storage")
 async def get_cloud_storage(
     account_id: str,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_cloud)
 ):
     """Fetch real-time quota usage and user details for the connected Google Drive account."""
     account = database.CloudAccounts.get_account_raw(account_id=account_id, user_id=_get_user_identifiers(user))
@@ -514,7 +517,7 @@ async def stream_cloud_file(
     account_id: str,
     file_id: str,
     request: Request,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_cloud)
 ):
     """
     Stream a video/audio file directly from Google Drive to the browser player
@@ -585,7 +588,7 @@ async def download_cloud_file(
     account_id: str,
     file_id: str,
     request: Request,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_cloud)
 ):
     """
     Directly stream a file from Google Drive to the client as an attachment download
@@ -652,7 +655,7 @@ async def download_cloud_file(
 async def star_cloud_file(
     account_id: str,
     body: StarFileRequest,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_cloud)
 ):
     """Star or unstar a file/folder in Google Drive."""
     account = database.CloudAccounts.get_account_raw(account_id=account_id, user_id=_get_user_identifiers(user))
@@ -675,7 +678,7 @@ async def star_cloud_file(
 async def restore_cloud_file(
     account_id: str,
     body: RestoreFileRequest,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_cloud)
 ):
     """Restore a trashed file or folder in Google Drive."""
     account = database.CloudAccounts.get_account_raw(account_id=account_id, user_id=_get_user_identifiers(user))
@@ -696,7 +699,7 @@ async def restore_cloud_file(
 @router.post("/{account_id}/trash/empty")
 async def empty_cloud_trash(
     account_id: str,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_cloud)
 ):
     """Permanently empty Google Drive trash."""
     account = database.CloudAccounts.get_account_raw(account_id=account_id, user_id=_get_user_identifiers(user))
@@ -716,7 +719,7 @@ async def transfer_to_telegram(
     account_id: str,
     body: TransferToTelegramRequest,
     request: Request,
-    user: User = Depends(require_upload)
+    user: User = Depends(require_cloud_upload)
 ):
     """
     Stream and copy/cut a file or full recursive folder directly from Google Drive into Telegram storage.
@@ -825,7 +828,7 @@ async def transfer_from_telegram(
     account_id: str,
     body: TransferFromTelegramRequest,
     request: Request,
-    user: User = Depends(require_upload)
+    user: User = Depends(require_cloud_upload)
 ):
     """
     Stream and copy/cut Telegram files/folders directly into Google Drive.
@@ -933,7 +936,7 @@ async def upload_to_google_drive(
     account_id: str,
     file: UploadFile = File(...),
     folder_id: Optional[str] = Query("root"),
-    user: User = Depends(require_upload)
+    user: User = Depends(require_cloud_upload)
 ):
     """
     Directly upload a file from the user's browser into Google Drive.

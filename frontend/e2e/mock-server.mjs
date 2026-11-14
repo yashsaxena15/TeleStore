@@ -58,7 +58,14 @@ const resetProtection = () => {
 resetProtection();
 let UNLOCK = null; // the file_id the last unlock was for, until it's spent
 // Settings › Server: compress & extract for everyone (the features reply follows it)
-let SERVER = { archives_enabled: true };
+let SERVER = { archives_enabled: true, cloud_enabled: false };
+// Transfers › Workers: the machines that run cloud transfers
+const freshMachines = () => [
+    { worker_id: "master-vm1", name: "Main server", is_main: true, online: true, paused: false, running: 1 },
+    { worker_id: "phone-redmi", name: "phone-redmi", is_main: false, online: true, paused: false, running: 2 },
+    { worker_id: "vm2-mumbai", name: "vm2-mumbai", is_main: false, online: false, paused: false, running: 0 },
+];
+let MACHINES = freshMachines();
 const ALL = () => Object.values(FOLDERS).flat();
 const byId = (id) => ALL().find((f) => f.id === id);
 const fullPath = (f) => `${f.file_path}/${f.file_name}`;
@@ -537,6 +544,15 @@ const mutation = (req, res, url, body) => {
     if (url.pathname === "/vault/unlock") {
         return send(res, 429, { detail: "Too many wrong attempts. Try again in 1 minute." }, "application/json");
     }
+    const machine = /^\/worker\/machines\/([^/]+)\/(pause|resume)$/.exec(url.pathname);
+    if (machine) {
+        const m = MACHINES.find((x) => x.worker_id === decodeURIComponent(machine[1]));
+        const stopNow = machine[2] === "pause" && JSON.parse(body || "{}").stop_now === true;
+        const handedBack = stopNow ? m.running : 0;
+        m.paused = machine[2] === "pause";
+        if (stopNow) m.running = 0;
+        return send(res, 200, m.paused ? { paused: true, handed_back: handedBack } : { paused: false });
+    }
     if (url.pathname === "/system/settings" && req.method === "PUT") {
         SERVER = { ...SERVER, ...JSON.parse(body || "{}") };
         return send(res, 200, SERVER);
@@ -564,7 +580,8 @@ http.createServer((req, res) => {
                 resetProtection();
                 resetShares();
                 UNLOCK = null;
-                SERVER = { archives_enabled: true };
+                SERVER = { archives_enabled: true, cloud_enabled: false };
+                MACHINES = freshMachines();
             }
             return send(res, 200, requests);
         }
@@ -578,7 +595,8 @@ http.createServer((req, res) => {
         if (url.pathname === "/files") return send(res, 200, listFiles(url));
         if (url.pathname === "/user/notifications") return send(res, 200, notificationsJson());
         if (url.pathname === "/system/settings") return send(res, 200, SERVER);
-        if (url.pathname === "/user/features") return send(res, 200, { archives: SERVER.archives_enabled, is_owner: true });
+        if (url.pathname === "/user/features") return send(res, 200, { archives: SERVER.archives_enabled, cloud: true, is_owner: true });
+        if (url.pathname === "/worker/machines") return send(res, 200, { machines: MACHINES });
         const groupPage = /^\/transfers\/remote\/groups\/([^/]+)\/tasks$/.exec(url.pathname);
         if (groupPage) {
             requests.push({ method: req.method, path: url.pathname, body: url.search });

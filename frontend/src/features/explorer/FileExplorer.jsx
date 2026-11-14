@@ -22,6 +22,7 @@ import { SectionStatus } from "./SectionStatus";
 import { getSection } from "./lib/explorerItems";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { settingsUrl } from "@/features/settings/settingsTabs";
+import { useFeatures } from "@/features/settings/useFeatures";
 import { pathFromUrl, segmentsFromFilePath, viewFromPathname } from "./lib/explorerRoutes";
 import { countByType, filterAndSortItems, mapCloudItems } from "./lib/itemFilters";
 import { createClipboardActions } from "./actions/clipboardActions";
@@ -33,6 +34,8 @@ import { followTarget, useMarkNotificationsRead, useNotificationPoller } from "@
 import { loadOffline, offlineSupported, syncOfflineFolders } from "@/features/offline/offlineStore";
 
 // Pages fade in (same feel as before, without a motion library)
+// Leeches, video and Instagram downloads and Google Drive use the server's bandwidth: the owner allows them per user
+const CLOUD_OFF = "Cloud features are turned off for your account. Ask the owner to allow them (Settings › Users).";
 const PAGE_CLASS = "flex-1 flex flex-col h-full min-h-0 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300";
 
 // Page panels are split into their own chunks and load when first shown
@@ -231,6 +234,7 @@ export const FileExplorer = () => {
     }, [currentApiPath, searchQuery, typeFilter, sizeFilter, dateFilter]);
     const isAllPages = pageSize === -1;
     const { files, pagination, isLoading: isFilesLoading, isFetching: isFilesFetching, isError, error, refetch: refetchFiles } = useFiles(isCloudMode ? undefined : currentApiPath, isAllPages ? undefined : page, isAllPages ? undefined : pageSize, sortField, sortOrder);
+    const { cloud: canCloud } = useFeatures();
     // Cloud Accounts Query
     const cloudAccountsQuery = useQuery({
         queryKey: ['cloudAccounts'],
@@ -665,15 +669,19 @@ export const FileExplorer = () => {
                 return;
             }
             case "remote-leech":
+                if (!canCloud) return toast.error(CLOUD_OFF);
                 setRemoteDownloadOpen(true);
                 return;
             case "instagram-import":
+                if (!canCloud) return toast.error(CLOUD_OFF);
                 setInstagramOpen(true);
                 return;
             case "media-download":
+                if (!canCloud) return toast.error(CLOUD_OFF);
                 setMediaOpen(true);
                 return;
             case "connect-drive":
+                if (!canCloud) return toast.error(CLOUD_OFF);
                 setConnectDriveOpen(true);
                 return;
             case "webdav":

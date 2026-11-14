@@ -13,6 +13,9 @@ import { useTransferManager } from "./useTransferManager";
 import { buildTransferItems, countByFilter, matchesFilter, TRANSFER_FILTERS, TRANSFERRING_STATUSES, formatEta, kindLabel, statusInfo, rowActions, activitySummary, itemSpeeds, totalSpeeds, speedText, headerLine, googleNote, workerLabel } from "./transferRows";
 import { TONE_CHIP, TransferDetails } from "./TransferDetails";
 import { FolderTransfer } from "./FolderTransfer";
+import { WorkersPanel } from "./WorkersPanel";
+import { useIsOwner } from "@/hooks/useShellData";
+import { useFeatures } from "@/features/settings/useFeatures";
 
 // Server transfers the user can start: the "From elsewhere" items of the New menu, minus
 // connecting a drive (not a transfer)
@@ -121,6 +124,9 @@ const TransferRow = ({ item, actions, openInFolder, onOpen, onCancelFolder }) =>
 export const Transfers = ({ onNewTransfer }) => {
     const navigate = useNavigate();
     const manager = useTransferManager();
+    const isOwner = useIsOwner();
+    const { cloud } = useFeatures();
+    const canStart = Boolean(onNewTransfer) && cloud;
     const { uploads, downloads, remoteTransfers, remoteGroups, stats, pauseAll, resumeAll, cancelAll, clearCompleted } = manager;
     const [filter, setFilter] = useState("all");
     const [folderId, setFolderId] = useState(null);
@@ -160,7 +166,7 @@ export const Transfers = ({ onNewTransfer }) => {
     };
     return (<div className="flex-1 flex flex-col overflow-hidden bg-background">
       <PageHeader icon={ArrowUpDown} title="Transfers" subtitle={subtitle} actions={<>
-          {onNewTransfer && <NewTransferMenu onPick={onNewTransfer}/>}
+          {canStart && <NewTransferMenu onPick={onNewTransfer}/>}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon" className="h-9 w-9" aria-label="Bulk actions" title="Bulk actions">
@@ -178,6 +184,7 @@ export const Transfers = ({ onNewTransfer }) => {
         </>}/>
       <div className="flex-1 overflow-auto px-3 sm:px-6 py-4">
         <div className="max-w-5xl mx-auto flex flex-col gap-3">
+          {!openFolder && isOwner && <WorkersPanel />}
           {openFolder ? (<FolderTransfer key={openFolder.group_id} group={openFolder} actions={manager} onBack={() => setFolderId(null)} onCancelFolder={setConfirmFolder}/>) : (<>
           <div role="group" aria-label="Filter transfers" className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
             {TRANSFER_FILTERS.map((f) => (<button key={f.id} type="button" onClick={() => setFilter(f.id)} aria-pressed={filter === f.id} className={cn("h-7 shrink-0 inline-flex items-center gap-1.5 px-2.5 rounded-md border text-xs whitespace-nowrap transition-colors", filter === f.id ? "bg-foreground text-background border-transparent" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted", f.id === "failed" && counts.failed > 0 && filter !== f.id && "text-destructive")}>
@@ -193,7 +200,7 @@ export const Transfers = ({ onNewTransfer }) => {
               <h3 className="text-sm font-semibold">{filter === "all" ? "No transfers yet" : `No ${TRANSFER_FILTERS.find((f) => f.id === filter).label.toLowerCase()} transfers`}</h3>
               <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">Uploads, downloads and cloud leeches show up here while they run.</p>
               <div className="mt-3 flex justify-center gap-2">
-                {onNewTransfer && <NewTransferMenu onPick={onNewTransfer}/>}
+                {canStart && <NewTransferMenu onPick={onNewTransfer}/>}
                 <Button size="sm" variant="outline" onClick={() => navigate("/")} className="gap-1.5"><Folder className="w-4 h-4"/>Go to Files</Button>
               </div>
             </div>) : (<div role="table" aria-label="Transfers" className="rounded-lg border border-border bg-card overflow-hidden">

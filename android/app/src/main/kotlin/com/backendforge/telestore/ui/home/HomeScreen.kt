@@ -115,6 +115,7 @@ fun HomeScreen(
     var newFolder by remember { mutableStateOf(false) }
 
     val unread by container.unreadNotifications.collectAsStateWithLifecycle()
+    val features by container.features.collectAsStateWithLifecycle()
     // The top bar pads for the status bar itself, so the Scaffold mustn't add that space a second time
     Scaffold(
         contentWindowInsets = WindowInsets(0),
@@ -127,7 +128,10 @@ fun HomeScreen(
                 DropdownMenu(expanded = newMenu, onDismissRequest = { newMenu = false }) {
                     DropdownMenuItem(text = { Text("Upload files") }, leadingIcon = { Icon(Icons.Filled.Upload, null) }, onClick = { newMenu = false; onUpload(TeleStoreApi.HOME) })
                     DropdownMenuItem(text = { Text("New folder") }, leadingIcon = { Icon(Icons.Filled.CreateNewFolder, null) }, onClick = { newMenu = false; newFolder = true })
-                    DropdownMenuItem(text = { Text("Add from link") }, leadingIcon = { Icon(Icons.Filled.Link, null) }, onClick = { newMenu = false; onAddLink() })
+                    // Leeches use the server's bandwidth: only when the owner allows them
+                    if (features.cloud) {
+                        DropdownMenuItem(text = { Text("Add from link") }, leadingIcon = { Icon(Icons.Filled.Link, null) }, onClick = { newMenu = false; onAddLink() })
+                    }
                 }
             }
         },

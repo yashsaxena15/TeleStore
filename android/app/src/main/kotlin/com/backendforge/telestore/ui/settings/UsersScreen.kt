@@ -84,13 +84,27 @@ fun UsersScreen(container: AppContainer, myUsername: String, onBack: () -> Unit)
     /** Settings › Server: compress and extract for everyone who follows it. */
     fun setArchivesForEveryone(on: Boolean) {
         val before = server
-        server = ServerSettings(archivesEnabled = on)
+        server = (before ?: ServerSettings()).copy(archivesEnabled = on)
         scope.launch {
             var failed = false
             attempt("Couldn't change it.", { failed = true; server = before; say(it) }) { container.api().setArchivesEnabled(on) }
             if (failed) return@launch
             say(if (on) "Compress and extract turned on" else "Compress and extract turned off")
             // Who follows the server setting just changed with it
+            runCatching { container.api().users() }.onSuccess { users = it.users }
+            container.refreshFeatures()
+        }
+    }
+
+    /** Settings › Server: the cloud features for everyone who follows it (off unless you allow them). */
+    fun setCloudForEveryone(on: Boolean) {
+        val before = server
+        server = (before ?: ServerSettings()).copy(cloudEnabled = on)
+        scope.launch {
+            var failed = false
+            attempt("Couldn't change it.", { failed = true; server = before; say(it) }) { container.api().setCloudEnabled(on) }
+            if (failed) return@launch
+            say(if (on) "Cloud features turned on for everyone following the server" else "Cloud features turned off for everyone following the server")
             runCatching { container.api().users() }.onSuccess { users = it.users }
             container.refreshFeatures()
         }
@@ -135,6 +149,11 @@ fun UsersScreen(container: AppContainer, myUsername: String, onBack: () -> Unit)
                                     "For everyone set to follow this. They use the server's disk and CPU for a long time.",
                                     settings.archivesEnabled, true, { setArchivesForEveryone(it) },
                                 )
+                                SwitchLine(
+                                    "Cloud features",
+                                    "Remote leech (links, magnets, torrents), video and Instagram downloads, Google Drive. For everyone set to follow this. They use the server's bandwidth; you always have them.",
+                                    settings.cloudEnabled, true, { setCloudForEveryone(it) },
+                                )
                             }
                         }
                     }
@@ -169,6 +188,16 @@ fun UsersScreen(container: AppContainer, myUsername: String, onBack: () -> Unit)
                             change(user, user.copy(archives = choice.wire, archivesAllowed = allowed), "Compress & extract for ${user.name}: ${choice.label.lowercase()}") {
                                 container.api().updateUser(user.id, archives = choice)
                                 if (user.username == myUsername) container.refreshFeatures()
+                            }
+                        },
+                        onCloud = { choice ->
+                            val allowed = when (choice) {
+                                ArchiveChoice.ALLOW -> true
+                                ArchiveChoice.BLOCK -> false
+                                ArchiveChoice.DEFAULT -> server?.cloudEnabled ?: user.cloudAllowed
+                            }
+                            change(user, user.copy(cloud = choice.wire, cloudAllowed = allowed), "Cloud features for ${user.name}: ${choice.label.lowercase()}") {
+                                container.api().updateUser(user.id, cloud = choice)
                             }
                         },
                         onEmail = { emailFor = user },
@@ -249,6 +278,7 @@ private fun UserCard(
     onActive: (Boolean) -> Unit,
     onUpload: (Boolean) -> Unit,
     onArchives: (ArchiveChoice) -> Unit,
+    onCloud: (ArchiveChoice) -> Unit,
     onEmail: () -> Unit,
     onPassword: () -> Unit,
     onRemove: () -> Unit,
@@ -294,29 +324,35 @@ private fun UserCard(
                 }
             }
             SwitchLine("Active", if (user.locked) "The owner account can't be turned off" else "Turned-off accounts can't sign in. Their files are kept.", user.active, !user.locked, onActive)
-            SwitchLine("Can upload", if (user.locked) "The owner account can always upload" else "Uploads, leeches, Drive transfers and compressing", user.canUpload, !user.locked, onUpload)
-            ArchivesLine(ArchiveChoice.of(user.archives), user.archivesAllowed, onArchives)
+            SwitchLine("Can upload", if (user.locked) "The owner account can always upload" else "Uploads and compressing", user.canUpload, !user.locked, onUpload)
+            ChoiceLine("Compress & extract", ArchiveChoice.of(user.archives), user.archivesAllowed, onArchives)
+            if (user.locked) {
+                ChoiceLine("Cloud features", ArchiveChoice.ALLOW, true, null)
+            } else {
+                ChoiceLine("Cloud features", ArchiveChoice.of(user.cloud), user.cloudAllowed, onCloud)
+            }
         }
     }
 }
 
-/** Compress & extract for one user: follow the server setting, or always allow / block. */
+/** Compress & extract, or the cloud features, for one user: follow the server setting, or always allow / block.
+ *  No [onChange]: fixed (the owner always has everything). */
 @Composable
-private fun ArchivesLine(choice: ArchiveChoice, allowed: Boolean, onChange: (ArchiveChoice) -> Unit) {
+private fun ChoiceLine(label: String, choice: ArchiveChoice, allowed: Boolean, onChange: ((ArchiveChoice) -> Unit)?) {
     var open by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(end = 4.dp)) {
         Column(Modifier.weight(1f)) {
-            Text("Compress & extract", style = MaterialTheme.typography.bodyMedium)
+            Text(label, style = MaterialTheme.typography.bodyMedium)
             Text(
                 (if (allowed) "On" else "Off") + if (choice == ArchiveChoice.DEFAULT) " · follows the server setting" else "",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Box {
-            TextButton(onClick = { open = true }) { Text(choice.label) }
+            TextButton(onClick = { open = true }, enabled = onChange != null) { Text(choice.label) }
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 ArchiveChoice.entries.forEach { option ->
-                    DropdownMenuItem(text = { Text(option.label) }, onClick = { open = false; if (option != choice) onChange(option) })
+                    DropdownMenuItem(text = { Text(option.label) }, onClick = { open = false; if (option != choice) onChange?.invoke(option) })
                 }
             }
         }

@@ -223,6 +223,16 @@ class TeleStoreApi(
     suspend fun serverSettings(): ServerSettings = get(url("system/settings"))
     suspend fun setArchivesEnabled(on: Boolean): ServerSettings =
         put(url("system/settings"), buildJsonObject { put("archives_enabled", on) })
+    suspend fun setCloudEnabled(on: Boolean): ServerSettings =
+        put(url("system/settings"), buildJsonObject { put("cloud_enabled", on) })
+
+    // Transfers › Workers (owner only)
+    suspend fun machines(): Machines = get(url("worker/machines"))
+    /** [stopNow]: what it runs goes back to the queue at once; otherwise that finishes first. */
+    suspend fun pauseMachine(id: String, stopNow: Boolean): MachinePaused =
+        post(url("worker/machines").newBuilder().addPathSegment(id).addPathSegment("pause").build(), buildJsonObject { put("stop_now", stopNow) })
+    suspend fun resumeMachine(id: String): MachinePaused =
+        post(url("worker/machines").newBuilder().addPathSegment(id).addPathSegment("resume").build(), buildJsonObject { })
 
     /** [user]: an id from the user list, or the signed-in username for your own password. Empty [current] when you have none yet. */
     suspend fun changePassword(user: String, current: String, new: String): MessageReply =
@@ -274,12 +284,13 @@ class TeleStoreApi(
             put("can_upload", canUpload)
         })
 
-    suspend fun updateUser(id: String, email: String? = null, active: Boolean? = null, canUpload: Boolean? = null, archives: ArchiveChoice? = null): ManagedUser =
+    suspend fun updateUser(id: String, email: String? = null, active: Boolean? = null, canUpload: Boolean? = null, archives: ArchiveChoice? = null, cloud: ArchiveChoice? = null): ManagedUser =
         put(url("user").newBuilder().addPathSegment(id).build(), buildJsonObject {
             email?.let { put("email", it.trim()) }
             active?.let { put("active", it) }
             canUpload?.let { put("can_upload", it) }
             archives?.let { put("archives", it.wire) }
+            cloud?.let { put("cloud", it.wire) }
         })
 
     suspend fun removeUser(id: String) = delete(url("user").newBuilder().addPathSegment(id).build())

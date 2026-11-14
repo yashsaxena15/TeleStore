@@ -3,7 +3,7 @@
 from telestore.services.remote_transfer_manager.helpers import friendly_error, google_limit_pause
 from telestore.services import event_service
 from fastapi import APIRouter, Request, HTTPException, Header, Depends, status
-from telestore.security.credentials import require_admin
+from telestore.security.credentials import User, require_admin, require_owner
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, timedelta
@@ -128,7 +128,8 @@ async def worker_heartbeat(
         },
         upsert=True
     )
-    return {"status": "ok", "timestamp": now.isoformat()}
+    from telestore.services import worker_control
+    return {"status": "ok", "timestamp": now.isoformat(), "paused": worker_control.is_paused(body.worker_id)}
 
 
 @router.get("/torrent/{task_id}")
@@ -169,6 +170,49 @@ async def list_worker_nodes(admin: bool = Depends(require_admin)):
     return {"nodes": result, "count": len(result)}
 
 
+class PauseWorkerModel(BaseModel):
+    # False: what it's running finishes first. True: that goes back to the queue right away.
+    stop_now: bool = False
+
+
+@router.get("/machines")
+async def list_machines(owner: User = Depends(require_owner)):
+    """Transfers › Workers: every machine that runs cloud transfers, the main server first."""
+    from telestore.services import worker_control
+    return {"machines": worker_control.overview()}
+
+
+def _known_machine(worker_id: str) -> None:
+    from telestore.services import worker_control
+    if worker_id != worker_control.MAIN_ID and not get_remote_db()["WorkerNodes"].find_one({"worker_id": worker_id}):
+        raise HTTPException(status_code=404, detail="No such machine")
+
+
+@router.post("/machines/{worker_id}/pause")
+async def pause_machine(worker_id: str, body: PauseWorkerModel = PauseWorkerModel(), owner: User = Depends(require_owner)):
+    """It takes no new transfers until resumed; with stop_now what it runs goes to the other machines."""
+    from telestore.services import worker_control
+    _known_machine(worker_id)
+    worker_control.set_paused(worker_id, True)
+    handed_back = 0
+    if body.stop_now:
+        if worker_id == worker_control.MAIN_ID:
+            from telestore.services.remote_transfer_manager import remote_transfer_manager
+            await remote_transfer_manager.stop_local_tasks()
+        handed_back = worker_control.hand_back(worker_id)
+    logger.info(f"[WORKERS] {worker_id} paused by {owner.username} (stop now: {body.stop_now}, handed back {handed_back})")
+    return {"paused": True, "handed_back": handed_back}
+
+
+@router.post("/machines/{worker_id}/resume")
+async def resume_machine(worker_id: str, owner: User = Depends(require_owner)):
+    from telestore.services import worker_control
+    _known_machine(worker_id)
+    worker_control.set_paused(worker_id, False)
+    logger.info(f"[WORKERS] {worker_id} resumed by {owner.username}")
+    return {"paused": False}
+
+
 def tokens_for_worker(worker_id: str) -> List[str]:
     """The bots set aside for workers (from the 7th on, if there are 7 or more), with this worker's own
     bot first: a worker sends with the first one, so two workers don't share a bot. Each worker keeps
@@ -201,6 +245,9 @@ async def claim_task(
     auth: None = Depends(verify_worker_auth)
 ):
     """Atomically claim an available queued remote transfer task for an external worker."""
+    from telestore.services import worker_control
+    if worker_control.is_paused(body.worker_id):  # paused in Transfers › Workers: nothing new for it
+        return {"has_task": False, "task": None, "paused": True}
     coll = get_remote_db()["RemoteTransfers"]
     now = datetime.now(timezone.utc)
 

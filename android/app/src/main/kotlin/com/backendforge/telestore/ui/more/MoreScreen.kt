@@ -99,6 +99,7 @@ fun MoreScreen(
     LaunchedEffect(session.token) { isOwner = runCatching { container.api().isOwner() }.getOrDefault(false) }
 
     val unread by container.unreadNotifications.collectAsStateWithLifecycle()
+    val features by container.features.collectAsStateWithLifecycle()
 
     Scaffold(
         modifier = modifier,
@@ -177,7 +178,7 @@ fun MoreScreen(
             SectionLabel("Private and connected")
             NavGroup {
                 MoreNavRow(icon = Icons.Default.Lock, label = "Private Vault", onClick = onNavigateVault)
-                MoreNavRow(icon = Icons.Default.Cloud, label = "Google Drive", onClick = onNavigateDrive)
+                if (features.cloud) MoreNavRow(icon = Icons.Default.Cloud, label = "Google Drive", onClick = onNavigateDrive)
                 MoreNavRow(icon = Icons.Default.Lan, label = "WebDAV (use in other apps)", onClick = onNavigateWebDav)
             }
 

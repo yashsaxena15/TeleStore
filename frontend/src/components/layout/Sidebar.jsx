@@ -1,3 +1,4 @@
+import { useFeatures } from "@/features/settings/useFeatures";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { HardDrive, HardDriveDownload, Images, ListMusic, User, Settings, Users, LogOut, Laptop, ArrowUpDown, Lock, Cloud, Unlink, Plus, Search, PanelLeftClose, PanelLeftOpen, ChevronsUpDown } from "lucide-react";
@@ -75,6 +76,7 @@ const CloudAccountRow = ({ acc, isSelected, collapsed, onSelect, onDisconnect })
 export const Sidebar = ({ selectedFilter, activeView = "files", onNavigateView, onDrop, onAction, onOpenPalette, isCollapsed = false, onToggleCollapse, isVaultUnlocked = false }) => {
     const [dragOverFilter, setDragOverFilter] = useState(null);
     const cloudAccounts = useCloudAccounts();
+    const { cloud: canCloud } = useFeatures();
     const isOwner = useIsOwner();
     const profile = useUserProfile();
     const { busyCount } = useTransferManager();
@@ -168,6 +170,7 @@ export const Sidebar = ({ selectedFilter, activeView = "files", onNavigateView, 
           {!collapsed && <span className="truncate">Offline</span>}
         </button>
 
+        {canCloud && (<>
         <SectionLabel collapsed={collapsed} action={<button onClick={() => onAction("connect-drive")} className="text-[11px] text-primary hover:underline font-medium" aria-label="Connect cloud drive">+ Connect</button>}>
           Cloud drives
         </SectionLabel>
@@ -175,6 +178,7 @@ export const Sidebar = ({ selectedFilter, activeView = "files", onNavigateView, 
         {cloudAccounts.length === 0 && !collapsed && (<button onClick={() => onAction("connect-drive")} className="w-full mt-0.5 text-xs text-muted-foreground hover:text-foreground border border-dashed border-border rounded-md py-2 flex items-center justify-center gap-1.5 hover:bg-sidebar-accent/40">
             <Cloud className="w-3.5 h-3.5"/>Connect Google Drive
           </button>)}
+        </>)}
 
         <SectionLabel collapsed={collapsed}>Activity</SectionLabel>
         <NotificationBell collapsed={collapsed} className={navClass(false, collapsed)} onNavigateView={onNavigateView}/>

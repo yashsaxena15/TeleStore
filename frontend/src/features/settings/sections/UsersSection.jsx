@@ -71,7 +71,7 @@ const AddUserDialog = ({ open, onOpenChange, onAdded }) => {
           {type === "local" && (<Field label="Password" htmlFor="nu-password"><Input id="nu-password" type="password" autoComplete="new-password" className="h-9" value={form.password} onChange={(e) => set({ password: e.target.value })}/></Field>)}
           <label className="flex items-start gap-2.5 text-sm pt-1">
             <Switch className="mt-0.5" checked={form.canUpload} onCheckedChange={(v) => set({ canUpload: v })}/>
-            <span>Can upload<span className="block text-xs text-muted-foreground">Uploads, cloud leeches and torrents, Drive transfers, compressing. Uses your bots and bandwidth.</span></span>
+            <span>Can upload<span className="block text-xs text-muted-foreground">Uploads and compressing. Uses your bots. Cloud features (leeches, Google Drive) are set separately in the users list.</span></span>
           </label>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <DialogFooter className="gap-2 sm:gap-0 pt-1">
@@ -165,6 +165,9 @@ const ARCHIVE_CHOICES = [
     { value: "block", label: "Block" },
 ];
 
+// A user's cloud features (they use the server's bandwidth): the same three choices
+const CLOUD_CHOICES = ARCHIVE_CHOICES;
+
 export const UsersSection = () => {
     const me = useUserProfile();
     const [users, setUsers] = useState([]);
@@ -200,6 +203,21 @@ export const UsersSection = () => {
             toast.error(errorMessage(err, "Couldn't change it"));
         }
     };
+    // Settings › Server: cloud features for everyone who follows it (off unless you allow them)
+    const setCloudForEveryone = async (on) => {
+        const before = server;
+        setServer({ ...server, cloud_enabled: on });
+        try {
+            setServer(await api.updateServerSettings({ cloud_enabled: on }));
+            toast.success(on ? "Cloud features turned on for everyone following the server" : "Cloud features turned off for everyone following the server");
+            api.getUsers().then((r) => setUsers(r.users)).catch(() => {});
+            refreshFeatures();
+        }
+        catch (err) {
+            setServer(before);
+            toast.error(errorMessage(err, "Couldn't change it"));
+        }
+    };
     // Saves email / Active / Can upload; the table shows the change right away and rolls back on failure
     const saveUser = async (user, patch) => {
         const before = users;
@@ -210,6 +228,7 @@ export const UsersSection = () => {
         if (patch.active !== undefined) body.active = patch.active;
         if (patch.canUpload !== undefined) body.can_upload = patch.canUpload;
         if (patch.archives !== undefined) body.archives = patch.archives;
+        if (patch.cloud !== undefined) body.cloud = patch.cloud;
         try {
             await api.updateUser(user.id, body);
             if (patch.email) toast.success("Email updated");
@@ -219,6 +238,8 @@ export const UsersSection = () => {
                 toast.success(`Compress & extract for ${user.username || user.email}: ${ARCHIVE_CHOICES.find((c) => c.value === patch.archives).label.toLowerCase()}`);
                 if (user.username === me?.username) refreshFeatures();
             }
+            if (patch.cloud !== undefined)
+                toast.success(`Cloud features for ${user.username || user.email}: ${CLOUD_CHOICES.find((c) => c.value === patch.cloud).label.toLowerCase()}`);
         }
         catch (err) {
             setUsers(before);
@@ -240,6 +261,7 @@ export const UsersSection = () => {
     const added = (raw) => setUsers((list) => [...list, mapUser(raw)]);
     // What a choice means right now (follow-server users change with the switch)
     const archivesOn = (choice) => (choice === "allow" ? true : choice === "block" ? false : server?.archives_enabled !== false);
+    const cloudOn = (choice) => (choice === "allow" ? true : choice === "block" ? false : server?.cloud_enabled === true);
     return (<SettingsPanel icon={Users} title="Users" description="Each person has their own private library; nobody sees anyone else's files." actions={<Button size="sm" className="h-8" onClick={() => setAddOpen(true)}><UserPlus className="w-3.5 h-3.5 mr-1.5"/>Add user</Button>}>
       {server && (<div className="flex items-start justify-between gap-4 rounded-lg border border-border px-3 py-2.5 mb-3">
           <div className="min-w-0">
@@ -247,6 +269,13 @@ export const UsersSection = () => {
             <p className="text-xs text-muted-foreground">For everyone set to follow this. They use the server's disk and CPU for a long time.</p>
           </div>
           <Switch className="mt-0.5 shrink-0" checked={server.archives_enabled !== false} onCheckedChange={setArchivesForEveryone} aria-label="Compress and extract for everyone"/>
+        </div>)}
+      {server && (<div className="flex items-start justify-between gap-4 rounded-lg border border-border px-3 py-2.5 mb-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Cloud features</p>
+            <p className="text-xs text-muted-foreground">Remote leech (links, magnets, torrents), video and Instagram downloads, Google Drive. For everyone set to follow this. They use the server's bandwidth; you always have them.</p>
+          </div>
+          <Switch className="mt-0.5 shrink-0" checked={server.cloud_enabled === true} onCheckedChange={setCloudForEveryone} aria-label="Cloud features for everyone"/>
         </div>)}
       {loading ? (<p className="text-sm text-muted-foreground">Loading users…</p>) : users.length === 0 ? (<p className="text-sm text-muted-foreground">No users yet.</p>) : (<div className="-mx-4 -mb-4 overflow-x-auto">
           <table className="w-full text-sm">
@@ -257,6 +286,7 @@ export const UsersSection = () => {
                 <th className="font-semibold px-2 py-2 text-center w-16" title="Turned-off accounts can't sign in. Their files are kept.">Active</th>
                 <th className="font-semibold px-2 py-2 text-center w-20" title="Uploads, cloud leeches, Drive transfers and compressing">Can upload</th>
                 <th className="font-semibold px-2 py-2 w-36" title="Compress to ZIP, Extract and look inside archives">Compress &amp; extract</th>
+                <th className="font-semibold px-2 py-2 w-36" title="Remote leech, torrents, video and Instagram downloads, Google Drive (they use the server's bandwidth)">Cloud features</th>
                 <th className="w-12"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
@@ -283,6 +313,12 @@ export const UsersSection = () => {
                         {ARCHIVE_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                       </select>
                       <span className={cn("ml-2 text-[11px]", user.archivesAllowed ? "text-success" : "text-muted-foreground")}>{user.archivesAllowed ? "On" : "Off"}</span>
+                    </td>
+                    <td className="px-2 py-2.5 whitespace-nowrap" title={locked ? "The owner always has cloud features" : undefined}>
+                      <select value={locked ? "allow" : user.cloud} disabled={locked} onChange={(e) => saveUser(user, { cloud: e.target.value, cloudAllowed: cloudOn(e.target.value) })} aria-label={`Cloud features for ${name}`} className="h-8 rounded-md border border-border bg-background px-2 text-xs disabled:opacity-60">
+                        {CLOUD_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                      </select>
+                      <span className={cn("ml-2 text-[11px]", locked || user.cloudAllowed ? "text-success" : "text-muted-foreground")}>{locked || user.cloudAllowed ? "On" : "Off"}</span>
                     </td>
                     <td className="pr-3 py-2.5 text-right">
                       <DropdownMenu>

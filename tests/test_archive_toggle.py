@@ -61,7 +61,7 @@ def test_jobs_can_still_be_listed_and_cancelled_when_turned_off(client, signed_i
 
 def test_the_app_learns_what_it_may_show(client, signed_in):
     signed_in(archives=False)
-    assert client.get("/user/features").json() == {"archives": False, "is_owner": False}
+    assert client.get("/user/features").json() == {"archives": False, "cloud": True, "is_owner": False}
 
 
 def test_only_the_owner_sees_and_changes_server_settings(client, signed_in, server_switch):
@@ -79,11 +79,11 @@ def test_server_settings_are_stored_and_read_back():
     coll.find_one.return_value = {"_id": "server", "archives_enabled": False}
     with patch.object(server_settings, "_coll", return_value=coll):
         server_settings._cache.update(value=None, at=0.0)
-        assert server_settings.update(archives_enabled=False, unknown=1) == {"archives_enabled": False}
+        assert server_settings.update(archives_enabled=False, unknown=1) == {"archives_enabled": False, "cloud_enabled": False}
         assert coll.update_one.call_args.args == ({"_id": "server"}, {"$set": {"archives_enabled": False}})
         server_settings._cache.update(value=None, at=0.0)
         coll.find_one.return_value = None
-        assert server_settings.get() == {"archives_enabled": True}  # nothing stored: on
+        assert server_settings.get() == {"archives_enabled": True, "cloud_enabled": False}  # nothing stored: archives on, cloud off
     server_settings._cache.update(value=None, at=0.0)
 
 

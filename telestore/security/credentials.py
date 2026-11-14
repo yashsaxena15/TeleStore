@@ -28,6 +28,9 @@ class User(BaseModel):
     can_upload: bool = True
     # Compress, extract and look inside archives (Settings › Server, and per user)
     archives: bool = True
+    # Leeches, torrents, video / Instagram downloads and Google Drive (Settings › Users); require_auth
+    # always sets it from the owner's choice (cloud_allowed), the default only matters to tests
+    cloud: bool = True
 
 # Fallback admin, used only when the username is not in the database.
 # Both values come from .env (DEFAULT_ADMIN_PASSWORD is required by telestore.config).
@@ -140,6 +143,10 @@ UPLOADS_DISABLED = "Uploading is turned off for this account. Ask the owner to t
 ARCHIVES_DISABLED = "Compress and extract are turned off by the owner."
 # A user's archive tools: follow the server's switch, or always allow / block them for this user
 ARCHIVE_CHOICES = ("default", "allow", "block")
+CLOUD_DISABLED = ("Cloud features (leeching links and torrents, video downloads, Instagram, Google Drive) "
+                  "use the server's bandwidth, so the owner turns them on per user. Ask the owner to allow them.")
+# A user's cloud features: follow the server's switch, or always allow / block them for this user
+CLOUD_CHOICES = ARCHIVE_CHOICES
 
 
 def is_owner_account(username: Optional[str], user_data: Optional[dict]) -> bool:
@@ -208,6 +215,24 @@ def archives_allowed(user_data: Optional[dict]) -> bool:
     return bool(server_settings.get()["archives_enabled"])
 
 
+def cloud_choice(user_data: Optional[dict]) -> str:
+    choice = (user_data or {}).get("cloud")
+    return choice if choice in CLOUD_CHOICES else "default"
+
+
+def cloud_allowed(username: Optional[str], user_data: Optional[dict]) -> bool:
+    """Cloud leeches, torrents, video and Instagram downloads, Google Drive: they cost the server's
+    bandwidth, so the owner decides. The owner always has them; others follow their own setting, else
+    the server's switch (off unless the owner turns it on)."""
+    if is_owner_account(username, user_data):
+        return True
+    choice = cloud_choice(user_data)
+    if choice != "default":
+        return choice == "allow"
+    from telestore.services import server_settings
+    return bool(server_settings.get().get("cloud_enabled", False))
+
+
 def _with_account_flags(user: User, user_data: Optional[dict]) -> User:
     active, can_upload = account_flags(user.username, user_data)
     if not active:
@@ -215,6 +240,7 @@ def _with_account_flags(user: User, user_data: Optional[dict]) -> User:
         raise HTTPException(status_code=403, detail=ACCOUNT_DISABLED)
     user.active, user.can_upload = active, can_upload
     user.archives = archives_allowed(user_data)
+    user.cloud = cloud_allowed(user.username, user_data)
     return user
 
 
@@ -311,4 +337,18 @@ def require_upload(user: User = Depends(require_auth)) -> User:
     """Like require_auth, for anything that adds files (uploads, leeches, transfers, archives)."""
     if not user.can_upload:
         raise HTTPException(status_code=403, detail=UPLOADS_DISABLED)
+    return user
+
+
+def require_cloud(user: User = Depends(require_auth)) -> User:
+    """For the cloud features (they use the server's bandwidth): only for users the owner allows."""
+    if not user.cloud:
+        raise HTTPException(status_code=403, detail=CLOUD_DISABLED)
+    return user
+
+
+def require_cloud_upload(user: User = Depends(require_upload)) -> User:
+    """A cloud feature that also adds files: needs both permissions."""
+    if not user.cloud:
+        raise HTTPException(status_code=403, detail=CLOUD_DISABLED)
     return user

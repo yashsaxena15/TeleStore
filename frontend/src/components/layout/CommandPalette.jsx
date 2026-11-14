@@ -3,12 +3,14 @@ import { ArrowUpDown, HardDrive, HardDriveDownload, Images, ListMusic, User, Set
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator, CommandShortcut } from "@/components/ui/command";
 import { useCloudAccounts, useIsOwner } from "@/hooks/useShellData";
 import { setTheme } from "@/lib/theme";
-import { LIBRARY, NEW_ITEM_GROUPS } from "./shellActions";
+import { LIBRARY, newItemGroups } from "./shellActions";
+import { useFeatures } from "@/features/settings/useFeatures";
 
 // Ctrl/⌘+K: jump anywhere or run any shell action.
 export const CommandPalette = ({ open, onOpenChange, onNavigateView, onAction }) => {
     const cloudAccounts = useCloudAccounts();
     const isOwner = useIsOwner();
+    const { cloud } = useFeatures();
     useEffect(() => {
         const onKey = (e) => {
             if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -47,7 +49,7 @@ export const CommandPalette = ({ open, onOpenChange, onNavigateView, onAction })
         </CommandGroup>
         <CommandSeparator />
         <CommandGroup heading="New">
-          {NEW_ITEM_GROUPS.flatMap((g) => g.items).map(({ id, label, icon }) => <Item key={id} icon={icon} label={label} onSelect={() => onAction(id)}/>)}
+          {newItemGroups(cloud).flatMap((g) => g.items).map(({ id, label, icon }) => <Item key={id} icon={icon} label={label} onSelect={() => onAction(id)}/>)}
         </CommandGroup>
         <CommandSeparator />
         <CommandGroup heading="Actions">

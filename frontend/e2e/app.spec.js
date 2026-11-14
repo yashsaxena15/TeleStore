@@ -256,6 +256,24 @@ test.describe("trash, starter folders and new transfers", () => {
         await expect(page.getByRole("table", { name: "Transfers" })).toBeVisible();
     });
 
+    test("the owner pauses and resumes a worker from Transfers", async ({ page, request }) => {
+        await page.goto("/transfers");
+        const workers = page.getByRole("region", { name: "Workers" });
+        await expect(workers.getByText("Main server")).toBeVisible();
+        await expect(workers.getByText("2 transfers running")).toBeVisible();
+        await expect(workers.getByText("Offline")).toBeVisible();
+
+        await workers.getByRole("button", { name: "Pause phone-redmi" }).click();
+        await page.getByRole("menuitem", { name: /Stop now/ }).click();
+        await expect.poll(async () => (await mutations(request)).find((r) => r.path === "/worker/machines/phone-redmi/pause")?.body).toBe('{"stop_now":true}');
+        await expect(page.getByText(/phone-redmi paused. 2 transfers went back to the queue/)).toBeVisible();
+        await expect(workers.getByText("Takes no new transfers until resumed")).toBeVisible();
+
+        await workers.getByRole("button", { name: "Resume phone-redmi" }).click();
+        await expect.poll(async () => (await mutations(request)).some((r) => r.path === "/worker/machines/phone-redmi/resume")).toBe(true);
+        await expect(workers.getByRole("button", { name: "Pause phone-redmi" })).toBeVisible();
+    });
+
     test("New transfer offers leech, video and Instagram", async ({ page }) => {
         await page.goto("/transfers");
         await page.getByRole("button", { name: "New transfer" }).first().click();

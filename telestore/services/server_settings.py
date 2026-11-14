@@ -13,6 +13,9 @@ logger = setup_logger("server_settings")
 DEFAULTS = {
     # Compress to ZIP, Extract and Look inside: they use the server's disk and CPU for a long time
     "archives_enabled": True,
+    # Cloud features for users who follow the server's setting: leeches, torrents, video and Instagram
+    # downloads, Google Drive. They use the server's bandwidth, so they're off until the owner allows them.
+    "cloud_enabled": False,
 }
 CACHE_SECONDS = 30
 

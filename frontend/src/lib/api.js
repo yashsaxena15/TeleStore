@@ -211,6 +211,9 @@ export const mapUser = (user) => ({
     // Compress & extract: "default" follows Settings › Server, "allow" or "block" decide for this user
     archives: user.archives || 'default',
     archivesAllowed: user.archives_allowed !== false,
+    // Cloud features (leeches, video / Instagram downloads, Google Drive): the same three choices
+    cloud: user.cloud || 'default',
+    cloudAllowed: user.cloud_allowed === true,
     isOwner: Boolean(user.is_owner),
     hasTelegram: Boolean(user.has_telegram),
     hasIndexChat: Boolean(user.has_index_chat),
@@ -320,6 +323,10 @@ export const api = {
     // Settings › Server (owner only)
     fetchServerSettings: () => request('/system/settings', { fallback: "Couldn't load server settings" }),
     updateServerSettings: (changes) => put('/system/settings', changes, { fallback: "Couldn't change server settings" }),
+    // Transfers › Workers (owner only): the machines that run cloud transfers
+    fetchMachines: () => request('/worker/machines', { fallback: "Couldn't load the machines" }),
+    pauseMachine: (id, stopNow = false) => post(`/worker/machines/${enc(id)}/pause`, { stop_now: stopNow }, { fallback: "Couldn't pause it" }),
+    resumeMachine: (id) => post(`/worker/machines/${enc(id)}/resume`, {}, { fallback: "Couldn't resume it" }),
     async deleteUser(userId) {
         await request(`/user/${userId}`, { method: 'DELETE', timeout: 3000, fallback: 'Failed to delete user' });
     },
