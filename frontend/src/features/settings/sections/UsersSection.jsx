@@ -11,16 +11,14 @@ import { api, mapUser } from "@/lib/api";
 import { useUserProfile } from "@/hooks/useShellData";
 import logger from "@/lib/logger";
 import { cn } from "@/lib/utils";
-import { SettingsPanel, Field, Segmented } from "../SettingsUi";
+import { SettingsPanel, Field } from "../SettingsUi";
 import { errorMessage } from "../errorMessage";
 import { refreshFeatures } from "../useFeatures";
 
 const MIN_PASSWORD = 6;
-const LOGIN_TYPES = [{ value: "local", label: "Username & password" }, { value: "google", label: "Google sign-in" }];
 
 const AddUserDialog = ({ open, onOpenChange, onAdded }) => {
     const empty = { username: "", email: "", password: "", canUpload: true };
-    const [type, setType] = useState("local");
     const [form, setForm] = useState(empty);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
@@ -30,17 +28,17 @@ const AddUserDialog = ({ open, onOpenChange, onAdded }) => {
     };
     const close = () => {
         setForm(empty);
-        setType("local");
         setError("");
         onOpenChange(false);
     };
     const submit = async (e) => {
         e.preventDefault();
-        if (type === "local" && form.password.length < MIN_PASSWORD) return setError(`Use a password of at least ${MIN_PASSWORD} characters.`);
+        if (form.password.length < MIN_PASSWORD) return setError(`Use a password of at least ${MIN_PASSWORD} characters.`);
         setBusy(true);
         try {
             const added = await api.addUser({
-                ...(type === "local" ? { username: form.username.trim(), password: form.password } : {}),
+                username: form.username.trim(),
+                password: form.password,
                 email: form.email.trim(),
                 can_upload: form.canUpload,
             });
@@ -55,20 +53,19 @@ const AddUserDialog = ({ open, onOpenChange, onAdded }) => {
             setBusy(false);
         }
     };
-    const valid = form.email.trim() && (type === "google" || (form.username.trim() && form.password));
+    const valid = form.email.trim() && form.username.trim() && form.password;
     return (<Dialog open={open} onOpenChange={(o) => !o && close()}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Add user</DialogTitle>
-          <DialogDescription>They get their own private library, empty to start. To upload, they connect Telegram and add the bot to their own group once they sign in.</DialogDescription>
+          <DialogDescription>They get their own private library, empty to start. They sign in with the username or the email and the password. To upload, they connect Telegram and add the bot to their own group once they sign in.</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="grid gap-3">
-          <Field label="How they sign in"><div><Segmented label="How they sign in" value={type} options={LOGIN_TYPES} onChange={setType}/></div></Field>
-          {type === "local" && (<Field label="Username" htmlFor="nu-username"><Input id="nu-username" className="h-9" autoComplete="off" value={form.username} onChange={(e) => set({ username: e.target.value })}/></Field>)}
-          <Field label="Email" htmlFor="nu-email" hint={type === "google" ? "They sign in with this Google account." : undefined}>
+          <Field label="Username" htmlFor="nu-username"><Input id="nu-username" className="h-9" autoComplete="off" value={form.username} onChange={(e) => set({ username: e.target.value })}/></Field>
+          <Field label="Email" htmlFor="nu-email" hint="They can sign in with this too, and get password reset codes here.">
             <Input id="nu-email" type="email" className="h-9" value={form.email} onChange={(e) => set({ email: e.target.value })}/>
           </Field>
-          {type === "local" && (<Field label="Password" htmlFor="nu-password"><Input id="nu-password" type="password" autoComplete="new-password" className="h-9" value={form.password} onChange={(e) => set({ password: e.target.value })}/></Field>)}
+          <Field label="Password" htmlFor="nu-password"><Input id="nu-password" type="password" autoComplete="new-password" className="h-9" value={form.password} onChange={(e) => set({ password: e.target.value })}/></Field>
           <label className="flex items-start gap-2.5 text-sm pt-1">
             <Switch className="mt-0.5" checked={form.canUpload} onCheckedChange={(v) => set({ canUpload: v })}/>
             <span>Can upload<span className="block text-xs text-muted-foreground">Uploads and compressing. Uses your bots. Cloud features (leeches, Google Drive) are set separately in the users list.</span></span>
@@ -90,7 +87,7 @@ const EditEmailDialog = ({ user, onOpenChange, onSave }) => {
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>Email for {user?.username}</DialogTitle>
-          <DialogDescription>Google sign-in users sign in with this address.</DialogDescription>
+          <DialogDescription>They can sign in with this address, and password reset codes go here.</DialogDescription>
         </DialogHeader>
         <form onSubmit={(e) => { e.preventDefault(); onSave(user, { email: email.trim() }); }} className="grid gap-3">
           <Input type="email" className="h-9" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus aria-label="Email"/>
@@ -300,7 +297,6 @@ export const UsersSection = () => {
                     <td className="px-4 py-2.5 max-w-0 w-full">
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="font-medium truncate">{name}</span>
-                        <span className={cn("shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded", user.userType === "google" ? "bg-info/15 text-info" : "bg-muted text-muted-foreground")}>{user.userType === "google" ? "Google" : "Password"}</span>
                       </div>
                       {user.email && user.email !== name && <p className="text-xs text-muted-foreground truncate">{user.email}</p>}
                       <p className={cn("text-[11px] mt-0.5", setup.ready ? "text-success" : "text-warning")} title={setup.hint}>{setup.label}</p>
@@ -327,7 +323,7 @@ export const UsersSection = () => {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
                           <DropdownMenuItem className="gap-2" onSelect={() => setEditing(user)}><Mail className="w-4 h-4 text-muted-foreground"/>Change email</DropdownMenuItem>
-                          {user.userType !== "google" && <DropdownMenuItem className="gap-2" onSelect={() => setPasswordFor(user)}><KeyRound className="w-4 h-4 text-muted-foreground"/>{user.username === me?.username ? "Change password" : "Set a new password"}</DropdownMenuItem>}
+                          <DropdownMenuItem className="gap-2" onSelect={() => setPasswordFor(user)}><KeyRound className="w-4 h-4 text-muted-foreground"/>{user.username === me?.username ? "Change password" : "Set a new password"}</DropdownMenuItem>
                           {!isAdmin && (<>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onSelect={() => setDeleting(user)}><Trash2 className="w-4 h-4"/>Remove user</DropdownMenuItem>

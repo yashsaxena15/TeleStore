@@ -1,4 +1,4 @@
-"""Sign-in fixes: usernames ignore spaces and case, Google sign-in by email for added users,
+"""Sign-in fixes: usernames ignore spaces and case, sign-in with the account's email,
 owner password reset, email "Forgot password?", and bot /start records hidden from Users."""
 
 from unittest.mock import AsyncMock, patch
@@ -58,33 +58,33 @@ class TestPasswordSignIn:
         assert client.post("/auth/login", json={"username": "yashsaxena15", "password": "nope"}).status_code == 401
 
 
-class TestGoogleSignIn:
-    INFO = {"email": "guest@gmail.com", "name": "Guest Person", "picture": ""}
+class TestEmailSignIn:
+    DOCS = [{"username": "yashsaxena15", "password_hash": "x", "email": "Yash@Example.com"},
+            {"username": "mummy", "password_hash": "x", "email": "mummy@example.com"}]
 
-    def test_config_exposes_client_id_key(self, client):
-        assert "client_id" in client.get("/auth/google/config").json()
-
-    def test_added_google_user_signs_in_by_email(self, client):
-        _users([{"username": "google_guest@gmail.com", "email": "guest@gmail.com"}])
-        with patch.object(auth_routes, "verify_google_token", return_value=self.INFO):
-            res = client.post("/auth/google", json={"token": "t"})
+    def test_the_email_signs_in_to_its_account(self, client):
+        _users(self.DOCS)
+        database.Users.verify_user_credentials.side_effect = lambda name, pw: name == "yashsaxena15" and pw == "right"
+        res = client.post("/auth/login", json={"username": " yash@example.com", "password": "right"})
+        database.Users.verify_user_credentials.side_effect = None
         assert res.status_code == 200, res.text
-        assert res.json()["user"]["username"] == "google_guest@gmail.com"
+        assert res.json()["username"] == "yashsaxena15"
 
-    def test_same_display_name_does_not_give_access(self, client):
-        _users([{"username": "Guest Person", "password_hash": "x"}])
-        with patch.object(auth_routes, "verify_google_token", return_value=self.INFO):
-            res = client.post("/auth/google", json={"token": "t"})
-        assert res.status_code == 403
-        assert "hasn't been added" in res.json()["detail"]
+    def test_an_email_two_accounts_share_finds_neither(self):
+        from telestore.security.credentials import canonical_username
+        _users(self.DOCS + [{"username": "other", "email": "mummy@example.com"}])
+        assert canonical_username("mummy@example.com") == "mummy@example.com"
 
-    def test_admin_email_gets_an_account(self, client):
-        _users([])
-        with patch.object(auth_routes, "verify_google_token", return_value=self.INFO), \
-                patch.object(auth_routes, "AUTHORIZED_ADMINS", ["Guest@gmail.com"]):
-            res = client.post("/auth/google", json={"token": "t"})
-        assert res.status_code == 200
-        database.Users.SaveUser.assert_called_with(username="google_guest@gmail.com", email="guest@gmail.com")
+    def test_google_sign_in_is_gone(self, client):
+        assert client.get("/auth/google/config").json() == {"client_id": None}  # older apps hide their button
+        assert client.post("/auth/google", json={"token": "t"}).status_code in (404, 405)
+
+    def test_new_users_need_a_username_and_password(self, client, as_user):
+        as_user(username="admin")
+        _users(self.DOCS)
+        assert client.post("/user", json={"email": "new@example.com"}).status_code == 400
+        res = client.post("/user", json={"username": "new", "password": "secret1", "email": "MUMMY@example.com"})
+        assert res.status_code == 400 and "already uses this email" in res.json()["detail"]
 
 
 class TestForgotPassword:

@@ -88,7 +88,7 @@ internal fun DevicesPanel(container: AppContainer, onMessage: (String) -> Unit) 
         AlertDialog(
             onDismissRequest = { if (!busy) close() },
             title = { Text(if (target != null) "Sign out ${target.name}?" else "Sign out ${others.size} other devices?") },
-            text = { Text("They'll need your password (or Google) to sign in again. Uploads running there stop.") },
+            text = { Text("They'll need your password to sign in again. Uploads running there stop.") },
             confirmButton = {
                 TextButton(enabled = !busy, onClick = {
                     scope.launch {

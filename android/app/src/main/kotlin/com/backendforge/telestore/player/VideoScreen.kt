@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
-import android.media.AudioManager
 import android.provider.Settings
 import android.util.Rational
 import android.view.ViewGroup
@@ -46,7 +45,6 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Bedtime
-import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.ClosedCaptionOff
@@ -73,7 +71,6 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -100,7 +97,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -139,8 +135,6 @@ private val SLEEP_CHOICES = listOf(0 to "Off", 15 to "15 minutes", 30 to "30 min
 
 /** What a swipe or double-tap is doing, shown over the picture while it happens. */
 private sealed interface GestureHint {
-    data class Brightness(val level: Float) : GestureHint
-    data class Volume(val level: Float) : GestureHint
     data class Skip(val forward: Boolean) : GestureHint
 }
 
@@ -168,7 +162,7 @@ fun VideoScreen(vm: VideoViewModel, api: TeleStoreApi, onBack: () -> Unit, onDow
     var info by remember { mutableStateOf<FileItem?>(null) }
     val haptics = rememberHaptics()
     // Pulling the video down shrinks it to the mini player, a swipe up goes full screen (portrait
-    // only; full screen keeps brightness and volume at the sides, and a swipe down in the middle leaves it)
+    // only; in full screen a swipe down in the middle leaves it)
     var fullscreenRequest by remember { mutableIntStateOf(0) }
     val pull = rememberPullDownState(onBack, onPullUp = { fullscreenRequest++ })
 
@@ -285,7 +279,6 @@ fun VideoScreen(vm: VideoViewModel, api: TeleStoreApi, onBack: () -> Unit, onDow
                         vm.seekBy(if (forward) 10_000 else -10_000)
                         hint = GestureHint.Skip(forward)
                     },
-                    onHint = { hint = it },
                 )
             }
             if (state.buffering && !state.ended) {
@@ -384,8 +377,8 @@ private object LocalOrientation {
 // ── Gestures (VLC-style) ───────────────────────────────────────────────────────
 
 /**
- * Tap: show/hide controls. Double-tap a side: skip 10 s. Full screen: swipe up/down on the left for
- * brightness, on the right for volume, down in the middle to leave full screen.
+ * Tap: show/hide controls. Double-tap a side: skip 10 s. Full screen: swipe down in the middle to
+ * leave full screen. (No swiping for brightness or volume: the phone's own buttons do those.)
  */
 @Composable
 private fun GestureLayer(
@@ -395,21 +388,14 @@ private fun GestureLayer(
     onSwipeDownMiddle: () -> Unit,
     onTap: () -> Unit,
     onDoubleTap: (forward: Boolean) -> Unit,
-    onHint: (GestureHint) -> Unit,
 ) {
-    val context = LocalContext.current
-    val activity = context.findActivity()
-    val audio = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val tap by rememberUpdatedState(onTap)
     val doubleTap by rememberUpdatedState(onDoubleTap)
-    val showHint by rememberUpdatedState(onHint)
     val active by rememberUpdatedState(enabled)
     val swipeDownMiddle by rememberUpdatedState(onSwipeDownMiddle)
     val exitDistance = with(LocalDensity.current) { 90.dp.toPx() }
-    var leftSide by remember { mutableStateOf(true) }
     var middle by remember { mutableStateOf(false) }
     var travel by remember { mutableFloatStateOf(0f) }
-    var level by remember { mutableFloatStateOf(0f) }
 
     Box(
         Modifier
@@ -423,49 +409,25 @@ private fun GestureLayer(
             .then(if (pull != null) Modifier.pullDownToClose(pull, enabled) else Modifier.pointerInput(Unit) {
                 detectVerticalDragGestures(
                     onDragStart = { start ->
-                        leftSide = start.x < size.width / 2
                         middle = start.x > size.width / 3 && start.x < size.width * 2 / 3
                         travel = 0f
-                        level = if (leftSide) currentBrightness(activity) else
-                            audio.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                     },
                     onDragEnd = { if (middle && active && travel >= exitDistance) swipeDownMiddle() },
                     onVerticalDrag = { change, dragAmount ->
-                        if (!active) return@detectVerticalDragGestures
+                        if (!active || !middle) return@detectVerticalDragGestures
                         change.consume()
-                        if (middle) {
-                            travel += dragAmount
-                            return@detectVerticalDragGestures
-                        }
-                        level = (level - dragAmount / (size.height * 0.8f)).coerceIn(0f, 1f)
-                        if (leftSide) {
-                            activity?.window?.let { w -> w.attributes = w.attributes.apply { screenBrightness = level.coerceAtLeast(0.01f) } }
-                            showHint(GestureHint.Brightness(level))
-                        } else {
-                            val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                            audio.setStreamVolume(AudioManager.STREAM_MUSIC, (level * max).toInt(), 0)
-                            showHint(GestureHint.Volume(level))
-                        }
+                        travel += dragAmount
                     },
                 )
             }),
     )
 }
 
-private fun currentBrightness(activity: Activity?): Float {
-    val own = activity?.window?.attributes?.screenBrightness ?: -1f
-    if (own >= 0f) return own
-    val system = activity?.let { runCatching { Settings.System.getInt(it.contentResolver, Settings.System.SCREEN_BRIGHTNESS) }.getOrNull() } ?: 128
-    return system / 255f
-}
-
-/** The vertical level bar (brightness left, volume right) or the "« 10 s" ripple. */
+/** The "« 10 s" ripple. */
 @Composable
 private fun GestureOverlay(hint: GestureHint) {
     Box(Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 24.dp)) {
         when (hint) {
-            is GestureHint.Brightness -> LevelBar(Icons.Filled.Brightness6, hint.level, "${(hint.level * 100).toInt()}", Modifier.align(Alignment.CenterStart))
-            is GestureHint.Volume -> LevelBar(Icons.Filled.VolumeUp, hint.level, "${(hint.level * 100).toInt()}", Modifier.align(Alignment.CenterEnd))
             is GestureHint.Skip -> Box(
                 Modifier
                     .align(if (hint.forward) Alignment.CenterEnd else Alignment.CenterStart)
@@ -474,21 +436,6 @@ private fun GestureOverlay(hint: GestureHint) {
                 contentAlignment = Alignment.Center,
             ) { Text(if (hint.forward) "10 s »" else "« 10 s", color = Color.White, fontWeight = FontWeight.Bold) }
         }
-    }
-}
-
-@Composable
-private fun LevelBar(icon: ImageVector, level: Float, label: String, modifier: Modifier) {
-    Column(
-        modifier.width(44.dp).height(170.dp).background(Color(0x80000000), RoundedCornerShape(22.dp)).padding(vertical = 10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-        Box(Modifier.weight(1f).width(6.dp).clip(RoundedCornerShape(3.dp)).background(Color(0x40FFFFFF)), contentAlignment = Alignment.BottomCenter) {
-            Box(Modifier.fillMaxWidth().fillMaxHeight(level.coerceIn(0f, 1f)).background(Color.White))
-        }
-        Text(label, color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
     }
 }
 

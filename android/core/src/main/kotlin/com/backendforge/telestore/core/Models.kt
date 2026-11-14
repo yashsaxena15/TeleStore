@@ -8,22 +8,10 @@ data class LoginResponse(
     val message: String? = null,
     val username: String? = null,
     @SerialName("auth_token") val authToken: String,
-    val user: GoogleUser? = null,
 ) {
-    /** The account name, from a password sign-in or a Google one. */
-    val account: String get() = username ?: user?.username.orEmpty()
+    /** The account name (the server's spelling, also when signing in with an email). */
+    val account: String get() = username.orEmpty()
 }
-
-@Serializable
-data class GoogleUser(
-    val email: String? = null,
-    val name: String? = null,
-    val picture: String? = null,
-    val username: String? = null,
-)
-
-@Serializable
-data class GoogleConfig(@SerialName("client_id") val clientId: String? = null)
 
 @Serializable
 data class AuthCheck(

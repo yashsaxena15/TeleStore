@@ -9,8 +9,6 @@ import com.backendforge.telestore.core.TeleStoreApi
 import com.backendforge.telestore.data.AppContainer
 import com.backendforge.telestore.data.Session
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,22 +21,14 @@ data class SignInState(
     val password: String = "",
     val busy: Boolean = false,
     val error: String? = null,
-    /** The server's Google client ID; null hides "Continue with Google". */
-    val googleClientId: String? = null,
 )
 
 class SignInViewModel(private val container: AppContainer) : ViewModel() {
     private val _state = MutableStateFlow(SignInState(server = container.session.lastServer.removePrefix("https://")))
     val state: StateFlow<SignInState> = _state.asStateFlow()
-    private var configJob: Job? = null
-
-    init {
-        loadGoogleConfig()
-    }
 
     fun onServer(value: String) {
-        _state.update { it.copy(server = value, error = null, googleClientId = null) }
-        loadGoogleConfig(debounceMs = 600)
+        _state.update { it.copy(server = value, error = null) }
     }
 
     fun onUsername(value: String) = _state.update { it.copy(username = value, error = null) }
@@ -47,11 +37,9 @@ class SignInViewModel(private val container: AppContainer) : ViewModel() {
 
     fun signIn() {
         val s = _state.value
-        if (s.username.isBlank() || s.password.isEmpty()) return showError("Enter your username and password.")
+        if (s.username.isBlank() || s.password.isEmpty()) return showError("Enter your username or email, and your password.")
         signInWith { api -> api.login(s.username, s.password) }
     }
-
-    fun signInWithGoogle(idToken: String) = signInWith { api -> api.googleLogin(idToken) }
 
     private fun signInWith(call: suspend (TeleStoreApi) -> LoginResponse) {
         val api = currentApi() ?: return showError("That server address doesn't look right.")
@@ -76,14 +64,4 @@ class SignInViewModel(private val container: AppContainer) : ViewModel() {
     fun passwordReset(username: String) = _state.update { it.copy(username = username, password = "", error = "Password changed. Sign in with the new one.") }
 
     private fun currentApi(): TeleStoreApi? = ServerAddress.normalize(_state.value.server)?.let { container.apiFor(it) }
-
-    private fun loadGoogleConfig(debounceMs: Long = 0) {
-        configJob?.cancel()
-        configJob = viewModelScope.launch {
-            delay(debounceMs)
-            val api = currentApi() ?: return@launch
-            val id = runCatching { api.googleConfig().clientId }.getOrNull()
-            _state.update { it.copy(googleClientId = id) }
-        }
-    }
 }

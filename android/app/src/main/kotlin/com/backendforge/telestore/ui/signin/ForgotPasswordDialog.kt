@@ -26,7 +26,7 @@ import kotlinx.coroutines.launch
 
 /**
  * "Forgot password?": username, then a 6-digit code emailed to the account's address, then a new
- * password. Accounts without an email (or Google ones) ask the owner, who sets one in Users.
+ * password. Accounts without an email ask the owner, who sets one in Users.
  */
 @Composable
 fun ForgotPasswordDialog(api: TeleStoreApi?, initialUsername: String, onDismiss: () -> Unit, onDone: (username: String) -> Unit) {
@@ -49,7 +49,7 @@ fun ForgotPasswordDialog(api: TeleStoreApi?, initialUsername: String, onDismiss:
                     Text("We'll email a 6-digit code to the address on your account.", style = MaterialTheme.typography.bodyMedium)
                     OutlinedTextField(username, { username = it; error = null }, singleLine = true, label = { Text("Username") }, modifier = Modifier.fillMaxWidth())
                     Text(
-                        "No email on your account, or signing in with Google? Ask the owner to set a new password for you.",
+                        "No email on your account? Ask the owner to set a new password for you.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {

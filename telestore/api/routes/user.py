@@ -83,6 +83,14 @@ def _is_bot_contact(doc: dict) -> bool:
     return named_by_id and not doc.get("password_hash") and not doc.get("email")
 
 
+def _email_free(email: str, username: Optional[str] = None) -> None:
+    """People can sign in with their email, so two accounts can't share one."""
+    wanted = (email or "").strip().lower()
+    for doc in database.Users.get_all_users() or []:
+        if doc.get("username") != username and (doc.get("email") or "").strip().lower() == wanted:
+            raise HTTPException(status_code=400, detail="Another account already uses this email")
+
+
 def _user_response(doc: dict, id_value: str, user_type: str, **overrides) -> "UserResponse":
     username = doc.get("username", "")
     active, can_upload = account_flags(username, doc)
@@ -190,30 +198,13 @@ async def add_user(request: Request, user_request: AddUserRequest, user: User = 
         if not user_request.email:
             raise HTTPException(status_code=400, detail="Email is required")
         
-        # For local users, username and password are required
-        if user_request.username and not user_request.password:
-            raise HTTPException(status_code=400, detail="Password is required for local users")
-        
-        # For Google users, only email is required
-        if not user_request.username and user_request.password:
-            raise HTTPException(status_code=400, detail="Username is required for local users")
-        
-        # Check if user already exists by username
-        existing_user = None
-        if user_request.username:
-            existing_user = database.Users.getUser(user_request.username)
-        
-        # Also check if a Google user with this email already exists
-        if not user_request.username:
-            # Look for existing Google user with this email
-            all_users = database.Users.get_all_users()
-            for user in all_users:
-                if user.get("username", "").startswith("google_") and user.get("email") == user_request.email:
-                    existing_user = user
-                    break
-        
+        # Everyone signs in with a username (or their email) and a password
+        if not (user_request.username or "").strip() or not user_request.password:
+            raise HTTPException(status_code=400, detail="A username and a password are required")
+        existing_user = database.Users.getUser(user_request.username.strip())
         if existing_user:
             raise HTTPException(status_code=400, detail="User already exists")
+        _email_free(user_request.email)
         
         # Hash password if provided
         password_hash = None
@@ -221,7 +212,7 @@ async def add_user(request: Request, user_request: AddUserRequest, user: User = 
             password_hash = hash_password(user_request.password)
         
         # Save user to database
-        user_id_for_db = user_request.username if user_request.username else f"google_{user_request.email}"
+        user_id_for_db = user_request.username.strip()
         # SaveUser skips usernames it saved earlier in this process (e.g. a user deleted and added again)
         database.Users.user_cache.discard(user_id_for_db)
         save_result = database.Users.SaveUser(
@@ -232,10 +223,10 @@ async def add_user(request: Request, user_request: AddUserRequest, user: User = 
         
         database.Users.update_user_by_identifier(user_id_for_db, {"active": True, "can_upload": user_request.can_upload})
 
-        user_type = "local" if user_request.username else "google"
+        user_type = "local"
         new_doc = database.Users.getUser(user_id_for_db) or {"username": user_id_for_db, "email": user_request.email}
         new_user = _user_response(new_doc, str(save_result.inserted_id) if save_result else "unknown", user_type,
-                                  username=user_request.username or "", active=True, can_upload=user_request.can_upload)
+                                  username=user_id_for_db, active=True, can_upload=user_request.can_upload)
         return new_user
     except HTTPException:
         raise
@@ -322,6 +313,7 @@ async def update_user(request: Request, user_id_param: str, user_request: Update
 
         update_data = {}
         if user_request.email:
+            _email_free(user_request.email, current_user.get("username"))
             update_data["email"] = user_request.email
         if user_request.active is not None:
             update_data["active"] = user_request.active

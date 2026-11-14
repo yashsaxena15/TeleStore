@@ -61,10 +61,10 @@ class ThreadingTest {
         val caller = Thread.currentThread().name
         server.enqueue(json("""{"message":"Login successful","username":"bob","auth_token":"t"}"""))
         server.enqueue(json("""{"files":[{"id":"1","file_name":"Movies","file_type":"folder"}]}"""))
-        server.enqueue(json("""{"client_id":"abc"}"""))
+        server.enqueue(json("""{"authenticated":true,"username":"bob"}"""))
         api.login("bob", "pw")
         api.listFiles()
-        api.googleConfig()
+        api.check()
         assertTrue(readThreads.isNotEmpty())
         assertFalse(readThreads.contains(caller), "a reply was read on the caller's thread: $readThreads")
         assertTrue(readThreads.all { it.startsWith("api-io") }, "reads happened on $readThreads")

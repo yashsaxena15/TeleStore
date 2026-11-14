@@ -160,7 +160,7 @@ fun AccountScreen(container: AppContainer, onBack: () -> Unit) {
         val me = profile
         PasswordDialog(
             title = "Change password",
-            text = "Used when you sign in as ${me?.username}. Leave the current password empty if you sign in with Telegram or Google and never set one.",
+            text = "Used when you sign in as ${me?.username}. Leave the current password empty if you never set one.",
             askCurrent = true,
             onDismiss = { passwordOpen = false },
         ) { current, new ->

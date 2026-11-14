@@ -2,8 +2,8 @@
 // folder holding a protected item can't be trashed or deleted at all: the server answers HTTP 423
 // with a message saying why. The app hides delete for such items and shows that message.
 //
-// Removing the protection needs the password (or an emailed code when the account signs in with
-// Google only). Confirming gives a one-time pass for that one item, used for that one request.
+// Removing the protection needs the password (or an emailed code when the account has no
+// password). Confirming gives a one-time pass for that one item, used for that one request.
 // The confirm dialog (ProtectionDialog) is mounted once, in App; confirmUnlock() opens it.
 
 const CONFIRM_EVENT = "telestore:confirm-unlock";

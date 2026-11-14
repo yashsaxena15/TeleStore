@@ -77,6 +77,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.backendforge.telestore.security.VaultFingerprint
+import com.backendforge.telestore.player.findActivity
+import androidx.fragment.app.FragmentActivity
+import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material3.Switch
 
 enum class VaultStep { LOADING, SETUP_EMAIL, SETUP_CODE, SETUP_PIN, SETUP_CONFIRM, LOCKED, FORGOT_CODE, FORGOT_PIN, OPEN }
 
@@ -91,6 +96,10 @@ data class VaultState(
     val busy: Boolean = false,
     val error: String? = null,
     val message: String? = null,
+    /** Opening with a fingerprint is on for this account on this phone. */
+    val fingerprintOn: Boolean = false,
+    /** Just opened with the PIN: ask whether to use the fingerprint next time. */
+    val offerFingerprint: Boolean = false,
 )
 
 /** The Private Vault: set up with an email and a PIN, opened with the PIN, locked when the app is left. */
@@ -98,8 +107,15 @@ class VaultViewModel(private val container: AppContainer) : ViewModel() {
     private val _state = MutableStateFlow(VaultState())
     val state: StateFlow<VaultState> = _state.asStateFlow()
     private val api get() = container.api()
+    val fingerprint = VaultFingerprint(
+        container.context,
+        container.session.state.value?.let { "${it.server}|${it.username}" } ?: "default",
+    )
+    /** The PIN just typed, only until the fingerprint offer is answered (never stored as text). */
+    private var pinForOffer: String? = null
 
     init {
+        _state.update { it.copy(fingerprintOn = fingerprint.enabled) }
         reload()
     }
 
@@ -137,14 +153,82 @@ class VaultViewModel(private val container: AppContainer) : ViewModel() {
                 }
             VaultStep.LOCKED -> act {
                 api.vaultUnlock(pin)
+                if (!fingerprint.enabled && !fingerprint.declined && VaultFingerprint.unavailableReason(container.context) == null) {
+                    pinForOffer = pin
+                    _state.update { it.copy(offerFingerprint = true) }
+                }
                 reload()
             }
             VaultStep.FORGOT_PIN -> act {
                 api.vaultResetPin(s.code, pin)
+                pinChanged()
                 _state.update { it.copy(message = "PIN changed. Your files are safe.", code = "") }
                 reload()
             }
             else -> {}
+        }
+    }
+
+    // ── Fingerprint ────────────────────────────────────────────────────────────
+    /** Opens the vault with the PIN the fingerprint unlocks. A refused PIN (changed on another
+     *  device) is forgotten, so the PIN is asked once. */
+    fun unlockWithFingerprint(activity: androidx.fragment.app.FragmentActivity) {
+        if (_state.value.busy) return
+        fingerprint.unlock(activity) { pin, problem ->
+            when {
+                pin != null -> act {
+                    try {
+                        api.vaultUnlock(pin)
+                    } catch (e: ApiException) {
+                        if (e.status == 401) {
+                            fingerprint.forget()
+                            _state.update { it.copy(fingerprintOn = false) }
+                            throw ApiException(401, "Your vault PIN changed. Enter the new PIN; you can turn fingerprint on again after.")
+                        }
+                        throw e
+                    }
+                    reload()
+                }
+                problem != null -> _state.update { it.copy(error = problem, fingerprintOn = fingerprint.enabled) }
+            }
+        }
+    }
+
+    /** "Use fingerprint next time?" answered. */
+    fun answerFingerprintOffer(activity: androidx.fragment.app.FragmentActivity?, yes: Boolean) {
+        val pin = pinForOffer
+        pinForOffer = null
+        _state.update { it.copy(offerFingerprint = false) }
+        if (!yes || activity == null || pin == null) {
+            fingerprint.declined = true
+            return
+        }
+        turnOnFingerprint(activity, pin)
+    }
+
+    /** Vault settings: turning it on needs the PIN once (checked with the server first). */
+    fun turnOnFingerprint(activity: androidx.fragment.app.FragmentActivity, pin: String) = act {
+        api.vaultUnlock(pin)
+        fingerprint.enable(activity, pin) { problem ->
+            _state.update {
+                if (problem == null) it.copy(fingerprintOn = true, message = "The vault now opens with your fingerprint.")
+                else it.copy(error = problem, fingerprintOn = fingerprint.enabled)
+            }
+        }
+    }
+
+    fun turnOffFingerprint() {
+        fingerprint.forget()
+        fingerprint.declined = true
+        _state.update { it.copy(fingerprintOn = false, message = "Fingerprint unlock turned off.") }
+    }
+
+    /** A new PIN makes the saved one wrong: forget it and offer fingerprint again at the next PIN unlock. */
+    private fun pinChanged() {
+        if (fingerprint.enabled) {
+            fingerprint.forget()
+            fingerprint.declined = false
+            _state.update { it.copy(fingerprintOn = false) }
         }
     }
 
@@ -203,7 +287,9 @@ class VaultViewModel(private val container: AppContainer) : ViewModel() {
 
     fun changePin(current: String, new: String) = act {
         api.vaultChangePin(current, new)
-        _state.update { it.copy(message = "PIN changed.") }
+        val hadFingerprint = fingerprint.enabled
+        pinChanged()
+        _state.update { it.copy(message = if (hadFingerprint) "PIN changed. Turn fingerprint unlock on again in Vault settings." else "PIN changed.") }
     }
 
     /** Recovery email changed: show the new (partly hidden) address. */
@@ -252,6 +338,13 @@ fun VaultScreen(
     var newFolder by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
     var recoveryEmail by remember { mutableStateOf(false) }
+    var fingerprintPin by remember { mutableStateOf(false) }
+    val activity = androidx.compose.ui.platform.LocalContext.current.findActivity() as? FragmentActivity
+
+    // Locked and fingerprint on: ask for it straight away (the PIN pad stays as the other way)
+    LaunchedEffect(state.step) {
+        if (state.step == VaultStep.LOCKED && state.fingerprintOn && activity != null) vm.unlockWithFingerprint(activity)
+    }
 
     // No screenshots, and a blank preview in Recents, while the vault is on screen; lock when the app is left
     PrivateWhile(true)
@@ -308,6 +401,12 @@ fun VaultScreen(
                 VaultStep.SETUP_CONFIRM -> PinPad("Enter the PIN again", state.error, state.busy, onPin = vm::pinEntered)
                 VaultStep.FORGOT_PIN -> PinPad("Choose a new PIN", state.error, state.busy, onPin = vm::pinEntered)
                 VaultStep.LOCKED -> PinPad("Enter your vault PIN", state.error, state.busy, onPin = vm::pinEntered, extra = {
+                    if (state.fingerprintOn && activity != null) {
+                        TextButton(onClick = { vm.unlockWithFingerprint(activity) }, enabled = !state.busy) {
+                            Icon(Icons.Filled.Fingerprint, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Text("Use fingerprint", Modifier.padding(start = 6.dp))
+                        }
+                    }
                     TextButton(onClick = vm::forgotPin, enabled = !state.busy) { Text("Forgot PIN?") }
                 })
                 VaultStep.OPEN -> if (state.items.isEmpty()) {
@@ -354,7 +453,42 @@ fun VaultScreen(
     if (settings) VaultSettingsDialog(
         state.status, onAutoLock = vm::setAutoLock, onChangePin = vm::changePin,
         onRecoveryEmail = { settings = false; recoveryEmail = true }, onDismiss = { settings = false },
+        fingerprintOn = state.fingerprintOn,
+        fingerprintUnavailable = remember { VaultFingerprint.unavailableReason(container.context) },
+        onFingerprint = { on -> if (on) { settings = false; fingerprintPin = true } else vm.turnOffFingerprint() },
     )
+    if (state.offerFingerprint) {
+        AlertDialog(
+            onDismissRequest = { vm.answerFingerprintOffer(activity, yes = false) },
+            icon = { Icon(Icons.Filled.Fingerprint, contentDescription = null) },
+            title = { Text("Open the vault with your fingerprint?") },
+            text = { Text("Next time, touch the sensor instead of typing the PIN. The PIN stays on this phone, locked behind your fingerprint, and still works too.") },
+            confirmButton = { TextButton(onClick = { vm.answerFingerprintOffer(activity, yes = true) }) { Text("Turn on") } },
+            dismissButton = { TextButton(onClick = { vm.answerFingerprintOffer(activity, yes = false) }) { Text("Not now") } },
+        )
+    }
+    if (fingerprintPin) {
+        var pin by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { fingerprintPin = false },
+            title = { Text("Use fingerprint for the vault") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Enter your vault PIN once, then touch the sensor.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(pin, { pin = it.filter(Char::isDigit).take(4) }, label = { Text("Vault PIN") }, singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword))
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = VaultPin.isValid(pin) && activity != null, onClick = {
+                    fingerprintPin = false
+                    activity?.let { vm.turnOnFingerprint(it, pin) }
+                }) { Text("Continue") }
+            },
+            dismissButton = { TextButton(onClick = { fingerprintPin = false }) { Text("Cancel") } },
+        )
+    }
     if (recoveryEmail) RecoveryEmailDialog(container, state.status?.email, onDismiss = { recoveryEmail = false }, onChanged = vm::recoveryEmailChanged)
 }
 
@@ -433,6 +567,9 @@ private fun VaultSettingsDialog(
     onChangePin: (String, String) -> Unit,
     onRecoveryEmail: () -> Unit,
     onDismiss: () -> Unit,
+    fingerprintOn: Boolean,
+    fingerprintUnavailable: String?,
+    onFingerprint: (Boolean) -> Unit,
 ) {
     var current by remember { mutableStateOf("") }
     var new by remember { mutableStateOf("") }
@@ -448,6 +585,16 @@ private fun VaultSettingsDialog(
                     }
                 }
                 Text("It also locks as soon as you leave the app.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Open with fingerprint", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            fingerprintUnavailable ?: "Touch the sensor instead of typing the PIN (on this phone).",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = fingerprintOn, enabled = fingerprintOn || fingerprintUnavailable == null, onCheckedChange = onFingerprint)
+                }
                 Text("Change PIN", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
                 OutlinedTextField(current, { current = it.filter(Char::isDigit).take(4) }, label = { Text("Current PIN") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword))

@@ -6,8 +6,7 @@ from pydantic import BaseModel
 import secrets
 
 from typing import Optional
-from telestore.config import GOOGLE_CLIENT_ID
-from telestore.security.credentials import ACCOUNT_DISABLED, AUTHORIZED_ADMINS, User, account_flags, canonical_username, check_login, require_auth, verify_google_token
+from telestore.security.credentials import ACCOUNT_DISABLED, User, account_flags, canonical_username, check_login, require_auth
 from telestore.services.email_service import create_and_send_vault_otp, verify_vault_otp
 from telestore.utils.passwords import hash_password
 from telestore.security.attempt_limiter import TooManyAttempts, password_limiter, wait_message
@@ -31,10 +30,6 @@ class LoginRequest(BaseModel):
     password: str
     device: Optional[str] = None
 
-class GoogleLoginRequest(BaseModel):
-    token: str
-    device: Optional[str] = None
-
 @router.post("/login")
 async def login_post_route(request: Request, login_data: LoginRequest):
     logger.info(f"Login attempt for user: {login_data.username.strip()}")
@@ -48,7 +43,7 @@ async def login_post_route(request: Request, login_data: LoginRequest):
         )
     if not account:
         logger.warning(f"Login failed for user: {login_data.username.strip()}")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username, email or password")
 
     user_data = database.Users.getUser(account)
     if not account_flags(account, user_data)[0]:
@@ -89,47 +84,9 @@ def _issue_token(username: str, method: str, user_data: Optional[dict], device: 
 
 @router.get("/google/config")
 async def google_config():
-    """The Google sign-in client ID for the login page (public by design); null when not set up."""
-    return {"client_id": GOOGLE_CLIENT_ID or None}
-
-
-def _google_account(email: str) -> Optional[str]:
-    """The username of the account a Google email may sign in to, or None.
-
-    Accounts the owner added as "Google sign-in" are stored as google_<email>; emails in
-    AUTHORIZED_ADMIN_EMAILS get such an account on first sign-in.
-    """
-    email = (email or "").strip().lower()
-    username = f"google_{email}"
-    if database.Users.getUser(username):
-        return username
-    for user_doc in database.Users.get_all_users() or []:
-        name = user_doc.get("username")
-        if isinstance(name, str) and name.startswith("google_") and (user_doc.get("email") or "").strip().lower() == email:
-            return name
-    if email in {e.lower() for e in AUTHORIZED_ADMINS}:
-        database.Users.user_cache.discard(username)
-        database.Users.SaveUser(username=username, email=email)
-        return username
-    return None
-
-
-@router.post("/google")
-async def google_login_route(request: Request, login_data: GoogleLoginRequest):
-    user_info = verify_google_token(login_data.token)
-    if not user_info:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google sign-in failed. Please try again.")
-    account = _google_account(user_info["email"])
-    if not account:
-        logger.warning(f"Google sign-in refused for {user_info['email']}: not added by the owner")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This Google account hasn't been added. Ask the owner to add you in Settings › Users.")
-    user_data = database.Users.getUser(account)
-    if not account_flags(account, user_data)[0]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNT_DISABLED)
-    token = _issue_token(account, "google", user_data, login_data.device, request.headers.get("user-agent", ""))
-    _start_session(request, account, "google", user_email=user_info["email"], user_picture=user_info["picture"], token_id=device_service.token_id(token))
-    event_service.sign_in(account, request.headers.get("user-agent", ""), login_data.device, method="google")
-    return {"message": "Login successful", "user": {**user_info, "username": account}, "auth_token": token}
+    """Google sign-in was removed (sign in with a username or email and a password). Older apps
+    still ask for this; no client ID makes them hide their Google button."""
+    return {"client_id": None}
 
 
 # ── Forgot password: a 6-digit code to the account's email, then a new password ──────────────
