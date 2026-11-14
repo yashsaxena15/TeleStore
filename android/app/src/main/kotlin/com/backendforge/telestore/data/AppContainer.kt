@@ -85,6 +85,14 @@ class AppContainer(val context: Context) {
         // Telegram on this phone starts with the app whenever someone is signed in (it's required)
         scope.launch {
             session.state.collect {
+                if (it != null) {
+                    // Someone else signs in after the server ended the last sign-in: Telegram here was theirs
+                    val before = session.takeEndedByServer()
+                    if (before != null && !before.equals(it.username, ignoreCase = true) && (settings.telegramUsed || telegram.isReady)) {
+                        settings.telegramUsed = false
+                        runCatching { telegram.signOut() }
+                    }
+                }
                 if (it != null && telegram.available) runCatching { startTelegram() }
             }
         }
@@ -107,8 +115,10 @@ class AppContainer(val context: Context) {
                     unreadNotifications.value = 0
                     features.value = com.backendforge.telestore.core.Features()
                     protection.clear()
-                    // Telegram on this phone belongs to the account too: signing out of TeleStore ends it
-                    if (settings.telegramUsed || telegram.isReady) {
+                    // Telegram on this phone belongs to the account too: signing out of TeleStore ends it.
+                    // Not when the server ended the sign-in: the same person signs in again, and a new
+                    // Telegram sign-in would have to find the storage chat all over again
+                    if (session.endedByUser && (settings.telegramUsed || telegram.isReady)) {
                         settings.telegramUsed = false
                         launch { runCatching { telegram.signOut() } }
                     }
@@ -194,6 +204,6 @@ class AppContainer(val context: Context) {
 
     /** An API for a server typed on the sign-in screen (before anyone is signed in). */
     fun apiFor(base: HttpUrl): TeleStoreApi =
-        TeleStoreApi(base, token = { session.state.value?.token }, onUnauthorized = { session.signedOut() })
+        TeleStoreApi(base, token = { session.state.value?.token }, onUnauthorized = { session.signedOut(byUser = false) })
 }
 

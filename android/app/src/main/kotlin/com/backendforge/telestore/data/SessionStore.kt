@@ -39,10 +39,29 @@ class SessionStore(context: Context) {
         _state.value = session
     }
 
-    /** Forgets the token but keeps the server address. */
-    fun signedOut() {
-        prefs.edit().remove(KEY_TOKEN).remove(KEY_USER).apply()
+    /**
+     * Forgets the token but keeps the server address. [byUser]: the person signed out (Telegram on
+     * this phone ends too); false when the server ended the sign-in (an expired token, a password
+     * change, a server-wide sign-out): Telegram stays signed in for when the same account comes back.
+     */
+    fun signedOut(byUser: Boolean = true) {
+        val edit = prefs.edit().remove(KEY_TOKEN).remove(KEY_USER)
+        val who = _state.value?.username ?: prefs.getString(KEY_USER, null)
+        if (byUser || who == null) edit.remove(KEY_ENDED_BY_SERVER) else edit.putString(KEY_ENDED_BY_SERVER, who)
+        edit.apply()
+        endedByUser = byUser
         _state.value = null
+    }
+
+    /** How the last sign-in ended (see [signedOut]). */
+    var endedByUser: Boolean = true
+        private set
+
+    /** The account whose sign-in the server ended, until someone signs in again (then cleared). */
+    fun takeEndedByServer(): String? {
+        val who = prefs.getString(KEY_ENDED_BY_SERVER, null)
+        if (who != null) prefs.edit().remove(KEY_ENDED_BY_SERVER).apply()
+        return who
     }
 
     private fun read(): Session? {
@@ -55,5 +74,6 @@ class SessionStore(context: Context) {
         const val KEY_SERVER = "server"
         const val KEY_USER = "username"
         const val KEY_TOKEN = "token"
+        const val KEY_ENDED_BY_SERVER = "ended_by_server"
     }
 }
