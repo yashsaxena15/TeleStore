@@ -142,6 +142,13 @@ def test_pages_carry_security_headers(client):
     assert "max-age" in res.headers["strict-transport-security"]
 
 
+def test_the_app_page_allows_its_fonts_but_no_outside_scripts():
+    from telestore.api.app import APP_CSP
+    assert "https://fonts.googleapis.com" in APP_CSP and "https://fonts.gstatic.com" in APP_CSP
+    script_src = APP_CSP.split("script-src", 1)[1].split(";", 1)[0]
+    assert "https" not in script_src and "unsafe-inline" not in script_src
+
+
 # ── Server errors don't show their insides ─────────────────────────────────
 
 def test_server_errors_keep_their_details_in_the_log(client, as_user):
