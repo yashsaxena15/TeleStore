@@ -116,6 +116,9 @@ class RemoteTransferManager:
         self._bot_manager = None
         self._last_media_at = 0.0
         self._torrent_locks: Dict[str, asyncio.Lock] = {}  # one aria2c per torrent folder at a time
+        # Tasks stopped because this machine was paused with "stop now": back in the queue, so their
+        # stopping isn't a failure or a cancel, and late progress from them is dropped
+        self._handed_back: set = set()
 
     def set_bot_manager(self, bot_manager):
         self._bot_manager = bot_manager
@@ -215,6 +218,10 @@ class RemoteTransferManager:
                 # Concurrency limit for local processing on VM 1 (leave remaining tasks for distributed workers)
                 max_local_concurrent = int(os.getenv("MAX_LOCAL_CONCURRENT", "1"))
                 available_slots = max(0, max_local_concurrent - len(self.active_tasks))
+                # Paused in Transfers › Workers: the main server takes nothing new
+                from telestore.services import worker_control
+                if available_slots and worker_control.is_paused(worker_control.MAIN_ID, cached=True):
+                    available_slots = 0
 
                 if available_slots > 0:
                     # Find queued tasks that have NOT been claimed by an external worker
@@ -243,6 +250,7 @@ class RemoteTransferManager:
                             )
                             if not claimed.modified_count:
                                 continue
+                            self._handed_back.discard(task_id)
                             # Launch task wrapper
                             t = asyncio.create_task(self._execute_task_wrapper(item))
                             self.active_tasks[task_id] = t
@@ -1602,6 +1610,8 @@ class RemoteTransferManager:
                 logger.info(f"Task {task_id} cancelled.")
                 self._update_task(task_id, {"status": "cancelled", "phase": "Cancelled by user", "speed_bps": 0})
             except Exception as e:
+                if task_id in self._handed_back:  # stopped by a pause, already back in the queue
+                    return
                 err_text = str(e)
                 if self._pause_blocked_media(task_doc, e):
                     return
@@ -2666,7 +2676,22 @@ class RemoteTransferManager:
             for slots in budget_slots:
                 slots.close()  # give back what a failed or cancelled transfer still held
 
+    async def stop_local_tasks(self, wait_s: float = 30.0) -> int:
+        """Stops what the main server is running (its machine was paused with "stop now"); the caller
+        puts those tasks back in the queue. Returns how many were stopped."""
+        tasks = dict(self.active_tasks)
+        for task_id, task in tasks.items():
+            self._handed_back.add(task_id)
+            if task_id in self.cancel_events:
+                self.cancel_events[task_id].set()
+            task.cancel()
+        if tasks:
+            await asyncio.wait(list(tasks.values()), timeout=wait_s)
+        return len(tasks)
+
     def _update_task(self, task_id: str, updates: dict):
+        if task_id in getattr(self, "_handed_back", ()):  # late news from a task a pause put back in the queue
+            return
         try:
             coll = get_remote_db()["RemoteTransfers"]
             updates["updated_at"] = datetime.now(timezone.utc)

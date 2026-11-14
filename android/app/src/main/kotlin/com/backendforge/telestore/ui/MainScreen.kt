@@ -44,6 +44,7 @@ import com.backendforge.telestore.ui.drive.WebDavScreen
 import com.backendforge.telestore.ui.vault.VaultScreen
 import com.backendforge.telestore.ui.vault.VaultViewModel
 import com.backendforge.telestore.ui.links.AddLinkScreen
+import com.backendforge.telestore.ui.links.CloudOffScreen
 import com.backendforge.telestore.ui.links.AddLinkViewModel
 import com.backendforge.telestore.ui.photos.CollectionsScreen
 import com.backendforge.telestore.ui.photos.BackupScreen
@@ -832,6 +833,10 @@ fun MainScreen(
 
                 composable("add_link?link={link}", arguments = listOf(navArgument("link") { type = NavType.StringType; nullable = true; defaultValue = null })) { entry ->
                     val link = entry.arguments?.getString("link")
+                    if (!features.cloud) {
+                        CloudOffScreen(onBack = { navController.popBackStack() })
+                        return@composable
+                    }
                     val vm: AddLinkViewModel = viewModel(key = "link-${link.orEmpty()}") { AddLinkViewModel(container, link) }
                     AddLinkScreen(
                         vm, container,
@@ -945,6 +950,10 @@ fun MainScreen(
                 }
 
                 composable("drive") {
+                    if (!features.cloud) {
+                        CloudOffScreen(onBack = { navController.popBackStack() })
+                        return@composable
+                    }
                     DriveAccountsScreen(container, onBack = { navController.popBackStack() }, onOpen = { acc ->
                         navController.navigate("drive_account/${Uri.encode(acc.id)}?email=${Uri.encode(acc.email.orEmpty())}")
                     })

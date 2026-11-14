@@ -14,6 +14,9 @@ export const LIBRARY = [
     { name: "Trash", icon: Trash2, filter: "trash" },
 ];
 
+// Cloud features use the server's bandwidth: only for accounts the owner allows (Settings › Users)
+export const CLOUD_ACTIONS = new Set(["remote-leech", "media-download", "instagram-import", "connect-drive"]);
+
 export const NEW_ITEM_GROUPS = [
     {
         label: "Add here",
@@ -33,3 +36,8 @@ export const NEW_ITEM_GROUPS = [
         ],
     },
 ];
+
+// The New items this account may use
+export const newItemGroups = (cloud) => NEW_ITEM_GROUPS
+    .map((g) => ({ ...g, items: g.items.filter((it) => cloud || !CLOUD_ACTIONS.has(it.id)) }))
+    .filter((g) => g.items.length > 0);

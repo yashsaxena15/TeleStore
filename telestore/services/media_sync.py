@@ -126,7 +126,11 @@ async def run_forever():
     while True:
         try:
             due = list(_coll().find({"enabled": True, "last_checked": {"$lte": datetime.now(timezone.utc) - CHECK_EVERY}}).sort("last_checked", 1).limit(20))
+            from telestore.services.cloud_access import allowed_for_owner_id
             for doc in due:
+                if not allowed_for_owner_id(doc.get("user_id")):  # the owner turned cloud features off for them
+                    _coll().update_one({"sync_id": doc["sync_id"]}, {"$set": {"last_checked": datetime.now(timezone.utc)}})
+                    continue
                 await check(doc)
                 await asyncio.sleep(PAUSE_BETWEEN_LINKS_S)
         except asyncio.CancelledError:

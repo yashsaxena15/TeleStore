@@ -1,3 +1,4 @@
+import { useFeatures } from "@/features/settings/useFeatures";
 import { useState, useEffect } from "react";
 import { Bell, Folder, HardDriveDownload, Images, Inbox, ListMusic, ArrowUpDown, LayoutGrid, Plus, Star, ShieldCheck, Trash2, HardDrive, Cloud, User, Settings, Users, Laptop, LogOut, Share2 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -32,6 +33,7 @@ export const MobileNav = ({ selectedFilter, activeView, onNavigateView, onAction
     }, []);
     const { busyCount } = useTransferManager();
     const cloudAccounts = useCloudAccounts();
+    const { cloud: canCloud } = useFeatures();
     const isOwner = useIsOwner();
     const profile = useUserProfile();
     const inFiles = activeView === "files";
@@ -71,11 +73,13 @@ export const MobileNav = ({ selectedFilter, activeView, onNavigateView, onAction
             <SheetRow icon={Trash2} label="Trash" onClick={() => go("files", "trash")}/>
             <SheetRow icon={HardDrive} label="Storage" onClick={() => go("storage")}/>
           </div>
+          {canCloud && (<>
           <div className="mt-3 mb-1 px-2 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Cloud drives</div>
           <div className="grid gap-0.5">
             {cloudAccounts.map((acc) => <SheetRow key={acc.id} icon={Cloud} label={acc.account_name} hint={acc.account_email} onClick={() => go("files", `cloud:${acc.id}:root`)}/>)}
             <SheetRow icon={Cloud} label="Connect cloud drive" onClick={() => act("connect-drive")}/>
           </div>
+          </>)}
           <div className="mt-3 mb-1 px-2 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Account</div>
           <div className="grid gap-0.5">
             <SheetRow icon={User} label="Account" onClick={() => go("profile")}/>

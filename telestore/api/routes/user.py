@@ -5,7 +5,7 @@ from pydantic import BaseModel
 import datetime
 from typing import Optional, List
 
-from telestore.security.credentials import ARCHIVE_CHOICES, account_flags, archive_choice, archives_allowed, is_owner_account, is_owner_user, require_auth, User
+from telestore.security.credentials import ARCHIVE_CHOICES, CLOUD_CHOICES, account_flags, archive_choice, archives_allowed, cloud_allowed, cloud_choice, is_owner_account, is_owner_user, require_auth, User
 from telestore.db import database
 from telestore.utils.passwords import hash_password
 from telestore.security.attempt_limiter import TooManyAttempts, password_limiter, wait_message
@@ -46,6 +46,9 @@ class UserResponse(BaseModel):
     # Compress/extract: "default" follows Settings › Server, "allow" or "block" decide for this user
     archives: str = "default"
     archives_allowed: bool = True
+    # Cloud features (leeches, torrents, video / Instagram downloads, Google Drive): same choices
+    cloud: str = "default"
+    cloud_allowed: bool = False
     is_owner: bool = False
     # Setup: uploads need a verified Telegram account and an index chat
     has_telegram: bool = False
@@ -69,6 +72,7 @@ class UpdateUserRequest(BaseModel):
     active: Optional[bool] = None
     can_upload: Optional[bool] = None
     archives: Optional[str] = None  # "default", "allow" or "block"
+    cloud: Optional[str] = None  # "default", "allow" or "block"
     permissions: Optional[UserPermission] = None  # old clients; no longer used
 
 
@@ -92,6 +96,8 @@ def _user_response(doc: dict, id_value: str, user_type: str, **overrides) -> "Us
         can_upload=can_upload,
         archives=archive_choice(doc),
         archives_allowed=archives_allowed(doc),
+        cloud=cloud_choice(doc),
+        cloud_allowed=cloud_allowed(username, doc),
         is_owner=is_owner_account(username, doc),
         has_telegram=bool(doc.get("telegram_user_id")),
         has_index_chat=doc.get("index_chat_id") is not None,
@@ -325,6 +331,10 @@ async def update_user(request: Request, user_id_param: str, user_request: Update
             if user_request.archives not in ARCHIVE_CHOICES:
                 raise HTTPException(status_code=400, detail="archives must be default, allow or block")
             update_data["archives"] = user_request.archives
+        if user_request.cloud is not None:
+            if user_request.cloud not in CLOUD_CHOICES:
+                raise HTTPException(status_code=400, detail="cloud must be default, allow or block")
+            update_data["cloud"] = user_request.cloud
         if update_data:
             success = database.Users.update_user_by_identifier(user_id_param, update_data)
             if not success:
@@ -517,7 +527,7 @@ async def get_user_profile(request: Request, user: User = Depends(require_auth))
 @router.get("/features")
 async def my_features(user: User = Depends(require_auth)):
     """What this account may use, so the app and website show only those options."""
-    return {"archives": user.archives, "is_owner": is_owner_user(user)}
+    return {"archives": user.archives, "cloud": user.cloud, "is_owner": is_owner_user(user)}
 
 
 @router.get("/is-owner", response_model=IsOwnerResponse)

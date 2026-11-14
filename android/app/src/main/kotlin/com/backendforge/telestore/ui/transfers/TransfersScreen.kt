@@ -118,6 +118,7 @@ fun TransfersScreen(
     var hidden by rememberSaveable { mutableStateOf(setOf<String>()) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val features by container.features.collectAsStateWithLifecycle()
 
     // The server's list, every 3 s while this tab is open (stops when it closes)
     LaunchedEffect(refreshTick) {
@@ -244,7 +245,8 @@ fun TransfersScreen(
                     }
                 },
                 actions = {
-                    NewTransferButton(onAddLink = onAddLink, onGoogleDrive = onGoogleDrive)
+                    // Leeches and Drive use the server's bandwidth: only when the owner allows them
+                    if (features.cloud) NewTransferButton(onAddLink = onAddLink, onGoogleDrive = onGoogleDrive)
                     BulkMenu(
                         manager = manager,
                         canPause = phone.any { it.status == TransferStatus.RUNNING || it.status == TransferStatus.QUEUED },
@@ -277,6 +279,9 @@ fun TransfersScreen(
                             )
                         }
                     }
+                }
+                if (features.isOwner) {
+                    item(key = "workers") { WorkersCard(container, onMessage = { scope.launch { snackbar.showSnackbar(it) } }) }
                 }
                 serverError?.let { message ->
                     item(key = "error") {

@@ -16,6 +16,7 @@ router = APIRouter(prefix="/system", tags=["System"])
 
 class ServerSettingsUpdate(BaseModel):
     archives_enabled: bool | None = None
+    cloud_enabled: bool | None = None
 
 
 @router.get("/settings")
@@ -26,7 +27,7 @@ async def get_server_settings(user: User = Depends(require_owner)):
 
 @router.put("/settings")
 async def update_server_settings(body: ServerSettingsUpdate, user: User = Depends(require_owner)):
-    return server_settings.update(**body.model_dump())
+    return server_settings.update(**body.model_dump(exclude_none=True))
 
 
 @router.get("/workloads")

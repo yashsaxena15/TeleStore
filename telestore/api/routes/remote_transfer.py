@@ -6,7 +6,7 @@ import asyncio
 import posixpath
 from typing import Literal, Optional, Union
 
-from telestore.security.credentials import require_auth, require_upload, User
+from telestore.security.credentials import require_auth, require_cloud, require_cloud_upload, User
 from telestore.services.remote_transfer_manager import remote_transfer_manager
 from telestore.db import database
 
@@ -32,7 +32,7 @@ class RetryRemoteTransferModel(BaseModel):
 async def add_remote_transfer(
     request: Request,
     body: EnqueueRemoteTransferModel,
-    user: User = Depends(require_upload)
+    user: User = Depends(require_cloud_upload)
 ):
     """Enqueue a Google Drive (file/folder), BitTorrent Magnet, or direct URL server-to-server download."""
     if not user.telegram_user_id:
@@ -74,7 +74,7 @@ async def upload_torrent_transfer(
     request: Request,
     file: UploadFile = File(...),
     destination_path: Optional[str] = Form("/Home"),
-    user: User = Depends(require_upload)
+    user: User = Depends(require_cloud_upload)
 ):
     """Enqueue a BitTorrent transfer from an uploaded .torrent file."""
     if not user.telegram_user_id:
@@ -152,7 +152,7 @@ async def cancel_remote_group(
 @router.post("/resume-group")
 async def resume_remote_group(
     body: ResumeRemoteGroupModel,
-    user: User = Depends(require_upload)
+    user: User = Depends(require_cloud_upload)
 ):
     """Manually resume all tasks in a group that were paused due to quota cooldown."""
     user_id = str(user.telegram_user_id or user.username)
@@ -178,7 +178,7 @@ async def get_remote_group_tasks(
 @router.post("/retry-failed")
 async def retry_failed_in_group(
     body: ResumeRemoteGroupModel,
-    user: User = Depends(require_upload)
+    user: User = Depends(require_cloud_upload)
 ):
     """Queue a folder copy's failed files again (only those)."""
     user_id = str(user.telegram_user_id or user.username)
@@ -188,7 +188,7 @@ async def retry_failed_in_group(
 @router.post("/retry")
 async def retry_remote_task(
     body: RetryRemoteTransferModel,
-    user: User = Depends(require_upload)
+    user: User = Depends(require_cloud_upload)
 ):
     """Retry a failed or paused remote transfer task."""
     user_id = str(user.telegram_user_id or user.username)
@@ -285,7 +285,7 @@ def _save_destination(request: Request, dest: InstagramDestinationModel, user: U
 
 
 @router.post("/instagram/preview")
-async def preview_instagram(body: InstagramUrlModel, user: User = Depends(require_upload)):
+async def preview_instagram(body: InstagramUrlModel, user: User = Depends(require_cloud_upload)):
     """What an Instagram link holds: the account, caption and each photo or video."""
     from telestore.services.instagram_service import get_client
     post = await _read_instagram_post(body.url)
@@ -300,7 +300,7 @@ async def preview_instagram(body: InstagramUrlModel, user: User = Depends(requir
 
 
 @router.post("/instagram")
-async def import_instagram(request: Request, body: InstagramImportModel, user: User = Depends(require_upload)):
+async def import_instagram(request: Request, body: InstagramImportModel, user: User = Depends(require_cloud_upload)):
     """Queues every photo and video of a post or reel, saved to Home, the Private Vault or a Google Drive."""
     destination, chat_id = _save_destination(request, body.destination, user)
     user_id = str(user.telegram_user_id or user.username)
@@ -343,7 +343,7 @@ async def instagram_session(user: User = Depends(require_auth)):
 
 
 @router.post("/instagram/session/login")
-async def instagram_login(body: InstagramLoginModel, user: User = Depends(require_auth)):
+async def instagram_login(body: InstagramLoginModel, user: User = Depends(require_cloud)):
     from telestore.services.instagram_service import InstagramError, get_client
     _require_owner(user)
     try:
@@ -353,7 +353,7 @@ async def instagram_login(body: InstagramLoginModel, user: User = Depends(requir
 
 
 @router.post("/instagram/session/2fa")
-async def instagram_two_factor(body: InstagramCodeModel, user: User = Depends(require_auth)):
+async def instagram_two_factor(body: InstagramCodeModel, user: User = Depends(require_cloud)):
     from telestore.services.instagram_service import InstagramError, get_client
     _require_owner(user)
     try:
@@ -363,7 +363,7 @@ async def instagram_two_factor(body: InstagramCodeModel, user: User = Depends(re
 
 
 @router.post("/instagram/session/browser")
-async def instagram_browser_session(body: InstagramBrowserSessionModel, user: User = Depends(require_auth)):
+async def instagram_browser_session(body: InstagramBrowserSessionModel, user: User = Depends(require_cloud)):
     from telestore.services.instagram_service import InstagramError, get_client
     _require_owner(user)
     try:
@@ -417,7 +417,7 @@ async def _probe_media(url: str) -> dict:
 
 
 @router.post("/media/preview")
-async def preview_media(body: InstagramUrlModel, user: User = Depends(require_upload)):
+async def preview_media(body: InstagramUrlModel, user: User = Depends(require_cloud_upload)):
     """What a link holds: one video, or a playlist and its videos."""
     from telestore.services.media_download_service import thumbnail
     info = await _probe_media(body.url)
@@ -436,7 +436,7 @@ async def preview_media(body: InstagramUrlModel, user: User = Depends(require_up
 
 
 @router.post("/media")
-async def download_media(request: Request, body: MediaDownloadModel, user: User = Depends(require_upload)):
+async def download_media(request: Request, body: MediaDownloadModel, user: User = Depends(require_cloud_upload)):
     """Queues the video, its audio, or the chosen videos of a playlist."""
     destination, chat_id = _save_destination(request, body.destination, user)
     user_id = str(user.telegram_user_id or user.username)
@@ -489,7 +489,7 @@ async def media_settings(user: User = Depends(require_auth)):
 
 
 @router.post("/media/update")
-async def update_media_downloader(user: User = Depends(require_auth)):
+async def update_media_downloader(user: User = Depends(require_cloud)):
     """Installs the newest yt-dlp on the server (owner); downloads that are running finish first."""
     from telestore.services.media_download_service import MediaError, update_yt_dlp
     if not _is_owner(user):
@@ -501,7 +501,7 @@ async def update_media_downloader(user: User = Depends(require_auth)):
 
 
 @router.post("/media/use-builtin")
-async def use_builtin_media_downloader(user: User = Depends(require_auth)):
+async def use_builtin_media_downloader(user: User = Depends(require_cloud)):
     from telestore.services.media_download_service import use_builtin_yt_dlp
     if not _is_owner(user):
         raise HTTPException(status_code=403, detail="Only the owner can change the downloader.")
@@ -519,7 +519,7 @@ async def list_media_syncs(user: User = Depends(require_auth)):
 
 
 @router.post("/media/syncs/{sync_id}")
-async def update_media_sync(sync_id: str, body: MediaSyncUpdateModel, user: User = Depends(require_upload)):
+async def update_media_sync(sync_id: str, body: MediaSyncUpdateModel, user: User = Depends(require_cloud_upload)):
     from telestore.services import media_sync
     sync = media_sync.set_enabled(_sync_user(user), sync_id, body.enabled)
     if not sync:
@@ -528,7 +528,7 @@ async def update_media_sync(sync_id: str, body: MediaSyncUpdateModel, user: User
 
 
 @router.post("/media/syncs/{sync_id}/check")
-async def check_media_sync(request: Request, sync_id: str, user: User = Depends(require_upload)):
+async def check_media_sync(request: Request, sync_id: str, user: User = Depends(require_cloud_upload)):
     """Looks for new videos now instead of waiting for the next check."""
     from telestore.services import media_sync
     doc = media_sync._coll().find_one({"user_id": _sync_user(user), "sync_id": sync_id})
@@ -548,7 +548,7 @@ async def delete_media_sync(sync_id: str, user: User = Depends(require_auth)):
 
 
 @router.post("/media/cookies")
-async def upload_media_cookies(file: UploadFile = File(...), user: User = Depends(require_auth)):
+async def upload_media_cookies(file: UploadFile = File(...), user: User = Depends(require_cloud)):
     """The owner's cookies.txt export of a signed-in browser, used for every download."""
     from telestore.services.media_download_service import MediaError, save_cookies
     if not _is_owner(user):

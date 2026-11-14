@@ -32,12 +32,50 @@ data class OwnerReply(@SerialName("is_owner") val isOwner: Boolean = false)
 data class Features(
     /** Compress to ZIP, Extract and Look inside (the owner can turn them off). */
     val archives: Boolean = true,
+    /** Leeches, torrents, video / Instagram downloads and Google Drive (they use the server's bandwidth;
+     *  the owner allows them per user). Off until the server says otherwise. */
+    val cloud: Boolean = false,
     @SerialName("is_owner") val isOwner: Boolean = false,
 )
 
 /** Settings › Server (owner only): GET/PUT /system/settings. */
 @Serializable
-data class ServerSettings(@SerialName("archives_enabled") val archivesEnabled: Boolean = true)
+data class ServerSettings(
+    @SerialName("archives_enabled") val archivesEnabled: Boolean = true,
+    /** Cloud features for everyone who follows the server setting (off unless the owner allows them). */
+    @SerialName("cloud_enabled") val cloudEnabled: Boolean = false,
+)
+
+/** Transfers › Workers (owner only): a machine that runs cloud transfers (GET /api/worker/machines). */
+@Serializable
+data class Machine(
+    @SerialName("worker_id") val id: String,
+    val name: String = id,
+    @SerialName("is_main") val isMain: Boolean = false,
+    val online: Boolean = false,
+    val paused: Boolean = false,
+    val running: Int = 0,
+) {
+    /** Its state in a word, and what that means. */
+    val state: String get() = when {
+        paused -> "Paused"
+        !online -> "Offline"
+        else -> "Online"
+    }
+    val detail: String get() = when {
+        paused && running > 0 -> "Finishing $running transfer${if (running == 1) "" else "s"}, then waits"
+        paused -> "Takes no new transfers until resumed"
+        !online -> "Not reporting in. Its transfers go to the other machines."
+        running > 0 -> "$running transfer${if (running == 1) "" else "s"} running"
+        else -> "Idle"
+    }
+}
+
+@Serializable
+data class Machines(val machines: List<Machine> = emptyList())
+
+@Serializable
+data class MachinePaused(val paused: Boolean = false, @SerialName("handed_back") val handedBack: Int = 0)
 
 /** A user's archive tools: follow Settings › Server, or decide for this user. */
 enum class ArchiveChoice(val wire: String, val label: String) {
@@ -80,6 +118,9 @@ data class ManagedUser(
     @SerialName("archives") val archives: String = "default",
     /** Whether compress and extract work for them right now. */
     @SerialName("archives_allowed") val archivesAllowed: Boolean = true,
+    /** Cloud features: "default" (follows Settings › Server), "allow" or "block". */
+    @SerialName("cloud") val cloud: String = "default",
+    @SerialName("cloud_allowed") val cloudAllowed: Boolean = false,
     @SerialName("is_owner") val isOwner: Boolean = false,
     @SerialName("has_telegram") val hasTelegram: Boolean = false,
     @SerialName("has_index_chat") val hasIndexChat: Boolean = false,
