@@ -22,11 +22,27 @@ def cached_token(token_data: dict) -> dict:
     }
 
 
+def _key(token: str) -> str:
+    """Tokens are kept (in memory and in the database) by their hash, never as themselves."""
+    from telestore.services.device_service import token_key
+    return token_key(token)
+
+
+def remember_token(token: str, data: dict) -> dict:
+    _auth_tokens[_key(token)] = data
+    return data
+
+
+def forget_token(token: str) -> None:
+    _auth_tokens.pop(_key(token), None)
+
+
 def cached_token_valid(token: str):
-    """The cached token's data while it is still valid; an expired one is dropped."""
-    data = _auth_tokens.get(token)
+    """The cached data of this (raw) token while it is still valid; an expired one is dropped."""
+    key = _key(token)
+    data = _auth_tokens.get(key)
     if data and data.get("expires_at") and data["expires_at"] < datetime.now():
-        _auth_tokens.pop(token, None)
+        _auth_tokens.pop(key, None)
         return None
     return data
 

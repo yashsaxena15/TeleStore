@@ -85,18 +85,12 @@ def _get_recovery_master_key(user_id: str, secret: str = None) -> bytes:
     secret = secret or SESSION_SECRET_KEY
     return hashlib.pbkdf2_hmac("sha256", secret.encode("utf-8"), user_id.encode("utf-8"), 50000, 32)
 
-# Vaults created before 2026-10-19 wrapped their recovery copy with this former public default
-# secret. It is accepted only to read such a copy, which is then re-wrapped with SESSION_SECRET_KEY.
-_LEGACY_RECOVERY_SECRET = "f6d2e3b9a0f43d9a2e6a56b2d3175cd9c05bbfe31d95ed2a7306b57cb1a8b6f0"
-
 def _open_recovery_envelope(config: dict, user_id: str):
-    """Return (vault_key, is_legacy) from the recovery envelope, trying the current secret first."""
+    """Return (vault_key, False) from the recovery envelope. (Copies wrapped with the old public
+    default secret were re-wrapped once by telestore/tools/rewrap_vault_recovery.py.)"""
     envelope = bytes.fromhex(config["recovery_envelope"])
     iv = bytes.fromhex(config["recovery_iv"])
-    try:
-        return AESGCM(_get_recovery_master_key(user_id)).decrypt(iv, envelope, None), False
-    except InvalidTag:
-        return AESGCM(_get_recovery_master_key(user_id, _LEGACY_RECOVERY_SECRET)).decrypt(iv, envelope, None), True
+    return AESGCM(_get_recovery_master_key(user_id)).decrypt(iv, envelope, None), False
 
 def _wrap_recovery_envelope(user_id: str, vault_key: bytes) -> dict:
     """Encrypt the vault key with the current server recovery key."""
@@ -171,6 +165,26 @@ def _check_pin(config: dict, pin: str, wrong_detail: str = "Incorrect vault PIN.
         raise HTTPException(status_code=401, detail=wrong_detail)
     pin_limiter.success(key)
     return derived
+
+
+VAULT_LOCKED = "Unlock your Private Vault first."
+
+
+def in_vault(doc: Optional[dict] = None, path: Optional[str] = None) -> bool:
+    """An item (or a folder path) inside the Private Vault."""
+    if doc is not None:
+        if doc.get("is_vault"):
+            return True
+        path = doc.get("file_path") or ""
+    p = (path or "").strip()
+    return p == "Vault" or p == "/Vault" or p.startswith("/Vault/")
+
+
+def hide_vault_unless_unlocked(request: Request) -> dict:
+    """A Files query filter: nothing from the vault while it's locked."""
+    if is_vault_unlocked(request):
+        return {}
+    return {"$nor": [{"is_vault": True}, {"file_path": {"$regex": "^/Vault(/|$)"}}]}
 
 
 def is_vault_unlocked(request: Request) -> bool:

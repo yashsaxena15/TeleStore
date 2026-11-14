@@ -471,6 +471,11 @@ async def change_user_password(request: Request, user_id_param: str, password_re
         success = database.Users.update_user_by_identifier(actual_user_id_param, {"password_hash": new_password_hash})
         from telestore.api.routes.webdav.common import forget_webdav_logins
         forget_webdav_logins()
+        if success:
+            # Other sign-ins end (this device stays signed in when you change your own)
+            from telestore.services import device_service
+            keep = (request.headers.get("X-Auth-Token") or request.query_params.get("token")) if is_self else None
+            device_service.sign_out_all(target_username, keep_token=keep)
         logger.info(f"Database update result: {success}")
         
         if not success:

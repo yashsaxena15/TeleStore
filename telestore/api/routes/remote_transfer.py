@@ -48,6 +48,15 @@ async def add_remote_transfer(
     chat_id = user_data["index_chat_id"]
     user_id = str(user.telegram_user_id)
 
+    # Plain links must lead to the public internet (magnets and Drive links are checked as they're read)
+    link = (body.url or "").strip()
+    if link.lower().startswith(("http://", "https://")):
+        from telestore.security import public_url
+        try:
+            await asyncio.to_thread(public_url.check_url, link)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
     # Ensure background processor is running
     remote_transfer_manager.start_worker(request.app)
 

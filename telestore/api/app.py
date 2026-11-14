@@ -40,7 +40,7 @@ from telestore.db import database
 
 # Import utility functions and global variables
 from telestore.services import device_service
-from telestore.api.state import _auth_tokens, cached_token, cached_token_valid, load_persistent_tokens, cleanup_stale_upload_files
+from telestore.api.state import cached_token, cached_token_valid, remember_token, load_persistent_tokens, cleanup_stale_upload_files
 
 app = FastAPI(
     docs_url="/docs" if API_DOCS_ENABLED else None,
@@ -96,22 +96,32 @@ async def startup_event():
             logger.error(f"Error ensuring admin user has correct Telegram ID: {e}")
 
 
+def _allowed_origins() -> list:
+    origins = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost",
+               "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8148"]
+    extra = [o.strip().rstrip("/") for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+    web_app = (os.getenv("WEB_APP") or "").strip().rstrip("/")
+    return origins + extra + ([web_app] if web_app.startswith(("http://", "https://")) else [])
+
+
 # --- Middleware Setup ---
 # Configure session middleware to work with both browsers and Tauri WebView
 # For localhost development, we need to handle cookies properly
 app.add_middleware(
     SessionMiddleware, 
     secret_key=SESSION_SECRET_KEY,
-    same_site="lax",     # Use lax for better compatibility with browsers in development
-    https_only=False,     # Allow non-HTTPS for localhost and IP deployments
+    same_site="lax",
+    # The cookie is only sent over HTTPS (set SESSION_HTTPS_ONLY=0 for a plain-http test install)
+    https_only=os.getenv("SESSION_HTTPS_ONLY", "1") != "0",
     max_age=3600,         # 1 hour session timeout
     path="/",             # Explicitly set cookie path
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:8000", "http://127.0.0.1:8000", "http://localhost:8081", "tauri://localhost", "http://localhost:5173", "http://localhost:9000", "http://127.0.0.1:9000"],
-    allow_origin_regex=r"https?://.*",
+    # Only these sites may call the API with someone's sign-in: the website itself needs no entry
+    # (same origin); the desktop app and local development do. More in CORS_ORIGINS (comma-separated).
+    allow_origins=_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -127,8 +137,8 @@ async def auth_token_middleware(request: Request, call_next):
         auth_header = request.query_params.get("token")
     if auth_header:
         # First check in-memory cache (an expired token is dropped there)
-        if cached_token_valid(auth_header):
-            token_data = _auth_tokens[auth_header]
+        token_data = cached_token_valid(auth_header)
+        if token_data:
             # Add token data to session-like storage for the route handlers
             request.state.auth_token_data = token_data
             request.state.authenticated_via_token = True
@@ -138,11 +148,11 @@ async def auth_token_middleware(request: Request, call_next):
             db_token_data = database.Users.get_auth_token(auth_header)
             if db_token_data:
                 # Add to in-memory cache for future requests
-                _auth_tokens[auth_header] = cached_token(db_token_data)
+                cached = remember_token(auth_header, cached_token(db_token_data))
                 # Add token data to session-like storage for the route handlers
-                request.state.auth_token_data = _auth_tokens[auth_header]
+                request.state.auth_token_data = cached
                 request.state.authenticated_via_token = True
-                device_service.touch(auth_header, _auth_tokens[auth_header])
+                device_service.touch(auth_header, cached)
     response = await call_next(request)
     return response
 
@@ -191,6 +201,28 @@ def _redact_url(url) -> str:
     from urllib.parse import parse_qsl, urlencode
     params = [(k, "***" if k.lower() in _SENSITIVE_QUERY_KEYS else v) for k, v in parse_qsl(url.query, keep_blank_values=True)]
     return str(url.replace(query=urlencode(params)))
+
+# The website's own pages may only run the site's own scripts (no injected ones), can't be framed
+# by other sites, and don't tell other sites the address they came from (it can carry ?token=)
+APP_CSP = ("default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; "
+           "img-src 'self' data: blob: https:; media-src 'self' data: blob:; font-src 'self' data:; "
+           "connect-src 'self' https:; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; "
+           "base-uri 'self'; form-action 'self'; frame-ancestors 'self'")
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    h = response.headers
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("Referrer-Policy", "same-origin")
+    h.setdefault("X-Frame-Options", "SAMEORIGIN")
+    if (response.headers.get("content-type") or "").startswith("text/html"):
+        h.setdefault("Content-Security-Policy", APP_CSP)
+    if request.headers.get("x-forwarded-proto") == "https" or request.url.scheme == "https":
+        h.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return response
+
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):

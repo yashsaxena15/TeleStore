@@ -16,8 +16,9 @@ on:
       - ".github/workflows/windows.yml"
   workflow_dispatch:
 
+# Read-only by default; only the publish job (pushes to main and windows-v* tags) can write releases
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-${{ github.ref }}
@@ -33,14 +34,16 @@ jobs:
     env:
       # windows-v1.2.0 -> 1.2.0; other builds are 1.0.<run>
       VERSION: ${{ format('1.0.{0}', github.run_number) }}
+    outputs:
+      version: ${{ steps.out.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Version from the tag
         if: startsWith(github.ref, 'refs/tags/windows-v')
         run: echo "VERSION=${GITHUB_REF_NAME#windows-v}" >> "$GITHUB_ENV"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
           cache: pip
@@ -80,27 +83,67 @@ jobs:
           Copy-Item "installer\Output\TeleStore-Setup-$env:VERSION.exe" dist\
           Get-ChildItem dist\*.exe
 
-      - uses: actions/upload-artifact@v4
+      # TeleStore-Setup-<version>.exe.sha256 (and one for the portable .exe), in sha256sum's format: the
+      # app's updater refuses an installer whose SHA-256 doesn't match the one published beside it
+      - name: Checksums
+        working-directory: windows/dist
+        run: |
+          for f in *.exe; do
+            h=$(sha256sum "$f" | cut -d' ' -f1)
+            printf '%s  %s\n' "$h" "$f" > "$f.sha256"
+          done
+          sha256sum -c *.sha256
+          cat *.sha256
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: TeleStore-Windows-${{ env.VERSION }}
-          path: windows/dist/*.exe
+          path: |
+            windows/dist/*.exe
+            windows/dist/*.exe.sha256
+
+      - name: Outputs for the publish job
+        id: out
+        run: echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+  # Only this job gets a token that can write releases, and only for pushes to main or windows-v* tags
+  publish:
+    needs: build
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/windows-v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: TeleStore-Windows-${{ needs.build.outputs.version }}
+          path: dist
+
+      - name: Check the checksums
+        working-directory: dist
+        run: sha256sum -c *.sha256
 
       # Every merge to main replaces the rolling "windows-latest" pre-release (the app's Beta updates)
       - name: Publish windows-latest
         if: github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete windows-latest --cleanup-tag --yes || true
           notes="TeleStore for Windows ${VERSION}, built from ${GITHUB_SHA::7}: $(git log -1 --pretty=%s).
 
-          Install with TeleStore-Setup-${VERSION}.exe (it updates itself afterwards), or run the portable .exe without installing."
-          gh release create windows-latest dist/*.exe --prerelease --target "$GITHUB_SHA" \
+          Install with TeleStore-Setup-${VERSION}.exe (it updates itself afterwards), or run the portable .exe without installing. Each .exe has a .sha256 checksum beside it."
+          gh release create windows-latest dist/*.exe dist/*.exe.sha256 --prerelease --target "$GITHUB_SHA" \
             --title "TeleStore for Windows (latest)" --notes "$notes"
 
       # A tag like windows-v1.0.0 makes a versioned release
       - name: Publish a versioned release
         if: startsWith(github.ref, 'refs/tags/windows-v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.exe --title "TeleStore for Windows $VERSION" --notes "TeleStore for Windows $VERSION." --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" dist/*.exe dist/*.exe.sha256 --title "TeleStore for Windows $VERSION" --notes "TeleStore for Windows $VERSION." --generate-notes

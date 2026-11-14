@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse, HTMLResponse
 from telestore.db import database
 from telestore.api.state import active_dav_uploads
 import re
+from telestore.security import content_safety
 import asyncio
 import glob
 from telestore.services.byte_streamer import get_byte_streamer
@@ -158,8 +159,8 @@ async def handle_get_head(request: Request, segments: List[str], owner_id: str, 
         "Accept-Ranges": "bytes",
         "Cache-Control": "private, no-cache",  # a PUT can replace the file at this address
         "Last-Modified": format_dav_date(file_doc.get("modified_date")),
-        "Content-Disposition": f'inline; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded_filename}',
-        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": f'{content_safety.disposition(True, content_type)}; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded_filename}',
+        **content_safety.file_headers(content_type),
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
     }

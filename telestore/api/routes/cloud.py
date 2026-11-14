@@ -16,6 +16,7 @@ from fastapi import APIRouter, Request, Depends, HTTPException, Query, UploadFil
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
+from telestore.security import content_safety
 from telestore.security.credentials import require_auth, require_cloud, require_cloud_upload, User
 from telestore.services.google_drive_manager import GoogleDriveManager
 from telestore.services.remote_transfer_manager import remote_transfer_manager
@@ -156,6 +157,44 @@ async def generate_gdrive_auth_url(
         logger.error(f"[GDRIVE_AUTH] Error generating auth URL: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate Google Drive authorization URL.")
 
+def _popup_response(title: str, heading: str, text: str, message: dict, fallback: str, status_code: int = 200) -> HTMLResponse:
+    """The popup page with its own strict CSP: only its one script (by nonce) may run."""
+    nonce = secrets.token_urlsafe(16)
+    page = _popup_page(title, heading, text, message, fallback).replace("<script>", f'<script nonce="{nonce}">', 1)
+    csp = f"default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-{nonce}'; base-uri 'none'; form-action 'none'"
+    return HTMLResponse(content=page, status_code=status_code, headers={"Content-Security-Policy": csp})
+
+
+def _popup_page(title: str, heading: str, text: str, message: dict, fallback: str) -> str:
+    """The page Google's sign-in popup lands on. Everything shown is escaped and the message to the
+    TeleStore window is JSON (so nothing in the address can run as script), and it is only sent to
+    this site's own origin."""
+    import html
+    payload = json.dumps(message).replace("<", "\\u003c")
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"><title>{html.escape(title)}</title>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }}
+    .card {{ background: #1e293b; padding: 32px 40px; border-radius: 16px; text-align: center; border: 1px solid #334155; max-width: 400px; }}
+    h2 {{ color: #38bdf8; margin-top: 0; }} p {{ color: #94a3b8; font-size: 14px; }}
+  </style>
+</head>
+<body>
+  <div class="card"><h2>{html.escape(heading)}</h2><p>{html.escape(text)}</p><p>This window will close automatically...</p></div>
+  <script>
+    if (window.opener) {{
+      window.opener.postMessage({payload}, window.location.origin);
+      setTimeout(() => window.close(), 1500);
+    }} else {{
+      setTimeout(() => {{ window.location.href = {json.dumps(fallback)}; }}, 1500);
+    }}
+  </script>
+</body>
+</html>"""
+
+
 @router.get("/gdrive/callback")
 async def gdrive_oauth_callback(
     code: Optional[str] = Query(None),
@@ -164,26 +203,10 @@ async def gdrive_oauth_callback(
 ):
     """Handle OAuth 2.0 callback redirect from Google."""
     if error:
-        logger.warning(f"[GDRIVE_OAUTH] Google returned error: {error}")
-        html_error = f"""
-        <!DOCTYPE html>
-        <html>
-        <head><title>Authorization Failed</title></head>
-        <body style="font-family:sans-serif; text-align:center; padding:50px;">
-          <h2 style="color:#ef4444;">Google Drive Authorization Cancelled</h2>
-          <p>Reason: {error}</p>
-          <script>
-            if (window.opener) {{
-              window.opener.postMessage({{ type: 'GDRIVE_AUTH_ERROR', error: '{error}' }}, '*');
-              setTimeout(() => window.close(), 2500);
-            }} else {{
-              setTimeout(() => {{ window.location.href = '/'; }}, 2500);
-            }}
-          </script>
-        </body>
-        </html>
-        """
-        return HTMLResponse(content=html_error, status_code=400)
+        logger.warning(f"[GDRIVE_OAUTH] Google returned error: {error[:200]!r}")
+        return _popup_response(
+            "Authorization Failed", "Google Drive Authorization Cancelled", f"Reason: {error[:200]}",
+            {"type": "GDRIVE_AUTH_ERROR", "error": error[:200]}, "/", status_code=400)
 
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing code or state parameter.")
@@ -242,40 +265,15 @@ async def gdrive_oauth_callback(
             credentials=credentials
         )
 
-        success_html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Google Drive Connected</title>
-          <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }}
-            .card {{ background: #1e293b; padding: 32px 40px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); text-align: center; border: 1px solid #334155; max-width: 400px; }}
-            h2 {{ color: #38bdf8; margin-top: 0; }}
-            p {{ color: #94a3b8; font-size: 14px; }}
-          </style>
-        </head>
-        <body>
-          <div class="card">
-            <h2>Connected Successfully!</h2>
-            <p><strong>{email}</strong> has been linked to your TeleStore.</p>
-            <p>This window will close automatically...</p>
-          </div>
-          <script>
-            if (window.opener) {{
-              window.opener.postMessage({{ type: 'GDRIVE_AUTH_SUCCESS', account_id: '{account_id}', email: '{email}' }}, '*');
-              setTimeout(() => window.close(), 1200);
-            }} else {{
-              setTimeout(() => {{ window.location.href = '/?cloud_connected=true'; }}, 1500);
-            }}
-          </script>
-        </body>
-        </html>
-        """
-        return HTMLResponse(content=success_html, status_code=200)
+        return _popup_response(
+            "Google Drive Connected", "Connected Successfully!", f"{email} has been linked to your TeleStore.",
+            {"type": "GDRIVE_AUTH_SUCCESS", "account_id": str(account_id), "email": email}, "/?cloud_connected=true")
 
     except Exception as e:
         logger.error(f"[GDRIVE_OAUTH] Callback handling error: {e}", exc_info=True)
-        return HTMLResponse(content=f"<h3>Authentication error: {e}</h3>", status_code=500)
+        return _popup_response(
+            "Google Drive", "Couldn't connect Google Drive", "Something went wrong. Close this window and try again.",
+            {"type": "GDRIVE_AUTH_ERROR", "error": "Couldn't connect Google Drive"}, "/", status_code=500)
 
 @router.delete("/accounts/{account_id}")
 async def disconnect_cloud_account(account_id: str, user: User = Depends(require_auth)):
@@ -570,7 +568,8 @@ async def stream_cloud_file(
             out_headers["Content-Length"] = resp.headers["Content-Length"]
 
         safe_name = urllib.parse.quote(file_name)
-        out_headers["Content-Disposition"] = f'inline; filename="{safe_name}"; filename*=UTF-8\'\'{safe_name}'
+        out_headers["Content-Disposition"] = f'{content_safety.disposition(True, out_headers["Content-Type"])}; filename="{safe_name}"; filename*=UTF-8\'\'{safe_name}'
+        out_headers.update(content_safety.file_headers(out_headers["Content-Type"]))
 
         return StreamingResponse(
             body_stream(),

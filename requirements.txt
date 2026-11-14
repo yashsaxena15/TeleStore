@@ -1,31 +1,20 @@
-aiohttp-jinja2==1.6
+aiohttp==3.14.5
 cachetools==6.2.0
 cryptography==45.0.4
-Flask==3.1.2
-humanize==4.13.0
 parse-torrent-title==2.8.1
 pymongo==4.14.1
 python-dotenv==1.1.1
 python-telegram-bot==22.3
-requests-html==0.10.0
-schedule==1.2.2
 TgCrypto==1.2.5
-themoviedb==1.0.2
 colorama==0.4.6
 requests==2.32.4
-RapidFuzz==3.14.1
 pyrofork==2.3.68
 psutil==7.1.0
-aiohttp-session
-python-multipart
+python-multipart==0.0.33
 fastapi==0.121.1
 uvicorn==0.38.0
-pytz==2025.2
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
 aiofiles==25.1.0
-gdown>=6.4.0
+gdown==6.5.1
 instaloader==4.15.4
 yt-dlp==2026.10.21
 yt-dlp-ejs==0.8.0
@@ -37,3 +26,5 @@ curl-cffi==0.16.3
 pillow==13.0.0
 pillow-heif==1.8.1
 libtorrent==2.1.1  # torrents part by part (telestore/torrent_engine.py); aria2c is the fallback
+beautifulsoup4==4.15.0  # reading Google Drive pages (remote_transfer_manager)
+itsdangerous==2.2.0  # signed session cookies (Starlette SessionMiddleware)

@@ -188,10 +188,32 @@ def _first_bytes(request: Request) -> bool:
     return not rng or bool(re.match(r"^\s*bytes=0-", rng))
 
 
+# What the share page can show (frontend/src/features/sharing/shareHelpers.js EXT, kept the same)
+_PREVIEW_EXTS = {
+    "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "avif", "heic",
+    "mp4", "m4v", "webm", "mov", "mkv", "avi", "3gp", "ts",
+    "mp3", "wav", "ogg", "flac", "m4a", "aac", "opus",
+    "pdf",
+    "epub", "docx", "md", "markdown", "txt", "log", "json", "csv", "tsv", "xlsx", "xls", "ods", "pptx", "ppt",
+    "html", "xml", "yml", "yaml", "py", "js", "css", "sh", "sql", "ini", "conf",
+}
+
+
+def _previewable(doc: dict) -> bool:
+    name = doc.get("file_name") or ""
+    if "." in name and name.rsplit(".", 1)[-1].lower() in _PREVIEW_EXTS:
+        return True
+    return (doc.get("mime_type") or "").lower().startswith(("image/", "video/", "audio/"))
+
+
 async def _stream(request: Request, doc: dict, inline: bool, link_share: Optional[dict] = None):
     from telestore.api.routes.stream import stream_document
     if doc.get("file_type") == "folder":
         raise HTTPException(status_code=400, detail="That's a folder. Download it as a zip instead.")
+    # Viewing in the page is only for what the page can show (pictures, video, audio, PDF); asking
+    # to "view" anything else is a download, with the link's download switch and limit
+    if link_share is not None and inline and not _previewable(doc):
+        inline = False
     if link_share is not None and not inline:
         if not (link_share.get("link") or {}).get("allow_download", True):
             raise HTTPException(status_code=403, detail="The owner turned off downloads for this link.")
@@ -398,8 +420,8 @@ def upload_target(share_id: str, path: str, user: User):
 # ── Anyone with the link ───────────────────────────────────────────────────
 
 def _client_key(request: Request) -> str:
-    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
-    return "link:" + (forwarded or (request.client.host if request.client else "?"))
+    from telestore.security.client_ip import client_ip
+    return "link:" + client_ip(request)
 
 
 def _by_link(request: Request, token: str):

@@ -56,18 +56,18 @@ class TestAppTokens:
 
 class TestSignOutAndExpiry:
     def test_sign_out_ends_the_token_now(self, client):
-        state._auth_tokens["tok"] = {"authenticated": True, "username": "bob", "auth_method": "local", "expires_at": datetime.now() + timedelta(days=1)}
+        state.remember_token("tok", {"authenticated": True, "username": "bob", "auth_method": "local", "expires_at": datetime.now() + timedelta(days=1)})
         assert client.get("/auth/check", headers={"X-Auth-Token": "tok"}).json()["authenticated"] is True
         client.post("/auth/logout", headers={"X-Auth-Token": "tok"})
-        assert "tok" not in state._auth_tokens
+        assert state.cached_token_valid("tok") is None and state._key("tok") not in state._auth_tokens
         database.Users.get_auth_token.return_value = None
         assert client.get("/auth/check", headers={"X-Auth-Token": "tok"}).json()["authenticated"] is False
 
     def test_expired_token_stops_working(self, client):
-        state._auth_tokens["old"] = {"authenticated": True, "username": "bob", "auth_method": "local", "expires_at": datetime.now() - timedelta(seconds=1)}
+        state.remember_token("old", {"authenticated": True, "username": "bob", "auth_method": "local", "expires_at": datetime.now() - timedelta(seconds=1)})
         database.Users.get_auth_token.return_value = None
         assert client.get("/auth/check", headers={"X-Auth-Token": "old"}).json()["authenticated"] is False
-        assert "old" not in state._auth_tokens
+        assert state._key("old") not in state._auth_tokens
 
 
 class TestSearch:
@@ -114,8 +114,8 @@ class TestOwnMedia:
         request.query_params = {}
         request.headers = {}
         token = media_routes._caller_token(request, None, self._user())
-        assert state._auth_tokens[token]["username"] == "bob"
-        assert state._auth_tokens[token]["expires_at"] > datetime.now()
+        assert state.cached_token_valid(token)["username"] == "bob"
+        assert state.cached_token_valid(token)["expires_at"] > datetime.now()
         database.Users.db.__getitem__.assert_not_called()
 
     def test_app_token_is_used_as_is(self):
@@ -125,7 +125,7 @@ class TestOwnMedia:
         assert media_routes._caller_token(request, None, self._user()) == "apptoken"
 
     def test_stream_of_someone_elses_file_is_404(self, client):
-        state._auth_tokens["tok"] = {"authenticated": True, "username": "bob", "auth_method": "local", "expires_at": datetime.now() + timedelta(days=1)}
+        state.remember_token("tok", {"authenticated": True, "username": "bob", "auth_method": "local", "expires_at": datetime.now() + timedelta(days=1)})
         database.Users.getUser.return_value = {"username": "bob", "telegram_user_id": 42}
         database.Files.find_one.return_value = None
         res = client.get("/media/stream/other.mp4", params={"token": "tok"}, follow_redirects=False)
@@ -133,7 +133,7 @@ class TestOwnMedia:
 
     def test_stream_redirect_carries_the_callers_token_and_file_id(self, client):
         oid = ObjectId()
-        state._auth_tokens["tok"] = {"authenticated": True, "username": "bob", "auth_method": "local", "expires_at": datetime.now() + timedelta(days=1)}
+        state.remember_token("tok", {"authenticated": True, "username": "bob", "auth_method": "local", "expires_at": datetime.now() + timedelta(days=1)})
         database.Users.getUser.return_value = {"username": "bob", "telegram_user_id": 42}
         database.Files.find_one.return_value = {"_id": oid, "file_name": "clip.mp4"}
         res = client.get("/media/stream/clip.mp4", params={"token": "tok"}, follow_redirects=False)
@@ -143,7 +143,7 @@ class TestOwnMedia:
 
 class TestThumbnails:
     def test_missing_thumbnail_is_404(self, client):
-        state._auth_tokens["tok"] = {"authenticated": True, "username": "bob", "auth_method": "local", "expires_at": datetime.now() + timedelta(days=1)}
+        state.remember_token("tok", {"authenticated": True, "username": "bob", "auth_method": "local", "expires_at": datetime.now() + timedelta(days=1)})
         bot = MagicMock()
         bot.get_least_busy_client.return_value.download_media.side_effect = ValueError("FILE_ID_INVALID")
         app.state.bot_manager = bot

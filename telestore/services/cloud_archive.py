@@ -260,7 +260,9 @@ async def extract_with_7z_or_fallback(archive_path: str, extract_dir: str) -> bo
     if tarfile.is_tarfile(archive_path):
         logger.info(f"Extracting {archive_path} using python tarfile...")
         with tarfile.open(archive_path, "r:*") as tf:
-            tf.extractall(extract_dir)
+            # "data": no paths outside the folder, no links out of it, no devices or setuid bits
+            # (7z refuses such archives, which is exactly when this fallback runs)
+            tf.extractall(extract_dir, filter="data")
         return True
 
     raise ValueError("Archive extraction failed: Format unrecognized or extraction utility failed.")

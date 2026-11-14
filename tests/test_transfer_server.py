@@ -336,7 +336,8 @@ def test_an_empty_file_is_a_record_with_no_message():
 
 
 def test_a_worker_reporting_an_empty_file_saves_it_as_a_record(worker_post):
-    coll = Coll([{"task_id": "t1", "status": "downloading", "claimed_by": "vm2"}])
+    coll = Coll([{"task_id": "t1", "status": "downloading", "claimed_by": "vm2", "user_id": "42", "chat_id": -100,
+                  "destination_path": "/Home/College"}])
     body = {"task_id": "t1", "worker_id": "vm2", "user_id": "42", "chat_id": -100, "destination_path": "/Home/College",
             "file_name": "Lec-3.mp4", "file_size": 0, "is_empty": True}
     result, db = worker_post(coll, "complete-task", body)
@@ -345,6 +346,18 @@ def test_a_worker_reporting_an_empty_file_saves_it_as_a_record(worker_post):
     assert db.Files.save_empty.call_args.args[:3] == ("Lec-3.mp4", "/Home/College", "42")
     assert not db.Files.claim_upload.called
     assert coll.docs[0]["status"] == "completed" and "empty file" in coll.docs[0]["phase"]
+
+
+def test_a_report_cant_put_the_file_into_another_account(worker_post):
+    """Whose file it is and where it goes come from the task, never from what the worker says."""
+    coll = Coll([{"task_id": "t1", "status": "downloading", "claimed_by": "vm2", "user_id": "42", "chat_id": -100,
+                  "destination_path": "/Home/College", "is_vault": False}])
+    body = {"task_id": "t1", "worker_id": "vm2", "user_id": "999", "chat_id": -555, "destination_path": "/Vault/x",
+            "is_vault": True, "file_name": "a.mp4", "file_size": 0, "is_empty": True}
+    result, db = worker_post(coll, "complete-task", body)
+    assert result == {"status": "ok"}
+    args, kwargs = db.Files.save_empty.call_args
+    assert args[:3] == ("a.mp4", "/Home/College", "42") and kwargs.get("is_vault") is False
 
 
 def test_an_empty_download_sends_no_part_to_telegram(tmp_path):

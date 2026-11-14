@@ -3,10 +3,11 @@
 from telestore.services.remote_transfer_manager.helpers import friendly_error, google_limit_pause
 from telestore.services import event_service
 from fastapi import APIRouter, Request, HTTPException, Header, Depends, status
-from telestore.security.credentials import User, require_admin, require_owner
+from telestore.security.credentials import User, require_owner
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, timedelta
+import hmac
 import os
 import logging
 from pymongo import ReturnDocument
@@ -39,7 +40,7 @@ router = APIRouter(prefix="/api/worker", tags=["Distributed Workers"])
 
 def verify_worker_auth(x_worker_key: Optional[str] = Header(None, alias="X-Worker-Key")):
     """Verifies that the incoming request has the valid WORKER_SECRET_KEY."""
-    if not x_worker_key or x_worker_key != WORKER_SECRET_KEY:
+    if not x_worker_key or not hmac.compare_digest(x_worker_key.encode(), (WORKER_SECRET_KEY or "").encode()):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing X-Worker-Key header"
@@ -146,7 +147,7 @@ async def torrent_details(task_id: str, worker_id: str, auth: None = Depends(ver
 
 
 @router.get("/nodes")
-async def list_worker_nodes(admin: bool = Depends(require_admin)):
+async def list_worker_nodes(owner: User = Depends(require_owner)):
     """Admin view of the distributed workers and their health (their names and addresses aren't public)."""
     coll = get_remote_db()["WorkerNodes"]
     now = datetime.now(timezone.utc)
@@ -379,12 +380,20 @@ async def complete_task(
 
     # Only the machine that has the task saves it: a late report (another machine took the task over)
     # would add a second copy of the file
-    if not coll.find_one_and_update(
+    claimed = coll.find_one_and_update(
         _still_theirs(body.task_id, body.worker_id),
         {"$set": {"status": "uploading_tg", "claimed_by": body.worker_id, "phase": "Saving…", "updated_at": now}},
-    ):
+    )
+    if not claimed:
         logger.warning(f"[WORKER_LATE] Task {body.task_id} finished on {body.worker_id}, but it isn't theirs any more. Ignored.")
         return {"status": "ignored"}
+    # Whose file it is and where it goes come from the task, never from the report: a worker key
+    # must not be able to put files into another account or its vault
+    body.user_id = str(claimed.get("user_id") or body.user_id)
+    body.destination_path = claimed.get("destination_path") or "/Home"
+    body.is_vault = bool(claimed.get("is_vault", False))
+    if claimed.get("chat_id") is not None:
+        body.chat_id = int(claimed["chat_id"])
 
     # One part of a big torrent file: the file is saved once its last part is in
     if body.is_torrent_part and body.part_info:

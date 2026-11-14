@@ -61,4 +61,3 @@ Ensure the `.env` file contains strong, non-default values for:
 | `DATABASE_URL` | MongoDB connection URI (`mongodb://mongo:27017/TeleStore`) | Required |
 | `API_ID` & `API_HASH` | Telegram API credentials from my.telegram.org | Required |
 | `TOKEN0` ... `TOKEN19` | Telegram Bot tokens for the bot pool | At least 1 token |
-| `GITHUB_WEBHOOK_SECRET` | Secret for auto-update webhook (optional) | Strong secret if enabled |

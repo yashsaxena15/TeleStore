@@ -372,9 +372,10 @@ class Users(Collection):
             from datetime import datetime, timedelta
             expires_at = datetime.now() + timedelta(hours=ttl_hours)
             
+            from telestore.services.device_service import token_key
             token_data = {
                 'username': username,
-                'auth_token': auth_token,
+                'auth_token': token_key(auth_token),
                 'auth_method': auth_method,
                 'created_at': datetime.now(),
                 'expires_at': expires_at
@@ -388,7 +389,7 @@ class Users(Collection):
             
             # Use upsert to either insert new or update existing token
             self.database.AuthTokens.update_one(
-                {'auth_token': auth_token},
+                {'auth_token': token_data['auth_token']},
                 {'$set': token_data},
                 upsert=True
             )
@@ -401,6 +402,8 @@ class Users(Collection):
         try:
             from datetime import datetime
             # Find token and check if it's expired
+            from telestore.services.device_service import token_key
+            auth_token = token_key(auth_token)
             token_data = self.database.AuthTokens.find_one({'auth_token': auth_token})
             if token_data:
                 # Check if token is expired
@@ -417,7 +420,8 @@ class Users(Collection):
     def remove_auth_token(self, auth_token: str) -> None:
         """Remove an auth token"""
         try:
-            self.database.AuthTokens.delete_one({'auth_token': auth_token})
+            from telestore.services.device_service import token_key
+            self.database.AuthTokens.delete_one({'auth_token': token_key(auth_token)})
             logger.info(f"Removed auth token")
         except Exception as e:
             logger.error(f"Failed to remove auth token: {e}")

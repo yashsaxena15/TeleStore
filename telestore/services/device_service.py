@@ -29,6 +29,12 @@ def token_id(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()[:20]
 
 
+def token_key(token: str) -> str:
+    """How a sign-in token is stored and looked up: its SHA-256, never the token itself (someone
+    reading the database or a backup can't sign in with what they find there)."""
+    return hashlib.sha256(("telestore-token:" + (token or "")).encode()).hexdigest()
+
+
 def _tokens():
     from telestore.db import database
     return database.Users.database.AuthTokens
@@ -42,7 +48,7 @@ def touch(token: str, cached: dict) -> None:
         return
     cached["_touched"] = now
     try:
-        _tokens().update_one({"auth_token": token}, {"$set": {"last_seen": datetime.now()}})
+        _tokens().update_one({"auth_token": token_key(token)}, {"$set": {"last_seen": datetime.now()}})
     except Exception as e:
         logger.warning(f"Couldn't record last use: {e}")
 
@@ -109,6 +115,29 @@ def listing(username: str, current: Optional[str]) -> list:
         })
     devices.sort(key=lambda d: (not d["current"], -(datetime.fromisoformat(d["last_seen"]).timestamp() if d["last_seen"] else 0)))
     return devices
+
+
+def sign_out_all(username: str, keep_token: str = None) -> int:
+    """Ends every sign-in of [username] (after a password change or reset), except [keep_token]
+    (the device that changed it). Returns how many ended."""
+    from telestore.api.state import _auth_tokens
+    keep = token_key(keep_token) if keep_token else None
+    flt = {"username": username}
+    if keep:
+        flt["auth_token"] = {"$ne": keep}
+    ended = 0
+    for doc in list(_tokens().find(flt, {"auth_token": 1, "token_id": 1})):
+        _tokens().delete_one({"_id": doc["_id"]})
+        _auth_tokens.pop(doc.get("auth_token"), None)
+        if doc.get("token_id"):
+            _session_checks[doc["token_id"]] = (False, time.monotonic())
+        ended += 1
+    for key, data in list(_auth_tokens.items()):
+        if data.get("username") == username and key != keep:
+            _auth_tokens.pop(key, None)
+    if ended:
+        logger.info(f"Signed out {ended} device(s) of {username}")
+    return ended
 
 
 def sign_out(username: str, tid: str) -> bool:

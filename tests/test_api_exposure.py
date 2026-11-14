@@ -10,11 +10,15 @@ def test_the_api_reference_is_not_public(client):
         assert client.get(path).status_code == 404
 
 
-def test_the_worker_list_needs_an_admin(client):
+def test_the_worker_list_is_for_the_owner_only(client):
+    from telestore.api.app import app
+    from telestore.security.credentials import User, require_auth
     assert client.get("/api/worker/nodes").status_code == 401
-    with patch("telestore.security.credentials.is_authenticated", return_value=True), \
-            patch("telestore.security.credentials.is_admin", return_value=False):
+    app.dependency_overrides[require_auth] = lambda: User(username="family")  # any other signed-in user
+    try:
         assert client.get("/api/worker/nodes").status_code == 403
+    finally:
+        app.dependency_overrides.pop(require_auth, None)
 
 
 def test_reset_codes_are_six_digits_from_a_secure_source():

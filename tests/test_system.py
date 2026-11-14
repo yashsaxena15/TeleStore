@@ -1,81 +1,14 @@
-"""Tests for /system/github webhook and /system/workloads endpoints."""
+"""Tests for /system endpoints (the old GitHub webhook is gone)."""
 
-import hashlib
-import hmac
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from telestore.security.credentials import User, require_auth
 
 
 class TestGithubWebhook:
     """Tests for GitHub webhook auto-update endpoint."""
 
-    def test_github_webhook_rejects_missing_signature(self, client):
-        """Unsigned calls must be rejected with 401."""
-        response = client.post(
-            "/system/github",
-            content=json.dumps({"ref": "refs/heads/main"}),
-            headers={"Content-Type": "application/json", "X-GitHub-Event": "push"},
-        )
-        assert response.status_code == 401
-        assert response.json()["detail"] == "Invalid signature"
-
-    def test_github_webhook_rejects_invalid_signature(self, client):
-        """Calls with forged or wrong signatures must be rejected with 401."""
-        response = client.post(
-            "/system/github",
-            content=json.dumps({"ref": "refs/heads/main"}),
-            headers={
-                "Content-Type": "application/json",
-                "X-GitHub-Event": "push",
-                "X-Hub-Signature-256": "sha256=0000000000000000000000000000000000000000000000000000000000000000",
-            },
-        )
-        assert response.status_code == 401
-        assert response.json()["detail"] == "Invalid signature"
-
-    @patch("subprocess.run")
-    def test_github_webhook_accepts_valid_signature_with_mocked_subprocess(
-        self, mock_subprocess, client, test_secrets
-    ):
-        """Valid HMAC signature triggers git pull with subprocess completely mocked (no real git)."""
-        mock_proc = MagicMock()
-        mock_proc.returncode = 0
-        mock_proc.stdout = "Already up to date."
-        mock_proc.stderr = ""
-        mock_subprocess.return_value = mock_proc
-
-        payload = json.dumps({"ref": "refs/heads/main"}).encode("utf-8")
-        secret = test_secrets["github_secret"].encode("utf-8")
-        signature = "sha256=" + hmac.new(secret, payload, hashlib.sha256).hexdigest()
-
-        response = client.post(
-            "/system/github",
-            content=payload,
-            headers={
-                "Content-Type": "application/json",
-                "X-GitHub-Event": "push",
-                "X-Hub-Signature-256": signature,
-            },
-        )
-        assert response.status_code == 200
-        # Verify subprocess was called and no real git process ran
-        assert mock_subprocess.called
-
-    def test_github_webhook_disabled_when_secret_unset(self, client):
-        """When GITHUB_WEBHOOK_SECRET is empty/unset, webhook responds with 503."""
-        with patch("telestore.config.GITHUB_WEBHOOK_SECRET", ""):
-            response = client.post(
-                "/system/github",
-                content=json.dumps({"ref": "refs/heads/main"}),
-                headers={"Content-Type": "application/json"},
-            )
-            assert response.status_code == 503
-            assert "Webhook disabled" in response.json()["detail"]
-
-
-class TestSystemWorkloads:
-    """Tests for /system/workloads endpoint."""
+    def test_the_old_github_webhook_is_gone(self, client):
+        assert client.post("/system/github", json={}).status_code in (404, 405)
 
     def test_get_workloads_unauthenticated(self, client):
         """Unauthenticated requests must be rejected with 401."""

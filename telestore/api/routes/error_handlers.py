@@ -1,5 +1,7 @@
 # telestore/api/routes/error_handlers.py
 
+import logging
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -37,9 +39,16 @@ async def validation_exception_handler(request: Request, exc):
 async def http_exception_handler(request: Request, exc):
     # Keep headers such as Retry-After (sign-in and PIN lockouts) and WWW-Authenticate
     headers = getattr(exc, "headers", None)
+    detail = exc.detail
+    if exc.status_code >= 500:
+        # Server errors keep their details in the log: they can hold paths, database errors or
+        # addresses that are nobody else's business. 502-504 carry plain "Telegram or a service is unavailable" messages.
+        logging.getLogger("telestore.errors").error(f"{request.method} {request.url.path} -> {exc.status_code}: {detail}")
+        if exc.status_code not in (502, 503, 504):
+            detail = "Something went wrong on the server. Try again; if it keeps happening, tell the owner."
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": exc.detail},
+        content={"detail": detail},
         headers=dict(headers) if headers else None
     )
 
