@@ -177,6 +177,50 @@ class DirectTest {
         assertEquals(listOf(1), saved)
     }
 
+    /** Takes a while per part and remembers how many were being sent at the same time. */
+    private class SlowSender : TelegramSender {
+        var now = 0
+        var most = 0
+        override suspend fun send(chatId: Long, source: ChunkSource, start: Long, length: Long, fileName: String, caption: String,
+                                  onProgress: (Long) -> Unit): Long {
+            synchronized(this) { now++; most = maxOf(most, now) }
+            kotlinx.coroutines.delay(50)
+            onProgress(length)
+            synchronized(this) { now-- }
+            return 200 + start / 10
+        }
+    }
+
+    @Test
+    fun `parts go several at once when the file can be read anywhere`() = runTest {
+        server.enqueue(json(bigPlan))
+        server.enqueue(json("""{"message":"File saved","file":{"id":"new2"}}"""))
+        val sender = SlowSender()
+        val saved = java.util.Collections.synchronizedList(mutableListOf<Int>())
+        val progress = java.util.Collections.synchronizedList(mutableListOf<Long>())
+        assertEquals("new2", DirectUploader(api, sender, NoBytes, "big.mkv", 30, "/Home", parallel = 3,
+            onPartSent = { i, _ -> saved += i }, onProgress = { progress += it }).upload())
+        assertEquals(3, sender.most)
+        assertEquals(setOf(1, 2, 3), saved.toSet())
+        assertEquals(30L, progress.last())
+        server.takeRequest()
+        val parts = server.takeRequest().json()["parts"]!!.jsonArray.map { it.jsonObject["message_id"]!!.jsonPrimitive.long }
+        assertEquals(listOf(200L, 201L, 202L), parts) // in part order, whatever order they finished in
+    }
+
+    @Test
+    fun `a stream that can only be read in order goes one part at a time`() = runTest {
+        server.enqueue(json(bigPlan))
+        server.enqueue(json("""{"message":"File saved"}"""))
+        val sender = SlowSender()
+        val stream = object : ChunkSource {
+            override val seekable = false
+            override fun read(offset: Long, length: Int, buffer: ByteArray) {}
+        }
+        DirectUploader(api, sender, stream, "big.mkv", 30, "/Home", parallel = 3).upload()
+        assertEquals(1, sender.most)
+    }
+
     @Test
     fun `already saved counts as done`() = runTest {
         server.enqueue(json(bigPlan))

@@ -196,6 +196,34 @@ class TelegramAccount(private val context: Context) {
         }
     }
 
+    // ── Downloading whole parts (downloads, not playback) ──
+
+    /**
+     * Starts Telegram fetching one message's file from [from] to its end in one go (no windows): for
+     * downloads, where nothing jumps around. Returns TDLib's file id for [downloadedFrom] and [readChunk].
+     */
+    /** Whole-part downloads running now (Telegram's cache isn't tidied meanwhile: it would cut them). */
+    val wholeDownloads = java.util.concurrent.atomic.AtomicInteger(0)
+
+    suspend fun startWholeDownload(chatId: Long, messageId: Long, from: Long): Int {
+        val fileId = fileIdFor(chatId, messageId)
+        wanted.remove(fileId) // the playback windows don't apply to this one
+        send(TdApi.DownloadFile(fileId, WHOLE_PRIORITY, from, 0, false))
+        return fileId
+    }
+
+    /** How many bytes from [offset] on are already on the phone (in Telegram's cache). */
+    suspend fun downloadedFrom(fileId: Int, offset: Long): Long = send(TdApi.GetFileDownloadedPrefixSize(fileId, offset)).size
+
+    suspend fun readChunk(fileId: Int, offset: Long, length: Long): ByteArray = send(TdApi.ReadFilePart(fileId, offset, length)).data
+
+    /** Stops fetching [fileId] and deletes Telegram's copy on the phone (once it's saved elsewhere). */
+    suspend fun dropFile(fileId: Int) {
+        runCatching { send(TdApi.CancelDownloadFile(fileId, false)) }
+        runCatching { send(TdApi.DeleteFile(fileId)) }
+        wanted.remove(fileId)
+    }
+
     /** Makes sure Telegram is fetching [fileId] from [from] (a window of [AHEAD] bytes), asking once per window. */
     private suspend fun want(fileId: Int, from: Long) {
         val size = fileSizes[fileId] ?: 0L
@@ -208,7 +236,7 @@ class TelegramAccount(private val context: Context) {
 
     /** Keeps Telegram's own copies of played and downloaded files under [maxBytes] on this phone. */
     fun trimCache(maxBytes: Long = 1L shl 30) {
-        if (client == null) return
+        if (client == null || wholeDownloads.get() > 0) return
         scope.launch {
             runCatching {
                 send(TdApi.OptimizeStorage(maxBytes, 3 * 24 * 3600, -1, 60, arrayOf<TdApi.FileType>(), longArrayOf(), longArrayOf(), false, 0))
@@ -312,6 +340,8 @@ class TelegramAccount(private val context: Context) {
 
     companion object {
         /** How much Telegram fetches ahead of the reader in one request. */
+        /** Downloads come after playback (32), so a video you're watching stays smooth. */
+        const val WHOLE_PRIORITY = 16
         const val AHEAD = 16L shl 20
         /** When less than this is ready ahead, the next window is asked for. */
         const val LOW_WATER = 4L shl 20
