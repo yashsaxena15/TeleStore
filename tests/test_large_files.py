@@ -343,3 +343,34 @@ class TestSharedMessages:
         repo = Files.__new__(Files)
         with patch.object(Files, "find", return_value=[{"message_id": 1, "parts": [{"message_id": 2}]}]):
             assert repo.unreferenced_messages({-100: {1, 2}}) == {}
+
+
+class TestResumingAtAPartBoundary:
+    """Some records say each part ends one byte past its last byte (torrents, links, workers before
+    2026-11-14). A download resumed exactly where part 2 starts must start in part 2, not ask part 1
+    for a byte it doesn't have (the browser showed "file incomplete")."""
+
+    def _record(self, inclusive_ends: bool):
+        cut = 0 if inclusive_ends else 1
+        parts = [{"part_index": i + 1, "chat_id": -100, "message_id": 10 + i, "part_size": 1000,
+                  "start_byte": i * 1000, "end_byte": i * 1000 + 999 + cut} for i in range(3)]
+        return {**RECORD, "file_size": 3000, "parts": parts, "total_parts": 3, "part_size": 1000}
+
+    @pytest.mark.parametrize("inclusive_ends", [True, False])
+    def test_resume_where_part_two_starts(self, client, inclusive_ends):
+        with _Dl(self._record(inclusive_ends)) as dl:
+            asked = []
+
+            async def parts(*a, **kw):
+                asked.append(kw.get("parts_to_stream") or a[0])
+                yield b"x"
+            dl.streamer.yield_parts = parts
+            res = client.get("/dl/movie.mp4?file_id=uniq", headers={"Range": "bytes=1000-"})
+        assert res.status_code == 206 and res.headers["content-range"] == "bytes 1000-2999/3000"
+        got = [(p["part_index"], p["part_from_byte"], p["part_until_byte"]) for p in asked[0]]
+        assert got == [(2, 0, 999), (3, 0, 999)]
+
+    def test_the_last_byte_comes_from_start_and_size(self):
+        from telestore.services.byte_streamer import part_last_byte
+        assert part_last_byte({"start_byte": 1000, "part_size": 1000, "end_byte": 2000}) == 1999
+        assert part_last_byte({"start_byte": 0, "end_byte": 499}) == 499  # no size: the recorded end

@@ -297,7 +297,7 @@ class DistributedWorker:
                 "file_unique_id": uniq_id,
                 "part_size": p_size,
                 "start_byte": s_byte,
-                "end_byte": s_byte + p_size
+                "end_byte": s_byte + p_size - 1  # the last byte (inclusive)
             }
         finally:
             try:
@@ -659,7 +659,7 @@ class DistributedWorker:
                     "file_unique_id": uniq_id,
                     "part_size": transferred,
                     "start_byte": range_start,
-                    "end_byte": range_start + transferred,
+                    "end_byte": range_start + transferred - 1,  # the last byte (inclusive)
                     "thumbnail": None
                 }
 

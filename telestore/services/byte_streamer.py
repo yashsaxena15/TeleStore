@@ -38,6 +38,18 @@ def _cache_in_background(chat_id, message_id, chunk_offset, chunk_size, data, is
 LOGGER = setup_logger(__name__)
 
 
+
+def part_last_byte(part: dict) -> int:
+    """The last byte of the whole file that [part] holds (inclusive). Worked out from its start and
+    size: some records (torrents, links, the workers, before 2026-11-14) saved end_byte one byte too
+    far, which made a download resumed exactly at a part boundary ask the wrong part and stop."""
+    start = int(part.get("start_byte") or 0)
+    size = int(part.get("part_size") or 0)
+    if size > 0:
+        return start + size - 1
+    return int(part.get("end_byte", start - 1))
+
+
 class InvalidHash(Exception):
     message = 'Invalid hash!'
 
@@ -498,7 +510,7 @@ class ByteStreamer:
         for item in overlapping_parts:
             part = item["part"]
             p_start = part["start_byte"]
-            p_end = part["end_byte"]
+            p_end = part_last_byte(part)
             if p_end < from_bytes or p_start > until_bytes:
                 continue
 

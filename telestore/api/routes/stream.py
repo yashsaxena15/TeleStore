@@ -513,8 +513,9 @@ async def media_streamer(
 
     parts_to_stream = []
     for p in parts_list:
-        p_start = p.get("start_byte", 0)
-        p_end = p.get("end_byte", p_start + p.get("part_size", 0) - 1)
+        from telestore.services.byte_streamer import part_last_byte
+        p_start = int(p.get("start_byte", 0) or 0)
+        p_end = part_last_byte(p)
         if p_end < from_bytes or p_start > until_bytes:
             continue
 

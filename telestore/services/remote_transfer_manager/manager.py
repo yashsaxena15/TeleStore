@@ -1387,7 +1387,7 @@ class RemoteTransferManager:
                 )
                 parts.append({
                     "part_index": index, "chat_id": chat_id, "message_id": res["message_id"], "file_unique_id": res["file_unique_id"],
-                    "part_size": part_size, "start_byte": start, "end_byte": start + part_size, "thumbnail": res.get("thumbnail"),
+                    "part_size": part_size, "start_byte": start, "end_byte": start + part_size - 1, "thumbnail": res.get("thumbnail"),
                 })
         database.Files.add_multipart_file(
             chat_id=chat_id, thumbnail=parts[0].get("thumbnail"), file_type=file_type, file_unique_id=parts[0]["file_unique_id"],
@@ -1800,7 +1800,7 @@ class RemoteTransferManager:
             "file_unique_id": res["file_unique_id"],
             "part_size": downloaded_bytes,
             "start_byte": range_start,
-            "end_byte": range_start + downloaded_bytes,
+            "end_byte": range_start + downloaded_bytes - 1,  # the last byte (inclusive)
             "thumbnail": res.get("thumbnail")
         }
 
