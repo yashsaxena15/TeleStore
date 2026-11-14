@@ -67,25 +67,85 @@ class TelegramFiles(private val container: AppContainer) {
         return out.toByteArray()
     }
 
-    /** Downloads one of your files straight from Telegram into [target], continuing after what it already has. */
+    /**
+     * Downloads one of your files straight from Telegram into [target], continuing after what it
+     * already has. A big file is several messages (parts of up to 1.95 GB): up to [PARALLEL_PARTS]
+     * of them are fetched at once, each in one go, and written into [target] in order as they come;
+     * each part's copy in Telegram's cache is deleted once it's written. Parts ahead only start when
+     * the phone has room for them in the cache.
+     */
     suspend fun download(fileId: String, target: DownloadTarget, onProgress: (Long, Long) -> Unit): Long = withContext(Dispatchers.IO) {
         val loc = locate(fileId)
+        val tg = container.telegram
         var done = target.length().coerceAtMost(loc.size)
-        target.open(append = done > 0).use { out ->
-            while (done < loc.size) {
-                val n = minOf(DOWNLOAD_WINDOW, loc.size - done)
-                out.write(read(loc, done, n)) // Telegram keeps fetching ahead while this is written
-                done += n
-                onProgress(done, loc.size)
+        val parts = loc.parts.sortedBy { it.start }
+        val started = HashMap<Int, Int>() // part index -> TDLib file id
+        tg.wholeDownloads.incrementAndGet()
+        try {
+            target.open(append = done > 0).use { out ->
+                for ((i, part) in parts.withIndex()) {
+                    val partEnd = part.start + part.size
+                    if (partEnd <= done) continue
+                    // This part (from where we are) and the next ones, while there's room for them
+                    for (j in i until minOf(parts.size, i + PARALLEL_PARTS)) {
+                        if (j in started) continue
+                        val p = parts[j]
+                        if (j > i && cacheRoom() < p.size + CACHE_RESERVE) break
+                        tg.ensureChat(p.chatId)
+                        started[j] = tg.startWholeDownload(p.chatId, p.messageId, if (j == i) done - p.start else 0)
+                    }
+                    val fid = started.getValue(i)
+                    var at = done - part.start
+                    var lastData = System.nanoTime()
+                    var lastAsk = lastData
+                    while (at < part.size) {
+                        val have = tg.downloadedFrom(fid, at)
+                        if (have > 0) {
+                            val n = minOf(have, CHUNK, part.size - at)
+                            out.write(tg.readChunk(fid, at, n))
+                            at += n
+                            done += n
+                            onProgress(done, loc.size)
+                            lastData = System.nanoTime()
+                            continue
+                        }
+                        val now = System.nanoTime()
+                        if (now - lastData > STALL_NS && now - lastAsk > STALL_NS) {
+                            // Nothing came for a while: ask again from here (Telegram may have dropped it)
+                            tg.startWholeDownload(part.chatId, part.messageId, at)
+                            lastAsk = now
+                        }
+                        if (now - lastData > GIVE_UP_NS) throw TgException(0, "Telegram stopped sending this file.")
+                        kotlinx.coroutines.delay(POLL_MS)
+                    }
+                    started.remove(i)?.let { tg.dropFile(it) }
+                }
             }
+        } finally {
+            // Stopped or failed: the parts fetched ahead aren't needed now (the next try starts them again)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { started.values.forEach { tg.dropFile(it) } }
+            tg.wholeDownloads.decrementAndGet()
         }
-        container.telegram.trimCache()
         loc.size
     }
+
+    /** Free space for Telegram's cache (where parts land before they're written to Downloads). */
+    private fun cacheRoom(): Long = runCatching {
+        android.os.StatFs(container.context.cacheDir.path).availableBytes
+    }.getOrDefault(0L)
 
     companion object {
         const val WINDOW = 1L shl 20  // what the player reads at a time (Telegram fetches 16 MB ahead)
         const val DOWNLOAD_WINDOW = 4L shl 20
+        /** Parts of one big file fetched at the same time. */
+        const val PARALLEL_PARTS = 3
+        /** Written to the downloaded file at a time. */
+        const val CHUNK = 4L shl 20
+        /** Room kept free on the phone when starting a part ahead. */
+        const val CACHE_RESERVE = 500L shl 20
+        const val POLL_MS = 50L
+        const val STALL_NS = 30_000_000_000L
+        const val GIVE_UP_NS = 120_000_000_000L
     }
 }
 

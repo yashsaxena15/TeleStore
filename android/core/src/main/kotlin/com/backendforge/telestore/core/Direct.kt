@@ -1,5 +1,6 @@
 package com.backendforge.telestore.core
 
+import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -119,24 +120,45 @@ class DirectUploader(
     private val onPartSent: (index: Int, messageId: Long) -> Unit = { _, _ -> },
     private val onProgress: (sentBytes: Long) -> Unit = {},
     private val onSaving: () -> Unit = {},
+    /**
+     * Parts of a big file sent at the same time (each over its own upload). Only for a source that can
+     * be read at any position; a front-to-back stream always goes one part after another.
+     */
+    private val parallel: Int = 1,
 ) {
     suspend fun upload(): String? {
         require(size > 0) { "Empty files can't be uploaded." }
         val plan = api.directPrepare(folder, name, size)
-        val messages = sentBefore.filterKeys { index -> plan.parts.any { it.index == index } }.toMutableMap()
-        var base = plan.parts.filter { it.index in messages }.sumOf { it.length }
-        onProgress(base)
-        for (part in plan.parts.sortedBy { it.index }) {
-            if (part.index in messages) continue
-            val id = sender.send(plan.chatId, source, part.start, part.length, part.fileName, part.caption) { onProgress(base + it) }
-            messages[part.index] = id
-            onPartSent(part.index, id)
-            base += part.length
-            onProgress(base)
+        val messages = java.util.concurrent.ConcurrentHashMap(sentBefore.filterKeys { index -> plan.parts.any { it.index == index } })
+        val finished = java.util.concurrent.atomic.AtomicLong(plan.parts.filter { messages.containsKey(it.index) }.sumOf { it.length })
+        val running = java.util.concurrent.ConcurrentHashMap<Int, Long>() // part index -> bytes sent of it so far
+        fun report() = onProgress(finished.get() + running.values.sum())
+        report()
+        val todo = plan.parts.sortedBy { it.index }.filter { !messages.containsKey(it.index) }
+        val slots = kotlinx.coroutines.sync.Semaphore(if (source.seekable) parallel.coerceIn(1, 4) else 1)
+        kotlinx.coroutines.coroutineScope {
+            for (part in todo) {
+                slots.acquire()
+                launch {
+                    try {
+                        val id = sender.send(plan.chatId, source, part.start, part.length, part.fileName, part.caption) {
+                            running[part.index] = it
+                            report()
+                        }
+                        messages[part.index] = id
+                        running.remove(part.index)
+                        finished.addAndGet(part.length)
+                        onPartSent(part.index, id)
+                        report()
+                    } finally {
+                        slots.release()
+                    }
+                }
+            }
         }
         onSaving()
         return try {
-            api.directComplete(plan.path, plan.fileName, size, messages, takenAt).file?.id
+            api.directComplete(plan.path, plan.fileName, size, messages.toSortedMap(), takenAt).file?.id
         } catch (e: ApiException) {
             if (e.status == 409) null else throw e // 409: saved already (the app stopped right after saving it)
         }

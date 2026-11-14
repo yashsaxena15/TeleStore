@@ -25,7 +25,17 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
 /** At most two transfers move at once; the rest wait their turn. */
-internal val transferSlots = Semaphore(2)
+internal val transferSlots = Semaphore(3)
+
+/**
+ * How many parts of one big file go to Telegram at once: each part being sent may need a copy of up
+ * to 1.95 GB in the app's cache, so it's as many as fit with room to spare (1 to 3).
+ */
+internal fun partsAtOnce(context: Context): Int {
+    val free = runCatching { android.os.StatFs(context.cacheDir.path).availableBytes }.getOrDefault(0L)
+    val each = com.backendforge.telestore.core.DirectRules.PART_SIZE + (300L shl 20)
+    return (free / each).toInt().coerceIn(1, 3)
+}
 
 /** Shared by both workers: progress, status and the ongoing notification. */
 abstract class TransferWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
@@ -161,6 +171,7 @@ class UploadWorker(context: Context, params: WorkerParameters) : TransferWorker(
                         onPartSent = { index, id -> store.update(transferId) { t -> t.copy(directParts = t.directParts + (index to id)) } },
                         onProgress = { sent -> store.update(transferId, force = false) { t -> t.copy(done = sent) } },
                         onSaving = { store.update(transferId) { t -> t.copy(status = TransferStatus.SAVING, done = t.size, speedBps = 0) } },
+                        parallel = partsAtOnce(applicationContext),
                     ).upload()?.let { id -> com.backendforge.telestore.core.FileItem(id = id, name = transfer.name) } ?: DIRECT_SAVED
                 }
                 return@use direct.takeIf { d -> d !== DIRECT_SAVED }
