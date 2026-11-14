@@ -185,14 +185,14 @@ async def get_file_thumbnail(file_id: str, request: Request, auth_token: str = N
     except HTTPException:
         # Image tags can't send headers, so the token may come in the address instead. The shared
         # check honours expiry and sign-out (this route used to keep its own copy that didn't).
-        from telestore.api.state import _auth_tokens as shared_tokens, cached_token, cached_token_valid
+        from telestore.api.state import cached_token, cached_token_valid, remember_token
         if not auth_token:
             raise HTTPException(status_code=401, detail="Authentication required")
         if not cached_token_valid(auth_token):
             db_token_data = database.Users.get_auth_token(auth_token)
             if not db_token_data:
                 raise HTTPException(status_code=401, detail="Authentication required")
-            shared_tokens[auth_token] = cached_token(db_token_data)
+            remember_token(auth_token, cached_token(db_token_data))
 
     # Only a thumbnail of one of the caller's own files (shared files have their own thumbnail
     # route); any signed-in account used to be able to fetch any file's thumbnail by its id

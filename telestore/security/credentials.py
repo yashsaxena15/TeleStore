@@ -6,7 +6,7 @@ import logging
 from telestore.config import DEFAULT_ADMIN_USERNAME, DEFAULT_ADMIN_PASSWORD
 from telestore.db import database
 from pydantic import BaseModel
-from telestore.security.attempt_limiter import TooManyAttempts, password_limiter
+from telestore.security.attempt_limiter import TooManyAttempts, address_limiter, password_limiter
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -84,22 +84,28 @@ def canonical_username(username: Optional[str]) -> str:
     return name
 
 
-def check_login(username: str, password: str) -> Optional[str]:
+def check_login(username: str, password: str, ip: Optional[str] = None) -> Optional[str]:
     """verify_credentials with brute-force protection for every password sign-in.
 
     Returns the account's stored username when the password is right, else None.
     Raises TooManyAttempts while the username is locked, including when this failure starts a lock.
     """
     name = canonical_username(username)
-    key = f"pw:{name.lower()}"
+    # Wrong guesses lock this account only for the address making them (so a stranger can't lock
+    # the owner out), and one address guessing at many accounts is slowed down as a whole
+    key = f"pw:{name.lower()}" + (f"@{ip}" if ip else "")
+    ip_key = f"ip:{ip}" if ip else None
     password_limiter.check(key)
+    if ip_key:
+        address_limiter.check(ip_key)
     if verify_credentials(name, password):
         password_limiter.success(key)
         return name
     lock = password_limiter.failure(key)
-    if lock:
-        logger.warning(f"Password sign-in for '{name}' locked for {lock}s after repeated failures")
-        raise TooManyAttempts(lock)
+    ip_lock = address_limiter.failure(ip_key) if ip_key else 0
+    if lock or ip_lock:
+        logger.warning(f"Password sign-in for '{name}' from {ip or '?'} locked for {max(lock, ip_lock)}s after repeated failures")
+        raise TooManyAttempts(max(lock, ip_lock))
     return None
 
 ACCOUNT_DISABLED = "This account has been turned off. Ask the owner to turn it back on."
@@ -148,17 +154,6 @@ def is_authenticated(request: Request) -> bool:
     auth_status = _session_signed_in(request)
     logger.info(f"Checking authentication status: {auth_status}")
     return auth_status
-
-def is_admin(request: Request) -> bool:
-    """Check if the authenticated user is an admin"""
-    if not is_authenticated(request):
-        return False
-    
-    # Check if user authenticated via username/password (always admin)
-    if request.session.get("auth_method") == "local":
-        return True
-        
-    return False
 
 def archive_choice(user_data: Optional[dict]) -> str:
     choice = (user_data or {}).get("archives")
@@ -244,16 +239,6 @@ def require_auth(request: Request) -> User:
         return _with_account_flags(user, user_data)
     
     raise HTTPException(status_code=401, detail="Authentication required")
-
-def require_admin(request: Request):
-    """Require admin privileges"""
-    if not is_authenticated(request):
-        raise HTTPException(status_code=401, detail="Authentication required")
-    
-    if not is_admin(request):
-        raise HTTPException(status_code=403, detail="Admin privileges required")
-    
-    return True
 
 def get_current_user(request: Request) -> Optional[str]:
     if is_authenticated(request):

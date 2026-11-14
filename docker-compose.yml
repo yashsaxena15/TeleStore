@@ -2,6 +2,8 @@ services:
   mongo:
     image: mongo:7
     restart: unless-stopped
+    # Sign-in required (the app's DATABASE_URL carries the user and password)
+    command: ["mongod", "--auth"]
     volumes:
       - mongo_data:/data/db
 

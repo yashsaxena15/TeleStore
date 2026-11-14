@@ -7,7 +7,7 @@ import pytest
 from bson import ObjectId
 
 from telestore.api.app import app
-from telestore.api.state import _auth_tokens, cached_token
+from telestore.api.state import _auth_tokens, cached_token, cached_token_valid, remember_token
 from telestore.db import database
 from telestore.security.credentials import User, require_auth
 from telestore.services import device_service
@@ -23,7 +23,8 @@ class Tokens:
 
     def add(self, token, username="bob", **extra):
         now = datetime.now()
-        doc = {"_id": ObjectId(), "auth_token": token, "username": username, "auth_method": "local",
+        extra.setdefault("token_id", device_service.token_id(token))
+        doc = {"_id": ObjectId(), "auth_token": device_service.token_key(token), "username": username, "auth_method": "local",
                "created_at": now - timedelta(days=1), "expires_at": now + timedelta(days=1), **extra}
         self.docs.append(doc)
         return doc
@@ -48,8 +49,8 @@ def tokens():
     store = Tokens()
     device_service._session_checks.clear()
     with patch.object(device_service, "_tokens", return_value=store), \
-            patch.object(database.Users, "get_auth_token", side_effect=lambda t: store.find_one({"auth_token": t})), \
-            patch.object(database.Users, "save_auth_token", side_effect=lambda u, t, m, **k: store.add(t, u, auth_method=m, token_id=device_service.token_id(t), **{x: y for x, y in k.items() if x != "ttl_hours" and y})):
+            patch.object(database.Users, "get_auth_token", side_effect=lambda t: store.find_one({"auth_token": device_service.token_key(t)})), \
+            patch.object(database.Users, "save_auth_token", side_effect=lambda u, t, m, **k: store.add(t, u, auth_method=m, **{x: y for x, y in k.items() if x != "ttl_hours" and y})):
         yield store
     _auth_tokens.clear()
 
@@ -94,13 +95,13 @@ class TestApi:
     def test_sign_out_another_device(self, client, tokens):
         tokens.add("phone")
         tokens.add("laptop")
-        _auth_tokens["laptop"] = cached_token(tokens.docs[1])
+        remember_token("laptop", cached_token(tokens.docs[1]))
         laptop = device_service.token_id("laptop")
         got = client.get("/auth/devices", headers={"X-Auth-Token": "phone"}).json()["devices"]
         assert [d["current"] for d in got] == [True, False]
         assert client.delete(f"/auth/devices/{laptop}", headers={"X-Auth-Token": "phone"}).status_code == 200
-        assert [d["auth_token"] for d in tokens.docs] == ["phone"]
-        assert "laptop" not in _auth_tokens  # stops working at once
+        assert [d["auth_token"] for d in tokens.docs] == [device_service.token_key("phone")]  # kept hashed
+        assert cached_token_valid("laptop") is None  # stops working at once
         assert client.delete(f"/auth/devices/{laptop}", headers={"X-Auth-Token": "phone"}).status_code == 404
 
     def test_not_this_device(self, client, tokens):
@@ -112,7 +113,7 @@ class TestApi:
         for t in ("phone", "laptop", "tablet"):
             tokens.add(t)
         assert client.post("/auth/devices/sign-out-others", headers={"X-Auth-Token": "phone"}).json() == {"signed_out": 2}
-        assert [d["auth_token"] for d in tokens.docs] == ["phone"]
+        assert [d["auth_token"] for d in tokens.docs] == [device_service.token_key("phone")]
 
 
 def test_a_browser_signed_out_elsewhere_loses_its_cookie_too(client, tokens):

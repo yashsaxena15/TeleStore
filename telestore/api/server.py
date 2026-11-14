@@ -95,6 +95,9 @@ class WebServerManager:
                             port=self._web_port,
                             log_level="info",
                             log_config=None,  # Use existing Python logging configuration
+                            # The app logs every request itself with sign-in tokens hidden; uvicorn's own
+                            # access line would write ?token=… in clear text
+                            access_log=False,
                             timeout_keep_alive=300,
                         )
                         self._server = uvicorn.Server(config)

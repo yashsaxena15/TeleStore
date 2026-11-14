@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 import urllib.parse
 from pymongo import MongoClient
 
-import requests
 
 from telestore.config import DATABASE_URL, APP_NAME
 from telestore.db import database
@@ -89,7 +88,8 @@ def probe_resource_for_range(
     """
     import bs4
 
-    session = requests.Session()
+    from telestore.security import public_url
+    session = public_url.session()
     session.headers.update({"User-Agent": MODERN_USER_AGENT})
     if custom_headers:
         session.headers.update(custom_headers)

@@ -340,7 +340,7 @@ export class UploadManager {
                             const detail = typeof data.detail === 'string' ? data.detail : data.detail?.message;
                             const error = new Error(detail || `Chunk upload failed (${res.status})`);
                             // The server gave up on this upload (a part failed on Telegram, bad chunk)
-                            if (res.status === 400 || res.status === 404 || (res.status === 500 && /Upload failed/.test(detail || '')))
+                            if (res.status === 400 || res.status === 404 || ((res.status === 500 || res.status === 502) && /Upload failed/.test(detail || '')))
                                 error.fatal = true;
                             throw error;
                         }

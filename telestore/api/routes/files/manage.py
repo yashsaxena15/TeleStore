@@ -8,6 +8,7 @@ import re
 from typing import Optional
 from collections import defaultdict
 
+from telestore.api.routes.vault import VAULT_LOCKED, in_vault, is_vault_unlocked
 from telestore.security.credentials import require_auth, User
 from telestore.api.routes.folders import validate_folder_name
 from telestore.db import database
@@ -51,7 +52,7 @@ def _check_protection(doc: Optional[dict], user: User) -> None:
         raise locked(str(e))
 
 @router.post("/move")
-async def move_file_route(request: MoveFileRequest, user: User = Depends(require_auth)):
+async def move_file_route(request: MoveFileRequest, http: Request, user: User = Depends(require_auth)):
     try:
         # Use the user's Telegram ID as the user identifier
         user_id = str(user.telegram_user_id) if user.telegram_user_id else user.username
@@ -64,6 +65,9 @@ async def move_file_route(request: MoveFileRequest, user: User = Depends(require
         if not file_data:
             raise HTTPException(status_code=404, detail="File not found")
         
+        # Out of (or within) the vault only while it's unlocked
+        if in_vault(file_data) and not is_vault_unlocked(http):
+            raise HTTPException(status_code=403, detail=VAULT_LOCKED)
         # Items in Trash stay where they were deleted from, so Restore can put them back
         if file_data.get("trashed"):
             raise HTTPException(status_code=400, detail="Items in Trash can't be moved. Restore it first, then move it.")
@@ -125,7 +129,7 @@ async def move_file_route(request: MoveFileRequest, user: User = Depends(require
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/copy")
-async def copy_file_route(request: CopyFileRequest, user: User = Depends(require_auth)):
+async def copy_file_route(request: CopyFileRequest, http: Request, user: User = Depends(require_auth)):
     try:
         # Use the user's Telegram ID as the user identifier
         user_id = str(user.telegram_user_id) if user.telegram_user_id else user.username
@@ -138,6 +142,8 @@ async def copy_file_route(request: CopyFileRequest, user: User = Depends(require
         if not file_data:
             raise HTTPException(status_code=404, detail="File not found")
         
+        if in_vault(file_data) and not is_vault_unlocked(http):
+            raise HTTPException(status_code=403, detail=VAULT_LOCKED)
         # Create a copy of the file with the new path
         new_file_data = file_data.copy()
         new_file_data["_id"] = ObjectId()  # Generate new ID
@@ -181,6 +187,8 @@ async def copy_file_route(request: CopyFileRequest, user: User = Depends(require
                 database.Files.insert_many(new_descendants)
         
         return {"message": "File copied successfully", "new_file_id": str(new_file_data["_id"])}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error copying file: {e}")
         raise HTTPException(status_code=500, detail=str(e))

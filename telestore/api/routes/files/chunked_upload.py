@@ -15,6 +15,7 @@ import asyncio
 import datetime
 import math
 import os
+import re
 import secrets
 import shutil
 import time
@@ -224,7 +225,7 @@ def _write_at(path: str, offset: int, data: bytes) -> None:
 
 async def _store_chunk(request: Request, session: dict, index: int, data: bytes, user: User):
     if session.get("error"):
-        raise HTTPException(status_code=500, detail=f"Upload failed: {session['error']}")
+        raise HTTPException(status_code=502, detail=f"Upload failed: {session['error']}")
     if session.get("status") in ("processing", "completed"):
         return {"status": "duplicate", **_status(session)}
     if not 0 <= index < session["total_chunks"]:
@@ -376,7 +377,7 @@ async def complete_chunked_upload(request: Request, upload_id: str = Form(...), 
     if session.get("status") in ("processing", "completed"):
         return {"status": session["status"], "upload_id": upload_id, "message": "Upload is already processing or completed"}
     if session.get("error"):
-        raise HTTPException(status_code=500, detail=f"Upload failed: {session['error']}")
+        raise HTTPException(status_code=502, detail=f"Upload failed: {session['error']}")
     missing = session["total_chunks"] - len(session["received"])
     if missing:
         # Never save a file with a gap in it
@@ -412,6 +413,9 @@ class AbortUploadRequest(BaseModel):
 @router.post("/upload/abort")
 async def abort_chunked_upload(req: AbortUploadRequest, user: User = Depends(require_auth)):
     upload_id = req.upload_id
+    # Upload ids are 24 hex characters (init makes them); anything else could name another folder
+    if not re.fullmatch(r"[0-9a-f]{24}", upload_id or ""):
+        raise HTTPException(status_code=400, detail="Unknown upload.")
     session = _active_upload_sessions.get(upload_id)
     if session and session.get("user_id") and not _is_uploader(session, user):
         raise HTTPException(status_code=403, detail="Forbidden")

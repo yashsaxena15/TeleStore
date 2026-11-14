@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from telestore.api.routes.vault import VAULT_LOCKED, hide_vault_unless_unlocked, in_vault, is_vault_unlocked
 from telestore.security.credentials import require_auth, User
 from telestore.db import database
 from d4rk.Logs import setup_logger
@@ -230,6 +231,8 @@ async def get_folder_stats(
             "total_subfolders": total_subfolders,
             "total_size": total_size,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error calculating folder stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -237,6 +240,7 @@ async def get_folder_stats(
 
 @router.get("/download-info")
 async def get_folder_download_info(
+    request: Request,
     id: Optional[str] = Query(None),
     path: Optional[str] = Query(None),
     user: User = Depends(require_auth)
@@ -247,11 +251,15 @@ async def get_folder_download_info(
         folder_doc, folder_name, full_path = resolve_folder_info(id, path, user_id)
 
         escaped = re.escape(full_path)
+        # The vault's files only while it's unlocked (a zip of / or /Vault mustn't skip the PIN)
+        if in_vault(path=full_path) and not is_vault_unlocked(request):
+            raise HTTPException(status_code=403, detail=VAULT_LOCKED)
         query = {
             "file_path": {"$regex": f"^{escaped}(/|$)"},
             "file_type": {"$ne": "folder"},
             "owner_id": user_id,
             "trashed": {"$ne": True},
+            **hide_vault_unless_unlocked(request),
         }
         files = list(database.Files.find(query))
         files.sort(key=lambda x: (x.get("file_path", ""), x.get("file_name", "")))
@@ -296,6 +304,8 @@ async def get_folder_download_info(
             "total_parts": num_parts,
             "parts": parts_result,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error preparing folder download info: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -316,11 +326,15 @@ async def download_folder_zip(
         folder_doc, folder_name, full_path = resolve_folder_info(id, path, user_id)
 
         escaped = re.escape(full_path)
+        # The vault's files only while it's unlocked (a zip of / or /Vault mustn't skip the PIN)
+        if in_vault(path=full_path) and not is_vault_unlocked(request):
+            raise HTTPException(status_code=403, detail=VAULT_LOCKED)
         query = {
             "file_path": {"$regex": f"^{escaped}(/|$)"},
             "file_type": {"$ne": "folder"},
             "owner_id": user_id,
             "trashed": {"$ne": True},
+            **hide_vault_unless_unlocked(request),
         }
         files = list(database.Files.find(query))
         files.sort(key=lambda x: (x.get("file_path", ""), x.get("file_name", "")))

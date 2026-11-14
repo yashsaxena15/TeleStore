@@ -106,7 +106,7 @@ class TestChunkedUpload:
         self._put(up.client, uid, 0, b"1234")
         self._put(up.client, uid, 1, b"5678")  # part 1 complete: sent, and fails
         res = self._put(up.client, uid, 2, b"9X")
-        assert res.status_code == 500 and "couldn't be saved to Telegram" in res.json()["detail"]
+        assert res.status_code == 502 and "couldn't be saved to Telegram" in res.json()["detail"]
 
     def test_resume_after_a_page_reload(self, up):
         first = self._init(up.client)

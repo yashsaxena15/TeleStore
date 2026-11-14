@@ -5,6 +5,7 @@ import re
 import urllib.parse
 import secrets
 import mimetypes
+from telestore.security import content_safety
 
 from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException
@@ -605,7 +606,7 @@ async def media_streamer(
     ascii_fallback = re.sub(r'[^\x20-\x7E]', '_', resolved_file_name).replace('"', '_').replace('\\', '_')
     if not ascii_fallback.strip('_ '):
         ascii_fallback = f"media_{secrets.token_hex(4)}"
-    disposition_type = "inline" if is_watch else "attachment"
+    disposition_type = content_safety.disposition(is_watch, mime_type)
     content_disposition = f'{disposition_type}; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded_filename}'
 
     headers = {
@@ -620,10 +621,8 @@ async def media_streamer(
         "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges, ETag",
     }
 
-    # Add additional headers for video streaming
-    if is_watch and mime_type and (mime_type.startswith('video/') or mime_type.startswith('audio/')):
-        headers["X-Content-Type-Options"] = "nosniff"
-        headers["X-Frame-Options"] = "SAMEORIGIN"
+    # Never a page of the site: no type guessing, no scripts (see security/content_safety)
+    headers.update(content_safety.file_headers(mime_type))
 
     if byte_range:
         headers["Content-Range"] = f"bytes {from_bytes}-{until_bytes}/{file_size}"

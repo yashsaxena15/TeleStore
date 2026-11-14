@@ -73,8 +73,11 @@ class AttemptLimiter:
             return lock
 
     def success(self, key: str) -> None:
+        """Clears the key, and with it every per-address key of the same account ("key@address")."""
         with self._lock:
             self._state.pop(key, None)
+            for k in [k for k in self._state if k.startswith(key + "@")]:
+                del self._state[k]
 
     def _prune(self, now: float) -> None:
         for key in [k for k, e in self._state.items() if now - e[2] > self.window and now >= e[1]]:
@@ -87,4 +90,6 @@ class AttemptLimiter:
 
 # One limiter for account passwords (web login, WebDAV, change-password) and one for vault PINs
 password_limiter = AttemptLimiter()
+# Every wrong password from one address, whichever account it tries
+address_limiter = AttemptLimiter(free_attempts=20)
 pin_limiter = AttemptLimiter()

@@ -118,15 +118,15 @@ def _caller_token(request: Request, token: Optional[str], user) -> str:
         return supplied
     import secrets
     from datetime import datetime, timedelta
-    from telestore.api.state import _auth_tokens
+    from telestore.api.state import remember_token
     minted = secrets.token_urlsafe(24)
-    _auth_tokens[minted] = {
+    remember_token(minted, {
         "authenticated": True,
         "username": user.username,
         "auth_method": "internal",
         "created_at": datetime.now().isoformat(),
         "expires_at": datetime.now() + timedelta(hours=6),
-    }
+    })
     return minted
 
 
@@ -542,11 +542,14 @@ async def get_media_cache_stats(request: Request):
 
 @router.post("/cache/clear")
 async def clear_media_cache(request: Request):
-    """Manually clear the 25GB Media Cache to immediately reclaim disk space."""
+    """Manually clear the 25GB Media Cache to immediately reclaim disk space (owner only: it's shared)."""
+    from telestore.security.credentials import is_owner_user
     try:
-        require_auth(request)
+        user = require_auth(request)
     except HTTPException:
         raise HTTPException(status_code=401, detail="Authentication required")
+    if not is_owner_user(user):
+        raise HTTPException(status_code=403, detail="Only the owner can clear the server's cache.")
 
     from telestore.services.disk_cache_manager import DISK_CACHE_MANAGER
     freed_bytes = DISK_CACHE_MANAGER.clear_all()

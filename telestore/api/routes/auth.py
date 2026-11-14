@@ -9,6 +9,7 @@ from typing import Optional
 from telestore.security.credentials import ACCOUNT_DISABLED, User, account_flags, canonical_username, check_login, require_auth
 from telestore.services.email_service import create_and_send_vault_otp, verify_vault_otp
 from telestore.utils.passwords import hash_password
+from telestore.security.client_ip import client_ip
 from telestore.security.attempt_limiter import TooManyAttempts, password_limiter, wait_message
 from telestore.db import database
 from d4rk.Logs import setup_logger
@@ -34,7 +35,7 @@ class LoginRequest(BaseModel):
 async def login_post_route(request: Request, login_data: LoginRequest):
     logger.info(f"Login attempt for user: {login_data.username.strip()}")
     try:
-        account = check_login(login_data.username, login_data.password)
+        account = check_login(login_data.username, login_data.password, ip=client_ip(request))
     except TooManyAttempts as e:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -147,6 +148,8 @@ async def forgot_password_reset(body: ResetPasswordRequest):
     database.Users.update_user_by_identifier(name, {"password_hash": hash_password(body.new_password)})
     from telestore.api.routes.webdav.common import forget_webdav_logins
     forget_webdav_logins()
+    # Whoever knew the old password (or holds a sign-in made with it) is out now
+    device_service.sign_out_all(name)
     # A successful reset also lifts any sign-in lockout for the account
     password_limiter.success(f"pw:{name.lower()}")
     logger.info(f"Password reset by email code for user {name}")
@@ -155,21 +158,21 @@ async def forgot_password_reset(body: ResetPasswordRequest):
 
 @router.post("/logout")
 async def logout_route(request: Request):
-    from telestore.api.state import _auth_tokens
+    from telestore.api.state import forget_token
     request.session.clear()
     auth_header = request.headers.get("X-Auth-Token") or request.query_params.get("token")
     if auth_header:
         database.Users.remove_auth_token(auth_header)
-        _auth_tokens.pop(auth_header, None)  # the server's memory too, so the token stops working now
+        forget_token(auth_header)  # the server's memory too, so it stops working now
     return {"message": "Logged out successfully"}
 
 @router.get("/check")
 async def check_auth(request: Request):
-    from telestore.api.state import _auth_tokens, cached_token_valid
+    from telestore.api.state import cached_token_valid
     # Check if there's an auth token in headers or query param
     auth_header = request.headers.get("X-Auth-Token") or request.query_params.get("token")
-    if auth_header and cached_token_valid(auth_header):
-        token_data = _auth_tokens[auth_header]
+    token_data = cached_token_valid(auth_header) if auth_header else None
+    if token_data:
         logger.info(f"Auth check result using token: authenticated=True, user={token_data.get('username')}")
         return {
             "authenticated": True,

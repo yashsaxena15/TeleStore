@@ -14,7 +14,7 @@ from datetime import datetime, timezone, timedelta
 import urllib.parse
 
 import math
-import requests
+from telestore.security import public_url
 
 from telestore.db import database
 from telestore.services.pipeline_uploader import upload_part_task
@@ -1715,7 +1715,7 @@ class RemoteTransferManager:
                 if task_doc.get("custom_headers"):
                     req_headers.update(task_doc["custom_headers"])
 
-                with requests.get(source_url, stream=True, timeout=60, headers=req_headers) as resp:
+                with public_url.session().get(source_url, stream=True, timeout=60, headers=req_headers) as resp:
                     if resp.status_code not in [200, 206]:
                         resp.raise_for_status()
 
@@ -2392,11 +2392,10 @@ class RemoteTransferManager:
                         if is_gdrive_quota_error(gerr):
                             raise GoogleDriveQuotaExceededError(err_str)
                         logger.warning(f"gdown encountered: {err_str}. Attempting direct HTTP fallback for {gdrive_id}...")
-                        import requests
                         import urllib.parse
                         import re
 
-                        session = requests.Session()
+                        session = public_url.session()
                         session.headers.update({"User-Agent": MODERN_USER_AGENT})
                         direct_url = f"https://drive.google.com/uc?id={gdrive_id}&export=download" if gdrive_id else source_url
                         
@@ -2521,7 +2520,7 @@ class RemoteTransferManager:
                             req_headers["Range"] = f"bytes={writer.total_bytes}-"
 
                         try:
-                            with requests.get(source_url, stream=True, timeout=60, headers=req_headers) as resp:
+                            with public_url.session().get(source_url, stream=True, timeout=60, headers=req_headers) as resp:
                                 if resp.status_code not in [200, 206]:
                                     resp.raise_for_status()
 

@@ -23,6 +23,8 @@ os.environ["WORKER_SECRET_KEY"] = TEST_WORKER_SECRET
 os.environ["DEFAULT_ADMIN_PASSWORD"] = TEST_ADMIN_PASSWORD
 os.environ["DEFAULT_ADMIN_USERNAME"] = TEST_ADMIN_USERNAME
 os.environ["GITHUB_WEBHOOK_SECRET"] = TEST_GITHUB_SECRET
+# The test client talks plain http; the real site sends the session cookie over HTTPS only
+os.environ["SESSION_HTTPS_ONLY"] = "0"
 os.environ["DATABASE_URL"] = "mongodb://dummy-host:27017/telestore_test"
 os.environ["MEDIA_CACHE_DIR"] = TEST_CACHE_DIR
 os.environ["OWNER"] = "123456789"
